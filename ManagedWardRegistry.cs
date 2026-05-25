@@ -1,0 +1,308 @@
+using System;
+using System.Collections.Generic;
+
+namespace STUWard;
+
+internal readonly struct ManagedWardRegistryEntry
+{
+    internal ManagedWardRegistryEntry(
+        ZDOID zdoId,
+        long ownerPlayerId,
+        string accountId,
+        string ownerName,
+        string characterKey,
+        int guildId)
+    {
+        ZdoId = zdoId;
+        OwnerPlayerId = ownerPlayerId;
+        AccountId = accountId ?? string.Empty;
+        OwnerName = ownerName ?? string.Empty;
+        CharacterKey = characterKey ?? string.Empty;
+        GuildId = guildId;
+    }
+
+    internal ZDOID ZdoId { get; }
+    internal long OwnerPlayerId { get; }
+    internal string AccountId { get; }
+    internal string OwnerName { get; }
+    internal string CharacterKey { get; }
+    internal int GuildId { get; }
+}
+
+internal static class ManagedWardRegistry
+{
+    private sealed class ManagedWardRegistryState
+    {
+        internal readonly Dictionary<ZDOID, ManagedWardRegistryEntry> EntriesByZdoId = new();
+        internal readonly Dictionary<string, int> CountByAccountId = new(StringComparer.Ordinal);
+        internal readonly Dictionary<string, HashSet<ZDOID>> WardIdsByAccountId = new(StringComparer.Ordinal);
+        internal readonly Dictionary<long, HashSet<ZDOID>> WardIdsByOwnerPlayerId = new();
+        internal readonly Dictionary<int, HashSet<ZDOID>> WardIdsByGuildId = new();
+        internal readonly Dictionary<string, HashSet<ZDOID>> WardIdsByCharacterKey = new(StringComparer.Ordinal);
+    }
+
+    private static readonly ManagedWardRegistryState ManagedWardRegistryData = new();
+
+    private static Dictionary<ZDOID, ManagedWardRegistryEntry> ManagedWardRegistryEntriesByZdoId => ManagedWardRegistryData.EntriesByZdoId;
+    private static Dictionary<string, int> ManagedWardCountsByAccountId => ManagedWardRegistryData.CountByAccountId;
+    private static Dictionary<string, HashSet<ZDOID>> ManagedWardIdsByAccountId => ManagedWardRegistryData.WardIdsByAccountId;
+    private static Dictionary<long, HashSet<ZDOID>> ManagedWardIdsByOwnerPlayerId => ManagedWardRegistryData.WardIdsByOwnerPlayerId;
+    private static Dictionary<int, HashSet<ZDOID>> ManagedWardIdsByGuildId => ManagedWardRegistryData.WardIdsByGuildId;
+    private static Dictionary<string, HashSet<ZDOID>> ManagedWardIdsByCharacterKey => ManagedWardRegistryData.WardIdsByCharacterKey;
+
+    internal static void Reset()
+    {
+        ManagedWardRegistryEntriesByZdoId.Clear();
+        ManagedWardCountsByAccountId.Clear();
+        ManagedWardIdsByAccountId.Clear();
+        ManagedWardIdsByOwnerPlayerId.Clear();
+        ManagedWardIdsByGuildId.Clear();
+        ManagedWardIdsByCharacterKey.Clear();
+    }
+
+    internal static void UpsertEntry(ZDO? zdo)
+    {
+        if (zdo == null || !zdo.IsValid() || ZNet.instance == null || !ZNet.instance.IsServer())
+        {
+            return;
+        }
+
+        if (!WardOwnership.IsManagedWardZdo(zdo))
+        {
+            RemoveEntry(zdo.m_uid);
+            return;
+        }
+
+        var entry = BuildManagedWardRegistryEntry(zdo);
+        if (ManagedWardRegistryEntriesByZdoId.TryGetValue(entry.ZdoId, out var existingEntry))
+        {
+            RemoveManagedWardRegistryIndexes(existingEntry);
+        }
+
+        ManagedWardRegistryEntriesByZdoId[entry.ZdoId] = entry;
+        AddManagedWardRegistryIndexes(entry);
+    }
+
+    internal static void RemoveEntry(ZDOID zdoId)
+    {
+        if (zdoId.IsNone() || !ManagedWardRegistryEntriesByZdoId.Remove(zdoId, out var entry))
+        {
+            return;
+        }
+
+        RemoveManagedWardRegistryIndexes(entry);
+    }
+
+    internal static int CountForAccount(string accountId, ZDOID ignoredZdoId = default)
+    {
+        var canonicalAccountId = WardOwnership.NormalizeAccountIdValue(accountId);
+        if (string.IsNullOrWhiteSpace(canonicalAccountId))
+        {
+            return 0;
+        }
+
+        var count = ManagedWardCountsByAccountId.TryGetValue(canonicalAccountId, out var indexedCount)
+            ? indexedCount
+            : 0;
+        if (!ignoredZdoId.IsNone() &&
+            ManagedWardRegistryEntriesByZdoId.TryGetValue(ignoredZdoId, out var ignoredEntry) &&
+            string.Equals(ignoredEntry.AccountId, canonicalAccountId, StringComparison.Ordinal))
+        {
+            count--;
+        }
+
+        return Math.Max(0, count);
+    }
+
+    internal static int GetIndexedCount()
+    {
+        return ManagedWardRegistryEntriesByZdoId.Count;
+    }
+
+    internal static int CollectCandidateIds(
+        HashSet<ZDOID> candidateWardIds,
+        HashSet<long>? targetPlayerIds,
+        HashSet<string>? targetCharacterKeys,
+        HashSet<int>? affectedGuildIds,
+        bool fullRefresh)
+    {
+        candidateWardIds.Clear();
+
+        if (fullRefresh)
+        {
+            foreach (var entry in ManagedWardRegistryEntriesByZdoId)
+            {
+                candidateWardIds.Add(entry.Key);
+            }
+
+            return candidateWardIds.Count;
+        }
+
+        if (targetPlayerIds != null)
+        {
+            foreach (var targetPlayerId in targetPlayerIds)
+            {
+                UnionManagedWardRegistryIds(candidateWardIds, ManagedWardIdsByOwnerPlayerId, targetPlayerId);
+            }
+        }
+
+        if (targetCharacterKeys != null)
+        {
+            foreach (var targetCharacterKey in targetCharacterKeys)
+            {
+                if (string.IsNullOrWhiteSpace(targetCharacterKey))
+                {
+                    continue;
+                }
+
+                UnionManagedWardRegistryIds(candidateWardIds, ManagedWardIdsByCharacterKey, targetCharacterKey);
+            }
+        }
+
+        if (affectedGuildIds != null)
+        {
+            foreach (var affectedGuildId in affectedGuildIds)
+            {
+                if (affectedGuildId == 0)
+                {
+                    continue;
+                }
+
+                UnionManagedWardRegistryIds(candidateWardIds, ManagedWardIdsByGuildId, affectedGuildId);
+            }
+        }
+
+        return candidateWardIds.Count;
+    }
+
+    private static ManagedWardRegistryEntry BuildManagedWardRegistryEntry(ZDO zdo)
+    {
+        var ownerPlayerId = zdo.GetLong(ZDOVars.s_creator, 0L);
+        var accountId = WardOwnership.NormalizeAccountIdValue(
+            WardOwnership.ResolveWardSteamAccountId(
+                zdo,
+                ownerPlayerId,
+                WardOwnership.GetWardSteamAccountId(zdo)));
+        var ownerName = (WardPrivateAreaSafeAccess.GetCreatorName(zdo) ?? string.Empty).Trim();
+        var characterKey = GuildsCompat.BuildCharacterIdentityKey(accountId, ownerName);
+        var guildId = GuildsCompat.GetWardGuildId(zdo);
+        return new ManagedWardRegistryEntry(
+            zdo.m_uid,
+            ownerPlayerId,
+            accountId,
+            ownerName,
+            characterKey,
+            guildId);
+    }
+
+    private static void AddManagedWardRegistryIndexes(ManagedWardRegistryEntry entry)
+    {
+        if (!string.IsNullOrWhiteSpace(entry.AccountId))
+        {
+            ManagedWardCountsByAccountId[entry.AccountId] = ManagedWardCountsByAccountId.TryGetValue(entry.AccountId, out var existingCount)
+                ? existingCount + 1
+                : 1;
+            AddManagedWardRegistryId(ManagedWardIdsByAccountId, entry.AccountId, entry.ZdoId);
+        }
+
+        if (entry.OwnerPlayerId != 0L)
+        {
+            AddManagedWardRegistryId(ManagedWardIdsByOwnerPlayerId, entry.OwnerPlayerId, entry.ZdoId);
+        }
+
+        if (entry.GuildId != 0)
+        {
+            AddManagedWardRegistryId(ManagedWardIdsByGuildId, entry.GuildId, entry.ZdoId);
+        }
+
+        if (!string.IsNullOrWhiteSpace(entry.CharacterKey))
+        {
+            AddManagedWardRegistryId(ManagedWardIdsByCharacterKey, entry.CharacterKey, entry.ZdoId);
+        }
+    }
+
+    private static void RemoveManagedWardRegistryIndexes(ManagedWardRegistryEntry entry)
+    {
+        if (!string.IsNullOrWhiteSpace(entry.AccountId))
+        {
+            if (ManagedWardCountsByAccountId.TryGetValue(entry.AccountId, out var existingCount))
+            {
+                if (existingCount <= 1)
+                {
+                    ManagedWardCountsByAccountId.Remove(entry.AccountId);
+                }
+                else
+                {
+                    ManagedWardCountsByAccountId[entry.AccountId] = existingCount - 1;
+                }
+            }
+
+            RemoveManagedWardRegistryId(ManagedWardIdsByAccountId, entry.AccountId, entry.ZdoId);
+        }
+
+        if (entry.OwnerPlayerId != 0L)
+        {
+            RemoveManagedWardRegistryId(ManagedWardIdsByOwnerPlayerId, entry.OwnerPlayerId, entry.ZdoId);
+        }
+
+        if (entry.GuildId != 0)
+        {
+            RemoveManagedWardRegistryId(ManagedWardIdsByGuildId, entry.GuildId, entry.ZdoId);
+        }
+
+        if (!string.IsNullOrWhiteSpace(entry.CharacterKey))
+        {
+            RemoveManagedWardRegistryId(ManagedWardIdsByCharacterKey, entry.CharacterKey, entry.ZdoId);
+        }
+    }
+
+    private static void AddManagedWardRegistryId<TKey>(
+        Dictionary<TKey, HashSet<ZDOID>> indexedWardIds,
+        TKey key,
+        ZDOID zdoId)
+        where TKey : notnull
+    {
+        if (!indexedWardIds.TryGetValue(key, out var wardIds))
+        {
+            wardIds = new HashSet<ZDOID>();
+            indexedWardIds[key] = wardIds;
+        }
+
+        wardIds.Add(zdoId);
+    }
+
+    private static void RemoveManagedWardRegistryId<TKey>(
+        Dictionary<TKey, HashSet<ZDOID>> indexedWardIds,
+        TKey key,
+        ZDOID zdoId)
+        where TKey : notnull
+    {
+        if (!indexedWardIds.TryGetValue(key, out var wardIds))
+        {
+            return;
+        }
+
+        wardIds.Remove(zdoId);
+        if (wardIds.Count == 0)
+        {
+            indexedWardIds.Remove(key);
+        }
+    }
+
+    private static void UnionManagedWardRegistryIds<TKey>(
+        HashSet<ZDOID> candidateWardIds,
+        Dictionary<TKey, HashSet<ZDOID>> indexedWardIds,
+        TKey key)
+        where TKey : notnull
+    {
+        if (!indexedWardIds.TryGetValue(key, out var indexedIds))
+        {
+            return;
+        }
+
+        foreach (var indexedId in indexedIds)
+        {
+            candidateWardIds.Add(indexedId);
+        }
+    }
+}

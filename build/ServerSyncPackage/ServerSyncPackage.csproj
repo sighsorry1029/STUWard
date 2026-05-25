@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <NoBuild>true</NoBuild>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <PackageId>STUWardServerSync</PackageId>
+    <Version>1.0.0</Version>
+    <Authors>blizz</Authors>
+    <Description>Local ServerSync package for STUWard builds.</Description>
+    <PackageOutputPath>..\..\LocalPackages</PackageOutputPath>
+    <NoWarn>NU5128</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\Libs\ServerSync.dll" Pack="true" PackagePath="lib\net48\" Visible="false" />
+  </ItemGroup>
+</Project>

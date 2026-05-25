@@ -1,0 +1,18 @@
+<Project>
+    <PropertyGroup>
+        <!-- Copy this file to environment.local.props and adjust paths for your machine. -->
+        <ValheimGamePath>C:\Program Files (x86)\Steam\steamapps\common\Valheim</ValheimGamePath>
+        <BepInExPath>$(ValheimGamePath)\BepInEx</BepInExPath>
+        <CorlibPath>$(ValheimGamePath)\valheim_Data\Managed</CorlibPath>
+        <PublicizedAssembliesPath>$(ValheimGamePath)\valheim_Data\Managed\publicized_assemblies</PublicizedAssembliesPath>
+
+        <!-- Local deploy is opt-in: dotnet build .\StuWard.csproj /p:DeployLocal=true -->
+        <CopyOutputDLLPath>$(BepInExPath)\plugins</CopyOutputDLLPath>
+        <CopyOutputDLLPath2></CopyOutputDLLPath2>
+        <CopyOutputDLLPath3></CopyOutputDLLPath3>
+        <CopyOutputDLLPath4></CopyOutputDLLPath4>
+
+        <!-- If using KeyManager, set this to KeyManager. -->
+        <AfterTargets>ILRepacker</AfterTargets>
+    </PropertyGroup>
+</Project>

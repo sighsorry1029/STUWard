@@ -1,88 +1,123 @@
-# Server Sync Mod Template
+# STU Ward
 
-Can be used to already have your project set up and ready to go with ServerSync and basic version checking. Please see the [Original Repository](https://github.com/blaxxun-boop/ServerSync) if you have to update, or have further questions this template might not answer.
+Simple, Tidy, and Unique Ward for Valheim servers. <br>
+It adds a clone of vanilla ward but with more server-side features such as diverse protections, permission control, guild integration, ward count limits, and compatibility handling for common utility mods.
+<br>
+![](https://i.ibb.co/Q7GkMgvB/Screenshot-2026-03-31-031730.png)<br>
+Registration is same with vanilla ward. <br>
+There is blacklist config to block certain items inside ward area.
 
-Thank you Blaxxun for ServerSync!
+![](https://i.ibb.co/HLH084PV/Screenshot-2026-03-31-024031.png)<br>
+Ward Settings UI <br>
 
-ServerSync
-==========
+![](https://i.ibb.co/gZRSPGrr/Screenshot-2026-03-30-234415.png)
+Ward area cannot be overlapped unless there is guild or one player built all the wards.<br>
 
-Bundling the dll
-----------------
+![](https://i.ibb.co/v42DSpST/Video-Project-8.gif) <br>
+Good old auto closing door inside ward area. <br>
 
-You need to ensure the dll is available to your mod.
+## What It Does
 
-Including the dll is best done via ILRepack (https://github.com/ravibpatel/ILRepack.Lib.MSBuild.Task). You can load this package (ILRepack.Lib.MSBuild.Task) from NuGet.
+- Adds a placeable `Ward` with server-controlled protection rules
+- Lets ward owners configure radius, marker visibility, warning effects, and door auto-close
+- Blocks unauthorized interaction, building, terrain edits, pickup, item use, and damage inside enabled foreign wards
+- Prevents foreign ward overlap while allowing trusted shared ward groups
+- Tracks per-account ward limits
+- Shows ward pins and active ranges on the map when allowed
 
-Then create a file ILRepack.targets in your project folder. File content:
-```
-<?xml version="1.0" encoding="utf-8"?>
-<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-    <Target Name="ILRepacker" AfterTargets="Build">
-        <ItemGroup>
-            <InputAssemblies Include="$(TargetPath)" />
-            <InputAssemblies Include="$(OutputPath)\ServerSync.dll" />
-        </ItemGroup>
-        <ILRepack Parallel="true" DebugInfo="true" Internalize="true" InputAssemblies="@(InputAssemblies)" OutputFile="$(TargetPath)" TargetKind="SameAsPrimaryAssembly" LibraryPath="$(OutputPath)" />
-    </Target>
-</Project>
-```
+## How To Use
 
-Using the ServerSync
---------------------
+1. Select `Ward` with the hammer and place it.
+2. A new ward starts at `8m` radius.
+3. Look at your ward and press `Alt+E` to open `Ward Settings`.
+4. Adjust radius, marker display, warning effects, and auto-close delay.
+5. To register a player, turn the ward off and have that player interact with it.
 
-Declare a variable:
+While placing a ward, the placement preview shows the maximum configurable radius.
 
-`ServerSync.ConfigSync configSync = new ServerSync.ConfigSync("my.mod.guid") { DisplayName = "My Mod Name", CurrentVersion = "1.2.3", MinimumRequiredVersion = "1.2.0" };`
+## Protection
 
-All of DisplayName, CurrentVersion and MinimumRequiredVersion are optional.
-If CurrentVersion is specified, then the user will see a warning in their BepInEx log if the server version does not match the client version.
-If also MinimumRequiredVersion is specified and the client has an older version than the servers MinimumRequiredVersion, the client will be immediately disconnected and see an error message, explaining why.
-To display a friendly name for your mod in the error messages, specify DisplayName, otherwise the primary identifier will be used.
-Also note that the primary identifier (I propose using the GUID, "my.mod.guid") should never be changed (changing it will break backwards compatibility completely).
+Inside an enabled ward, unauthorized players are blocked from:
 
-There are two public methods on the ServerSync.ConfigSync class:
+- Opening or using containers, doors, carts, ships, signs, item stands, beehives, crafting stations, fermenters, sap collectors, traps, portals, and tamed creatures
+- Building, repairing, removing pieces, or modifying terrain
+- Damaging protected structures and objects
+- Picking up items, including auto-pickup when the item policy blocks it
+- Using or equipping blocked item prefabs
+- Using creature-catching items on protected tamed animals
 
-- `AddConfigEntry<T>(ConfigEntry<T> configEntry)`
+Building pieces inside an enabled STU Ward receive extra damage protection. Player and tamed-creature damage to protected building pieces is blocked, and hostile creature damage can also be blocked depending on ward attendance settings.
 
-  Registers a BepInEx ConfigEntry to be synchronized.
+## Permissions
 
-- `AddLockingConfigEntry<T>(ConfigEntry<T> lockingConfig) where T : IConvertible`
+STU Ward separates access from control.
 
-  Registers a BepInEx ConfigEntry to be synchronized, whose value determines whether the config is locked. If the value is zero when converted to integer, the config is not locked. Otherwise it is locked.
-  This method must be called at most once. If not called at all, the config will never be locked.
+Players with access can use protected areas without being blocked. Players with control can change the ward itself.
 
-Useful properties:
+Access is granted to:
 
-- `static bool ProcessingServerUpdate`
+- The ward owner
+- Registered players
+- Players matching the ward's stored guild identity
+- Server admins using effective debug control
 
-  The mod is receiving and applying configs from the server. Used internally to avoid config writing loops.
+Control is limited to:
 
-- `bool IsSourceOfTruth`
+- The ward owner
+- Server admins using effective debug control
 
-  Whether the local config is currently being used. False if a remote config is currently applied.
+Registered players and guild members can use the protected area, but they cannot change settings, toggle the ward, remove other registered players, or remove the ward itself.
 
-Additionally, there is a class `ServerSync.CustomSyncedValue<T>(ConfigSync, string Identifier, T value = default)` to synchronize arbitrary data (more precisely: all data which Valheims native serialization supports).
-This class registers itself to the passed ConfigSync instance upon instantiation.
-It provides a Value property and a ValueChanged event handler.
-The Identifier must be unique for the given ConfigSync instance.
+## Registration
 
+Registration works like a vanilla ward:
 
-Handy config function
----------------------
+- The ward must be disabled.
+- A player interacts with the ward to add or remove themselves.
+- Players with control rights use interaction to toggle the ward instead.
 
-To avoid manually adding each config entry to the ConfigSync instance, I propose to add a simple wrapper `config()` (with the same signature as `Config.Bind()`) to your UnityBasePlugin class:
+This means a disabled ward is intentionally open for self-registration.
 
-```
-ConfigEntry<T> config<T>(string group, string name, T value, ConfigDescription description, bool synchronizedSetting = true)
-{
-    ConfigEntry<T> configEntry = Config.Bind(group, name, value, description);
+## Ward Overlap
 
-    SyncedConfigEntry<T> syncedConfigEntry = configSync.AddConfigEntry(configEntry);
-    syncedConfigEntry.SynchronizedConfig = synchronizedSetting;
+Ward overlap is strict.
 
-    return configEntry;
-}
+- Foreign wards cannot overlap.
+- Same-owner wards can overlap.
+- Wards with the same stored guild identity can overlap.
+- Registered-player access does not bypass overlap rules.
 
-ConfigEntry<T> config<T>(string group, string name, T value, string description, bool synchronizedSetting = true) => config(group, name, value, new ConfigDescription(description), synchronizedSetting);
-```
+In overlapping coverage, access is additive: if any enabled foreign ward denies the player, the action is denied.
+
+## Ward Settings
+
+Each ward can store its own behavior:
+
+- Radius
+- Area marker visibility
+- Area marker brightness
+- Warning sound
+- Warning flash
+- Door auto-close delay
+
+Door auto-close uses the shortest active delay from the wards covering the door.
+
+## Item Policy
+
+Servers can define blocked item prefabs and pickup rules.
+
+Blocked item prefabs cannot be used, equipped, or used to attack while the player is inside a foreign enabled ward. Pickup rules can either block everything except a whitelist or allow everything except a blacklist.
+
+## Map Pins
+
+Ward pins can show ward locations and active ranges on the map.
+
+Players normally see wards they are allowed to see. Admin debug control can show all managed wards.
+
+## Important Details
+
+- Ownership is based on the ward creator player id.
+- Account identity is used for limits and reporting, not direct ward control.
+- A ward's guild identity is stored on the ward when metadata is captured.
+- Changing guild later does not automatically rewrite old wards.
+- To move a ward to a different shared group, remove it and place a new one.

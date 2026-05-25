@@ -1,204 +1,257 @@
-﻿using System;
-using System.IO;
-using System.Linq;
-using System.Reflection;
-using System.Timers;
+using System.Collections.Generic;
 using BepInEx;
 using BepInEx.Configuration;
 using BepInEx.Logging;
 using HarmonyLib;
-using JetBrains.Annotations;
 using ServerSync;
 using UnityEngine;
 
-namespace ServerSyncModTemplate;
+namespace STUWard;
 
-[BepInPlugin(ModGUID, ModName, ModVersion)]
-public class ServerSyncModTemplatePlugin : BaseUnityPlugin
+[BepInPlugin(ModGuid, ModName, ModVersion)]
+[BepInDependency("com.jotunn.jotunn")]
+[BepInDependency("org.bepinex.plugins.guilds", BepInDependency.DependencyFlags.SoftDependency)]
+public sealed class Plugin : BaseUnityPlugin
 {
-    internal const string ModName = "ServerSyncModTemplate";
-    internal const string ModVersion = "1.0.0";
-    internal const string Author = "{Azumatt}";
-    private const string ModGUID = $"{Author}.{ModName}";
-    private static string ConfigFileName = $"{ModGUID}.cfg";
-    private static string ConfigFileFullPath = Paths.ConfigPath + Path.DirectorySeparatorChar + ConfigFileName;
-    internal static string ConnectionError = "";
-    private readonly Harmony _harmony = new(ModGUID);
-    public static readonly ManualLogSource ServerSyncModTemplateLogger = BepInEx.Logging.Logger.CreateLogSource(ModName);
-    private static readonly ConfigSync ConfigSync = new(ModGUID) { DisplayName = ModName, CurrentVersion = ModVersion, MinimumRequiredVersion = ModVersion };
-    private FileSystemWatcher _watcher;
-    private readonly object _reloadLock = new();
-    private DateTime _lastConfigReloadTime;
-    private const long RELOAD_DELAY = 10000000; // One second
+    internal const string ModName = "STUWard";
+    internal const string ModVersion = "1.2.0";
+    internal const string Author = "sighsorry";
+    internal const string ModGuid = $"{Author}.{ModName}";
 
-    public enum Toggle
+    internal static readonly ConfigSync ConfigSync = new(ModGuid)
     {
-        On = 1,
-        Off = 0
+        DisplayName = ModName,
+        CurrentVersion = ModVersion,
+        MinimumRequiredVersion = ModVersion
+    };
+
+    private Harmony _harmony = null!;
+
+    internal static ManualLogSource Log = null!;
+    internal static Plugin Instance = null!;
+    internal static WardGuiController WardGui = null!;
+
+    internal static ConfigEntry<Toggle> ServerConfigLocked = null!;
+    internal static ConfigEntry<int> MaxWardsPerSteamId = null!;
+    internal static ConfigEntry<float> MaxWardRadius = null!;
+    internal static ConfigEntry<PickupBlockRule> PickupBlockMode = null!;
+    internal static ConfigEntry<HostileCreatureStructureProtectionMode> HostileCreatureStructureProtection = null!;
+    internal static ConfigEntry<float> UnattendedWardTrustedPlayerRangeBuffer = null!;
+    internal static ConfigEntry<float> UnattendedWardTrustedPresenceGraceSeconds = null!;
+    internal static ConfigEntry<float> UnattendedWardPresenceRefreshInterval = null!;
+    internal static ConfigEntry<Toggle> DisableVanillaGuardStoneRecipe = null!;
+    internal static ConfigEntry<string> StuWardRecipe = null!;
+    internal static ConfigEntry<KeyboardShortcut> WardSettingsShortcut = null!;
+    internal static ConfigEntry<int> WardMinimapPinScale = null!;
+    internal static ConfigEntry<Toggle> WardMinimapActiveRanges = null!;
+    internal static ConfigEntry<DiagnosticLogMode> WardDiagnosticLogging = null!;
+
+    internal enum Toggle
+    {
+        Off = 0,
+        On = 1
     }
 
-    public void Awake()
+    internal enum PickupBlockRule
     {
-        bool saveOnSet = Config.SaveOnConfigSet;
+        BlockAllExceptWhitelist = 0,
+        AllowAllExceptBlacklist = 1
+    }
+
+    internal enum HostileCreatureStructureProtectionMode
+    {
+        Off = 0,
+        UnattendedOnly = 1,
+        Always = 2
+    }
+
+    internal enum DiagnosticLogMode
+    {
+        Off = 0,
+        Failures = 1,
+        Verbose = 2
+    }
+
+    private void Awake()
+    {
+        Instance = this;
+        Log = Logger;
+        WardPluginBootstrap.InitializeCore();
+
+        var saveOnSet = Config.SaveOnConfigSet;
         Config.SaveOnConfigSet = false;
+        try
+        {
+            WardPluginConfigBindings.BindAll();
+            WardPluginBootstrap.InitializeFeatures();
 
-        // Uncomment the line below to use the LocalizationManager for localizing your mod.
-        // Make sure to populate the English.yml file in the translation folder with your keys to be localized and the values associated before uncommenting!.
-        //Localizer.Load(); // Use this to initialize the LocalizationManager (for more information on LocalizationManager, see the LocalizationManager documentation https://github.com/blaxxun-boop/LocalizationManager#example-project).
+            _harmony = new Harmony(ModGuid);
+            WardPatchRegistry.ApplyAll(_harmony);
+            WardGui = CreateOrReuseWardGuiController();
 
-        _serverConfigLocked = config("1 - General", "Lock Configuration", Toggle.On, "If on, the configuration is locked and can be changed by server admins only.");
-        _ = ConfigSync.AddLockingConfigEntry(_serverConfigLocked);
-
-
-        Assembly assembly = Assembly.GetExecutingAssembly();
-        _harmony.PatchAll(assembly);
-        SetupWatcher();
-
-        Config.Save();
-        if (saveOnSet)
+            Config.Save();
+        }
+        finally
         {
             Config.SaveOnConfigSet = saveOnSet;
         }
     }
 
+    private void Update()
+    {
+        WardPluginBootstrap.Update();
+    }
+
     private void OnDestroy()
     {
-        SaveWithRespectToConfigSet();
-        _watcher?.Dispose();
+        WardPluginBootstrap.Shutdown();
+        _harmony?.UnpatchSelf();
+        Config.Save();
     }
 
-    private void SetupWatcher()
+    internal static bool IsBlockedItem(string prefabName)
     {
-        _watcher = new FileSystemWatcher(Paths.ConfigPath, ConfigFileName);
-        _watcher.Changed += ReadConfigValues;
-        _watcher.Created += ReadConfigValues;
-        _watcher.Renamed += ReadConfigValues;
-        _watcher.IncludeSubdirectories = true;
-        _watcher.SynchronizingObject = ThreadingHelper.SynchronizingObject;
-        _watcher.EnableRaisingEvents = true;
+        return WardItemPrefabPolicy.IsBlockedItem(prefabName);
     }
 
-    private void ReadConfigValues(object sender, FileSystemEventArgs e)
+    internal static bool HasBlockedItems()
     {
-        DateTime now = DateTime.Now;
-        long time = now.Ticks - _lastConfigReloadTime.Ticks;
-        if (time < RELOAD_DELAY)
+        return WardItemPrefabPolicy.HasBlockedItems();
+    }
+
+    internal static bool IsWardSettingsShortcutDown()
+    {
+        return WardSettingsShortcut != null &&
+               WardSettingsShortcut.Value.MainKey != KeyCode.None &&
+               WardSettingsShortcut.Value.IsDown();
+    }
+
+    internal static bool HasWardSettingsShortcutBinding()
+    {
+        return WardSettingsShortcut != null && WardSettingsShortcut.Value.MainKey != KeyCode.None;
+    }
+
+    internal static string GetWardSettingsShortcutLabel()
+    {
+        if (WardSettingsShortcut == null || WardSettingsShortcut.Value.MainKey == KeyCode.None)
+        {
+            return WardLocalization.Localize(WardLocalization.ShortcutUnboundToken, WardLocalization.ShortcutUnboundFallback);
+        }
+
+        var shortcut = WardSettingsShortcut.Value;
+        var parts = new List<string>();
+
+        AddModifierLabel(parts, shortcut.Modifiers, KeyCode.LeftControl, KeyCode.RightControl, "Ctrl");
+        AddModifierLabel(parts, shortcut.Modifiers, KeyCode.LeftAlt, KeyCode.RightAlt, "Alt");
+        AddModifierLabel(parts, shortcut.Modifiers, KeyCode.LeftShift, KeyCode.RightShift, "Shift");
+
+        foreach (var modifier in shortcut.Modifiers)
+        {
+            if (modifier is KeyCode.LeftControl or KeyCode.RightControl or KeyCode.LeftAlt or KeyCode.RightAlt or KeyCode.LeftShift or KeyCode.RightShift)
+            {
+                continue;
+            }
+
+            parts.Add(GetKeyLabel(modifier));
+        }
+
+        parts.Add(GetKeyLabel(shortcut.MainKey));
+        return string.Join("+", parts);
+    }
+
+    private static void AddModifierLabel(List<string> parts, IEnumerable<KeyCode> modifiers, KeyCode left, KeyCode right, string label)
+    {
+        foreach (var modifier in modifiers)
+        {
+            if (modifier == left || modifier == right)
+            {
+                parts.Add(label);
+                return;
+            }
+        }
+    }
+
+    private static string GetKeyLabel(KeyCode keyCode)
+    {
+        return keyCode switch
+        {
+            KeyCode.LeftAlt or KeyCode.RightAlt => "Alt",
+            KeyCode.LeftControl or KeyCode.RightControl => "Ctrl",
+            KeyCode.LeftShift or KeyCode.RightShift => "Shift",
+            KeyCode.Alpha0 => "0",
+            KeyCode.Alpha1 => "1",
+            KeyCode.Alpha2 => "2",
+            KeyCode.Alpha3 => "3",
+            KeyCode.Alpha4 => "4",
+            KeyCode.Alpha5 => "5",
+            KeyCode.Alpha6 => "6",
+            KeyCode.Alpha7 => "7",
+            KeyCode.Alpha8 => "8",
+            KeyCode.Alpha9 => "9",
+            _ => keyCode.ToString()
+        };
+    }
+
+    internal static ConfigEntry<T> BindConfigEntry<T>(string group, string name, T value, string description, bool synchronizedSetting = true)
+    {
+        return Instance.BindConfig(group, name, value, description, synchronizedSetting);
+    }
+
+    internal static bool ShouldLogWardDiagnosticFailures()
+    {
+        return WardDiagnosticLogging != null && WardDiagnosticLogging.Value != DiagnosticLogMode.Off;
+    }
+
+    internal static bool ShouldLogWardDiagnosticVerbose()
+    {
+        return WardDiagnosticLogging != null && WardDiagnosticLogging.Value == DiagnosticLogMode.Verbose;
+    }
+
+    internal static void LogWardDiagnosticFailure(string context, string message)
+    {
+        if (!ShouldLogWardDiagnosticFailures() || Log == null)
         {
             return;
         }
 
-        lock (_reloadLock)
-        {
-            if (!File.Exists(ConfigFileFullPath))
-            {
-                ServerSyncModTemplateLogger.LogWarning("Config file does not exist. Skipping reload.");
-                return;
-            }
-
-            try
-            {
-                ServerSyncModTemplateLogger.LogDebug("Reloading configuration...");
-                SaveWithRespectToConfigSet(true);
-                ServerSyncModTemplateLogger.LogInfo("Configuration reload complete.");
-            }
-            catch (Exception ex)
-            {
-                ServerSyncModTemplateLogger.LogError($"Error reloading configuration: {ex.Message}");
-            }
-        }
-
-        _lastConfigReloadTime = now;
+        Log.LogWarning($"[WardDiag:{context}] {message}");
     }
 
-    private void SaveWithRespectToConfigSet(bool reload = false)
+    internal static void LogWardDiagnosticVerbose(string context, string message)
     {
-        bool originalSaveOnSet = Config.SaveOnConfigSet;
-        Config.SaveOnConfigSet = false;
-        if (reload)
-            Config.Reload();
-        Config.Save();
-        if (originalSaveOnSet)
+        if (!ShouldLogWardDiagnosticVerbose() || Log == null)
         {
-            Config.SaveOnConfigSet = originalSaveOnSet;
+            return;
         }
-        
-        // If you want to do something once localization completes, LocalizationManager has a hook for that.
-        /*Localizer.OnLocalizationComplete += () =>
-        {
-            // Do something
-            ItemManagerModTemplateLogger.LogDebug("OnLocalizationComplete called");
-        };*/
+
+        Log.LogInfo($"[WardDiag:{context}] {message}");
     }
 
-
-    #region ConfigOptions
-
-    private static ConfigEntry<Toggle> _serverConfigLocked = null!;
-
-    private ConfigEntry<T> config<T>(string group, string name, T value, ConfigDescription description, bool synchronizedSetting = true)
+    private static WardGuiController CreateOrReuseWardGuiController()
     {
-        ConfigDescription extendedDescription = new(description.Description + (synchronizedSetting ? " [Synced with Server]" : " [Not Synced with Server]"), description.AcceptableValues, description.Tags);
-        ConfigEntry<T> configEntry = Config.Bind(group, name, value, extendedDescription);
-        //var configEntry = Config.Bind(group, name, value, description);
+        if (WardGuiController.Instance != null)
+        {
+            return WardGuiController.Instance;
+        }
 
-        SyncedConfigEntry<T> syncedConfigEntry = ConfigSync.AddConfigEntry(configEntry);
-        syncedConfigEntry.SynchronizedConfig = synchronizedSetting;
+        var guiRoot = new GameObject($"{ModName}.WardGui");
+        DontDestroyOnLoad(guiRoot);
+        return guiRoot.AddComponent<WardGuiController>();
+    }
+
+    private ConfigEntry<T> BindConfig<T>(string group, string name, T value, string description, bool synchronizedSetting = true)
+    {
+        var syncDescription = synchronizedSetting ? "Synced with server." : "Not synced with server.";
+        var combinedDescription = string.IsNullOrWhiteSpace(description)
+            ? syncDescription
+            : $"{description.TrimEnd()} {syncDescription}";
+        var configEntry = Config.Bind(group, name, value, new ConfigDescription(combinedDescription));
+        if (synchronizedSetting)
+        {
+            var syncedConfigEntry = ConfigSync.AddConfigEntry(configEntry);
+            syncedConfigEntry.SynchronizedConfig = true;
+        }
 
         return configEntry;
-    }
-
-    private ConfigEntry<T> config<T>(string group, string name, T value, string description, bool synchronizedSetting = true)
-    {
-        return config(group, name, value, new ConfigDescription(description), synchronizedSetting);
-    }
-
-    private class ConfigurationManagerAttributes
-    {
-        [UsedImplicitly] public int? Order = null!;
-        [UsedImplicitly] public bool? Browsable = null!;
-        [UsedImplicitly] public string? Category = null!;
-        [UsedImplicitly] public Action<ConfigEntryBase>? CustomDrawer = null!;
-    }
-
-    class AcceptableShortcuts() : AcceptableValueBase(typeof(KeyboardShortcut))
-    {
-        public override object Clamp(object value) => value;
-        public override bool IsValid(object value) => true;
-
-        public override string ToDescriptionString() => $"# Acceptable values: {string.Join(", ", UnityInput.Current.SupportedKeyCodes)}";
-    }
-
-    #endregion
-}
-
-public static class KeyboardExtensions
-{
-    extension(KeyboardShortcut shortcut)
-    {
-        public bool IsKeyDown()
-        {
-            return shortcut.MainKey != KeyCode.None && Input.GetKeyDown(shortcut.MainKey) && shortcut.Modifiers.All(Input.GetKey);
-        }
-
-        public bool IsKeyHeld()
-        {
-            return shortcut.MainKey != KeyCode.None && Input.GetKey(shortcut.MainKey) && shortcut.Modifiers.All(Input.GetKey);
-        }
-    }
-}
-
-public static class ToggleExtentions
-{
-    extension(ServerSyncModTemplatePlugin.Toggle value)
-    {
-        public bool IsOn()
-        {
-            return value == ServerSyncModTemplatePlugin.Toggle.On;
-        }
-
-        public bool IsOff()
-        {
-            return value == ServerSyncModTemplatePlugin.Toggle.Off;
-        }
     }
 }

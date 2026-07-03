@@ -317,9 +317,12 @@ internal static partial class WardMinimapPinsManager
         }
 
         routedRpc.InvokeRoutedRPC(RequestWardPinsRpc, pkg);
-        Plugin.LogWardDiagnosticVerbose(
-            "WardPins.Request",
-            $"Requested remote ward minimap snapshot. requestId={requestId}, requestFullSnapshot={requestFullSnapshot}, snapshotState={_snapshotState}, knownViewerRevisionToken={knownViewerRevisionToken}, localViewerRevisionToken={_lastViewerRevisionToken}, playerId={player.GetPlayerID()}, canSeeAllWards={canSeeAllWards}, force={force}, cachedSnapshotCount={LocalSnapshot.Count}, bootstrapReason='{_lastRemoteSnapshotBootstrapReason ?? string.Empty}'");
+        if (Plugin.ShouldLogWardDiagnosticVerbose())
+        {
+            Plugin.LogWardDiagnosticVerbose(
+                "WardPins.Request",
+                $"Requested remote ward minimap snapshot. requestId={requestId}, requestFullSnapshot={requestFullSnapshot}, snapshotState={_snapshotState}, knownViewerRevisionToken={knownViewerRevisionToken}, localViewerRevisionToken={_lastViewerRevisionToken}, playerId={player.GetPlayerID()}, canSeeAllWards={canSeeAllWards}, force={force}, cachedSnapshotCount={LocalSnapshot.Count}, bootstrapReason='{_lastRemoteSnapshotBootstrapReason ?? string.Empty}'");
+        }
     }
 
     private static void RebuildLocalSnapshot(long playerId, int playerGuildId, bool canSeeAllWards)
@@ -336,7 +339,10 @@ internal static partial class WardMinimapPinsManager
         ClearPendingForceRefresh();
         ClearPendingRemoteSnapshotBootstrapRequest();
 
-        LogScanSummary(
-            $"playerId={playerId}, canSeeAllWards={canSeeAllWards}, indexedWardCount={snapshot.IndexedWardCount}, candidateWardCount={snapshot.CandidateWardCount}, visibleWardCount={snapshot.VisibleWardCount}, enabledWardCount={snapshot.EnabledWardCount}{DescribeFirstEntry(snapshot.FirstEntry)}");
+        if (Plugin.ShouldLogWardDiagnosticVerbose())
+        {
+            LogScanSummary(
+                $"playerId={playerId}, canSeeAllWards={canSeeAllWards}, indexedWardCount={snapshot.IndexedWardCount}, candidateWardCount={snapshot.CandidateWardCount}, visibleWardCount={snapshot.VisibleWardCount}, enabledWardCount={snapshot.EnabledWardCount}{DescribeFirstEntry(snapshot.FirstEntry)}");
+        }
     }
 }

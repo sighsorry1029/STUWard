@@ -488,7 +488,6 @@
         <Compile Include="ManagedWardReportService.cs"/>
         <Compile Include="ManagedWardReportBuilder.cs"/>
         <Compile Include="ManagedWardMapStateService.cs"/>
-        <Compile Include="ManagedWardRuntimeInvalidationService.cs"/>
         <Compile Include="ManagedWardRuntimeLifecycle.cs"/>
         <Compile Include="ManagedWardProjectionService.cs"/>
         <Compile Include="ManagedWardMetadataMutationService.cs"/>

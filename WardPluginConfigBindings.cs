@@ -7,11 +7,17 @@ namespace STUWard;
 internal static class WardPluginConfigBindings
 {
     private static bool _handlersBound;
+    private const int GeneralOrderStart = 700;
+    private const int RestrictionOrderStart = 900;
+    private const int ClientOrderStart = 300;
+    private const int DebugOrderStart = 100;
+    private const int OrderStep = 10;
 
     internal static void BindAll()
     {
         UnbindAll();
         BindGeneral();
+        BindRestrictions();
         BindClient();
         BindDebug();
         BindHandlers();
@@ -27,9 +33,6 @@ internal static class WardPluginConfigBindings
         UnbindHandler(Plugin.MaxWardRadius, HandleMaxWardRadiusChanged);
         UnbindHandler(Plugin.MaxWardsPerSteamId, HandleMaxWardLimitChanged);
         UnbindHandler(Plugin.HostileCreatureStructureProtection, HandleWardPresenceConfigChanged);
-        UnbindHandler(Plugin.UnattendedWardTrustedPlayerRangeBuffer, HandleWardPresenceConfigChanged);
-        UnbindHandler(Plugin.UnattendedWardTrustedPresenceGraceSeconds, HandleWardPresenceConfigChanged);
-        UnbindHandler(Plugin.UnattendedWardPresenceRefreshInterval, HandleWardPresenceConfigChanged);
         UnbindHandler(Plugin.DisableVanillaGuardStoneRecipe, HandleRecipeSettingsChanged);
         UnbindHandler(Plugin.StuWardRecipe, HandleRecipeSettingsChanged);
         UnbindHandler(Plugin.WardMinimapPinScale, HandleLocalWardPinConfigChanged);
@@ -43,72 +46,117 @@ internal static class WardPluginConfigBindings
             "1 - General",
             "Lock Configuration",
             Plugin.Toggle.On,
-            "If on, the configuration is locked and can be changed by server admins only."
+            "If on, the configuration is locked and can be changed by server admins only.",
+            configManagerOrder: GeneralOrderStart
         );
         _ = Plugin.ConfigSync.AddLockingConfigEntry(Plugin.ServerConfigLocked);
-
-        Plugin.MaxWardsPerSteamId = Plugin.BindConfigEntry(
-            "1 - General",
-            "Max Wards Per Steam ID",
-            3,
-            "Maximum number of managed Wards allowed per Steam/platform account. Set to -1 for unlimited."
-        );
 
         Plugin.MaxWardRadius = Plugin.BindConfigEntry(
             "1 - General",
             "Max Ward Radius",
             32f,
-            "Maximum configurable Ward radius. Valid range: 8 to 64."
+            "Maximum configurable Ward radius. Valid range: 8 to 64.",
+            configManagerOrder: GeneralOrderStart - OrderStep
+        );
+
+        Plugin.MaxWardsPerSteamId = Plugin.BindConfigEntry(
+            "1 - General",
+            "Max Wards Per Steam ID",
+            3,
+            "Maximum number of managed Wards allowed per Steam/platform account. Set to -1 for unlimited.",
+            configManagerOrder: GeneralOrderStart - OrderStep * 2
         );
 
         Plugin.PickupBlockMode = Plugin.BindConfigEntry(
             "1 - General",
             "Pickup Block Mode",
             Plugin.PickupBlockRule.BlockAllExceptWhitelist,
-            "Pickup rule inside a foreign enabled ward. BlockAllExceptWhitelist blocks every item pickup except pickup_whitelist. AllowAllExceptBlacklist allows item pickup except pickup_blacklist."
+            "Pickup rule inside a foreign enabled ward. BlockAllExceptWhitelist blocks every item pickup except pickup_whitelist. AllowAllExceptBlacklist allows item pickup except pickup_blacklist.",
+            configManagerOrder: GeneralOrderStart - OrderStep * 3
         );
 
         Plugin.HostileCreatureStructureProtection = Plugin.BindConfigEntry(
-            "2 - Unattended Protection",
+            "1 - General",
             "Hostile Creature Structure Protection Mode",
             Plugin.HostileCreatureStructureProtectionMode.UnattendedOnly,
-            "Controls whether building pieces inside an enabled ward ignore damage from MonsterAI-controlled attackers. Off disables this extra protection. UnattendedOnly protects while no trusted player is nearby. Always protects regardless of trusted player presence."
-        );
-
-        Plugin.UnattendedWardTrustedPlayerRangeBuffer = Plugin.BindConfigEntry(
-            "2 - Unattended Protection",
-            "Unattended Ward Trusted Player Range Buffer",
-            16f,
-            "Additional distance beyond the ward radius used when checking for nearby trusted players before hostile-creature structure protection turns off."
-        );
-
-        Plugin.UnattendedWardTrustedPresenceGraceSeconds = Plugin.BindConfigEntry(
-            "2 - Unattended Protection",
-            "Unattended Ward Trusted Presence Grace Seconds",
-            10f,
-            "How long a ward keeps counting as attended after the last nearby trusted player leaves."
-        );
-
-        Plugin.UnattendedWardPresenceRefreshInterval = Plugin.BindConfigEntry(
-            "2 - Unattended Protection",
-            "Unattended Ward Presence Refresh Interval",
-            1f,
-            "How often nearby trusted-player attendance is recalculated for unattended hostile-creature structure protection."
+            "Controls whether building pieces inside an enabled ward ignore damage from MonsterAI-controlled attackers. Off disables this extra protection. UnattendedOnly protects while no trusted player is nearby. Always protects regardless of trusted player presence. UnattendedOnly uses an 8 m trusted-player range buffer, 10 s grace time, and 1 s presence refresh.",
+            configManagerOrder: GeneralOrderStart - OrderStep * 4
         );
 
         Plugin.DisableVanillaGuardStoneRecipe = Plugin.BindConfigEntry(
             "1 - General",
             "Disable Vanilla Guard Stone Recipe",
             Plugin.Toggle.On,
-            "If on, the vanilla guard_stone build recipe is removed from the Hammer piece table while STUWard remains available."
+            "If on, the vanilla guard_stone build recipe is removed from the Hammer piece table while STUWard remains available.",
+            configManagerOrder: GeneralOrderStart - OrderStep * 5
         );
 
         Plugin.StuWardRecipe = Plugin.BindConfigEntry(
             "1 - General",
             "STUWard Recipe",
             "GreydwarfEye:1,BoneFragments:3,Flint:5,Wood:7",
-            "STUWard recipe override. Format: ItemPrefab:Amount[:Recover], ..."
+            "STUWard recipe override. Format: ItemPrefab:Amount[:Recover], ...",
+            configManagerOrder: GeneralOrderStart - OrderStep * 6
         );
+    }
+
+    private static void BindRestrictions()
+    {
+        var definitions = WardSettings.RestrictionDefinitions;
+        for (var index = 0; index < definitions.Count; index++)
+        {
+            var definition = definitions[index];
+            SetRestrictionConfigEntry(
+                definition.Restriction,
+                BindRestrictionMode(
+                    definition.ConfigName,
+                    definition.ConfigDescription,
+                    RestrictionOrderStart - index * OrderStep));
+        }
+    }
+
+    private static ConfigEntry<Plugin.RestrictionServerMode> BindRestrictionMode(string name, string description, int configManagerOrder)
+    {
+        return Plugin.BindConfigEntry(
+            "2 - Ward Restrictions",
+            $"{name} Restriction",
+            Plugin.RestrictionServerMode.ForcedOn,
+            $"{description} ForcedOn preserves the server rule. NotForced lets each ward owner toggle this restriction in the ward settings UI.",
+            configManagerOrder: configManagerOrder);
+    }
+
+    private static void SetRestrictionConfigEntry(WardRestrictionOptions restriction, ConfigEntry<Plugin.RestrictionServerMode> entry)
+    {
+        switch (restriction)
+        {
+            case WardRestrictionOptions.Doors:
+                Plugin.DoorsRestriction = entry;
+                break;
+            case WardRestrictionOptions.Portals:
+                Plugin.PortalsRestriction = entry;
+                break;
+            case WardRestrictionOptions.Pickup:
+                Plugin.PickupRestriction = entry;
+                break;
+            case WardRestrictionOptions.PlacedConsumables:
+                Plugin.PlacedConsumablesRestriction = entry;
+                break;
+            case WardRestrictionOptions.ItemStands:
+                Plugin.ItemStandsRestriction = entry;
+                break;
+            case WardRestrictionOptions.ArmorStands:
+                Plugin.ArmorStandsRestriction = entry;
+                break;
+            case WardRestrictionOptions.Containers:
+                Plugin.ContainersRestriction = entry;
+                break;
+            case WardRestrictionOptions.CraftingStations:
+                Plugin.CraftingStationsRestriction = entry;
+                break;
+            case WardRestrictionOptions.TameablesAndSaddles:
+                Plugin.TameablesAndSaddlesRestriction = entry;
+                break;
+        }
     }
 
     private static void BindClient()
@@ -118,7 +166,8 @@ internal static class WardPluginConfigBindings
             "Ward Settings Shortcut",
             new KeyboardShortcut(KeyCode.E, KeyCode.LeftAlt),
             "Shortcut used to open the ward settings UI while looking at your ward. Example values: LeftAlt + E, F7",
-            synchronizedSetting: false
+            synchronizedSetting: false,
+            configManagerOrder: ClientOrderStart
         );
 
         Plugin.WardMinimapPinScale = Plugin.BindConfigEntry(
@@ -126,7 +175,8 @@ internal static class WardPluginConfigBindings
             "Ward Minimap Pin Scale",
             1,
             "0 disables ward icon pins. 1 is the default icon size. 100 means x100 icon size.",
-            synchronizedSetting: false
+            synchronizedSetting: false,
+            configManagerOrder: ClientOrderStart - OrderStep
         );
 
         Plugin.WardMinimapActiveRanges = Plugin.BindConfigEntry(
@@ -134,7 +184,8 @@ internal static class WardPluginConfigBindings
             "Ward Minimap Active Ranges",
             Plugin.Toggle.On,
             "If on, enabled managed wards also show their active radius on the minimap and map.",
-            synchronizedSetting: false
+            synchronizedSetting: false,
+            configManagerOrder: ClientOrderStart - OrderStep * 2
         );
 
     }
@@ -146,7 +197,8 @@ internal static class WardPluginConfigBindings
             "Ward Diagnostic Logging",
             Plugin.DiagnosticLogMode.Off,
             "Local-only scalar diagnostic logging for ward ownership/toggle flows. Use Failures for rejection paths only, or Verbose for request and state tracing. Enable separately on each client/server instance you want logs from.",
-            synchronizedSetting: false
+            synchronizedSetting: false,
+            configManagerOrder: DebugOrderStart
         );
     }
 
@@ -155,9 +207,6 @@ internal static class WardPluginConfigBindings
         BindHandler(Plugin.MaxWardRadius, HandleMaxWardRadiusChanged);
         BindHandler(Plugin.MaxWardsPerSteamId, HandleMaxWardLimitChanged);
         BindHandler(Plugin.HostileCreatureStructureProtection, HandleWardPresenceConfigChanged);
-        BindHandler(Plugin.UnattendedWardTrustedPlayerRangeBuffer, HandleWardPresenceConfigChanged);
-        BindHandler(Plugin.UnattendedWardTrustedPresenceGraceSeconds, HandleWardPresenceConfigChanged);
-        BindHandler(Plugin.UnattendedWardPresenceRefreshInterval, HandleWardPresenceConfigChanged);
         BindHandler(Plugin.DisableVanillaGuardStoneRecipe, HandleRecipeSettingsChanged);
         BindHandler(Plugin.StuWardRecipe, HandleRecipeSettingsChanged);
         BindHandler(Plugin.WardMinimapPinScale, HandleLocalWardPinConfigChanged);
@@ -177,7 +226,7 @@ internal static class WardPluginConfigBindings
 
     private static void HandleWardPresenceConfigChanged(object? _, EventArgs __)
     {
-        ManagedWardRuntimeInvalidationService.PublishPresencePolicyChanged("ward presence config changed");
+        ManagedWardPresenceService.Invalidate();
     }
 
     private static void HandleRecipeSettingsChanged(object? _, EventArgs __)

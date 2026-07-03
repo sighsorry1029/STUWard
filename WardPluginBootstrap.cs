@@ -12,7 +12,6 @@ internal static class WardPluginBootstrap
 
     internal static void InitializeFeatures()
     {
-        WardGuiLayoutSettings.Bind();
         ManagedWardConfigFileService.Initialize();
         WardItemPrefabPolicy.Initialize();
         WardOwnership.Initialize();

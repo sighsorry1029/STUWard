@@ -9,22 +9,39 @@ internal static class WardPatchRegistry
 {
     private static readonly HashSet<Type> RequiredPatchTypes = new()
     {
+        // Managed ward lifecycle/state hooks.
         typeof(PrivateAreaAwakePatch),
         typeof(PrivateAreaOnDestroyPatch),
         typeof(PrivateAreaUpdateStatusPatch),
         typeof(PrivateAreaSetupPatch),
         typeof(ZNetSceneCreateObjectManagedWardPatch),
+        typeof(PrivateAreaInteractAdminDebugPatch),
         typeof(PrivateAreaRpcTogglePermittedManagedPatch),
         typeof(PrivateAreaRpcToggleEnabledAdminDebugPatch),
+
+        // Core access and interaction enforcement hooks.
         typeof(DirectInteractionPatches),
+        typeof(PrivateAreaHaveLocalAccessManagedPatch),
+        typeof(PrivateAreaCheckAccessManagedPatch),
+        typeof(ContainerCheckAccessManagedPatch),
         typeof(UseItemInteractionPatches),
+        typeof(StationUsePatches),
+        typeof(ProcessingInteractionPatches),
+        typeof(TeleportWorldTeleportPatch),
+        typeof(TeleportWorldTriggerPatch),
         typeof(ItemDropPickupPatch),
         typeof(HumanoidPickupPatch),
+        typeof(PlayerAutoPickupPatch),
         typeof(PlayerTryPlacePiecePatch),
+        typeof(PlayerSetupPlacementGhostPatch),
+        typeof(PlayerUpdatePlacementGhostPatch),
         typeof(PlayerPlacePiecePatch),
         typeof(PlayerCheckCanRemovePiecePatch),
         typeof(PlayerRemovePiecePatch),
+        typeof(PlayerRepairPatch),
         typeof(ZNetSceneDestroyPatch),
+        typeof(AttackSpawnOnHitTerrainPatch),
+        typeof(TerrainOpAwakePatch),
         typeof(WearNTearDamagePatch),
         typeof(WearNTearRpcDamagePatch),
         typeof(WearNTearRemovePatch),
@@ -32,13 +49,22 @@ internal static class WardPatchRegistry
         typeof(DestructibleDamagePatch),
         typeof(DestructibleRpcDamagePatch),
         typeof(TreeBaseDamagePatch),
-        typeof(TreeBaseRpcDamagePatch)
+        typeof(TreeBaseRpcDamagePatch),
+        typeof(FeastRpcTryEatPatch),
+        typeof(PlayerUseHotbarItemPatch),
+        typeof(HumanoidUseItemPatch),
+        typeof(HumanoidUpdateEquipmentPatch),
+        typeof(HumanoidEquipItemPatch),
+        typeof(HumanoidStartAttackPatch),
+        typeof(AttackStartBlockedItemTargetPatch),
+        typeof(InventoryGuiOnRightClickItemPatch)
     };
 
     internal static void ApplyAll(Harmony harmony)
     {
         var failedRequiredPatches = new List<string>();
         var patchTypes = GetHarmonyPatchTypes(Assembly.GetExecutingAssembly());
+        ValidateRequiredPatchDiscovery(patchTypes, failedRequiredPatches);
         for (var index = 0; index < patchTypes.Count; index++)
         {
             ApplyPatch(harmony, patchTypes[index], failedRequiredPatches);
@@ -55,6 +81,21 @@ internal static class WardPatchRegistry
         var message = $"Failed to apply required patches: {string.Join(", ", failedRequiredPatches)}";
         Plugin.Log.LogError(message);
         throw new InvalidOperationException(message);
+    }
+
+    private static void ValidateRequiredPatchDiscovery(IReadOnlyList<Type> patchTypes, ICollection<string> failedRequiredPatches)
+    {
+        var discoveredPatchTypes = new HashSet<Type>(patchTypes);
+        foreach (var requiredPatchType in RequiredPatchTypes)
+        {
+            if (discoveredPatchTypes.Contains(requiredPatchType))
+            {
+                continue;
+            }
+
+            failedRequiredPatches.Add($"{requiredPatchType.Name} (not discovered)");
+            Plugin.Log.LogError($"Required patch {requiredPatchType.Name} was not discovered. Check its HarmonyPatch attribute.");
+        }
     }
 
     private static void ApplyPatch(Harmony harmony, Type patchType, ICollection<string> failedRequiredPatches)

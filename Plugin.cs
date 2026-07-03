@@ -8,13 +8,18 @@ using UnityEngine;
 
 namespace STUWard;
 
+internal sealed class ConfigurationManagerAttributes
+{
+    public int? Order;
+}
+
 [BepInPlugin(ModGuid, ModName, ModVersion)]
 [BepInDependency("com.jotunn.jotunn")]
 [BepInDependency("org.bepinex.plugins.guilds", BepInDependency.DependencyFlags.SoftDependency)]
 public sealed class Plugin : BaseUnityPlugin
 {
     internal const string ModName = "STUWard";
-    internal const string ModVersion = "1.2.0";
+    internal const string ModVersion = "1.2.1";
     internal const string Author = "sighsorry";
     internal const string ModGuid = $"{Author}.{ModName}";
 
@@ -36,9 +41,15 @@ public sealed class Plugin : BaseUnityPlugin
     internal static ConfigEntry<float> MaxWardRadius = null!;
     internal static ConfigEntry<PickupBlockRule> PickupBlockMode = null!;
     internal static ConfigEntry<HostileCreatureStructureProtectionMode> HostileCreatureStructureProtection = null!;
-    internal static ConfigEntry<float> UnattendedWardTrustedPlayerRangeBuffer = null!;
-    internal static ConfigEntry<float> UnattendedWardTrustedPresenceGraceSeconds = null!;
-    internal static ConfigEntry<float> UnattendedWardPresenceRefreshInterval = null!;
+    internal static ConfigEntry<RestrictionServerMode> DoorsRestriction = null!;
+    internal static ConfigEntry<RestrictionServerMode> PortalsRestriction = null!;
+    internal static ConfigEntry<RestrictionServerMode> PickupRestriction = null!;
+    internal static ConfigEntry<RestrictionServerMode> PlacedConsumablesRestriction = null!;
+    internal static ConfigEntry<RestrictionServerMode> ItemStandsRestriction = null!;
+    internal static ConfigEntry<RestrictionServerMode> ArmorStandsRestriction = null!;
+    internal static ConfigEntry<RestrictionServerMode> ContainersRestriction = null!;
+    internal static ConfigEntry<RestrictionServerMode> CraftingStationsRestriction = null!;
+    internal static ConfigEntry<RestrictionServerMode> TameablesAndSaddlesRestriction = null!;
     internal static ConfigEntry<Toggle> DisableVanillaGuardStoneRecipe = null!;
     internal static ConfigEntry<string> StuWardRecipe = null!;
     internal static ConfigEntry<KeyboardShortcut> WardSettingsShortcut = null!;
@@ -63,6 +74,12 @@ public sealed class Plugin : BaseUnityPlugin
         Off = 0,
         UnattendedOnly = 1,
         Always = 2
+    }
+
+    internal enum RestrictionServerMode
+    {
+        NotForced = 0,
+        ForcedOn = 1
     }
 
     internal enum DiagnosticLogMode
@@ -192,9 +209,15 @@ public sealed class Plugin : BaseUnityPlugin
         };
     }
 
-    internal static ConfigEntry<T> BindConfigEntry<T>(string group, string name, T value, string description, bool synchronizedSetting = true)
+    internal static ConfigEntry<T> BindConfigEntry<T>(
+        string group,
+        string name,
+        T value,
+        string description,
+        bool synchronizedSetting = true,
+        int? configManagerOrder = null)
     {
-        return Instance.BindConfig(group, name, value, description, synchronizedSetting);
+        return Instance.BindConfig(group, name, value, description, synchronizedSetting, configManagerOrder);
     }
 
     internal static bool ShouldLogWardDiagnosticFailures()
@@ -239,13 +262,22 @@ public sealed class Plugin : BaseUnityPlugin
         return guiRoot.AddComponent<WardGuiController>();
     }
 
-    private ConfigEntry<T> BindConfig<T>(string group, string name, T value, string description, bool synchronizedSetting = true)
+    private ConfigEntry<T> BindConfig<T>(
+        string group,
+        string name,
+        T value,
+        string description,
+        bool synchronizedSetting = true,
+        int? configManagerOrder = null)
     {
         var syncDescription = synchronizedSetting ? "Synced with server." : "Not synced with server.";
         var combinedDescription = string.IsNullOrWhiteSpace(description)
             ? syncDescription
             : $"{description.TrimEnd()} {syncDescription}";
-        var configEntry = Config.Bind(group, name, value, new ConfigDescription(combinedDescription));
+        var configDescription = configManagerOrder.HasValue
+            ? new ConfigDescription(combinedDescription, null, new ConfigurationManagerAttributes { Order = configManagerOrder.Value })
+            : new ConfigDescription(combinedDescription);
+        var configEntry = Config.Bind(group, name, value, configDescription);
         if (synchronizedSetting)
         {
             var syncedConfigEntry = ConfigSync.AddConfigEntry(configEntry);

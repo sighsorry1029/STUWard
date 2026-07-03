@@ -1,6 +1,6 @@
 {
   "name": "STU_Ward",
-  "version_number": "1.2.0",
+  "version_number": "1.2.1",
   "website_url": "https://discord.gg/jkcJCq2sK5",
   "description": "Simple Tidy and Unique Ward to protect your base from other players without pushing them out. Auto closing doors within ward area. Best to use with Guild mod.",
   "dependencies": [

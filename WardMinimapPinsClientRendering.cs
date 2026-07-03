@@ -77,8 +77,11 @@ internal static partial class WardMinimapPinsManager
 
         RemoveMissingPins(minimap, IconPins, seenWardIds);
         RemoveMissingPins(minimap, ActiveRangePins, seenWardIds);
-        LogApplySummary(
-            $"snapshotCount={LocalSnapshot.Count}, enabledWardCount={enabledWardCount}, iconPins={IconPins.Count}, rangePins={ActiveRangePins.Count}, showIconPins={showIconPins}, showActiveRanges={showActiveRanges}, iconResolved={wardIcon != null}, iconPinTypeVisible={FormatNullableBool(iconPinTypeVisible)}, rangePinTypeVisible={FormatNullableBool(rangePinTypeVisible)}");
+        if (Plugin.ShouldLogWardDiagnosticVerbose())
+        {
+            LogApplySummary(
+                $"snapshotCount={LocalSnapshot.Count}, enabledWardCount={enabledWardCount}, iconPins={IconPins.Count}, rangePins={ActiveRangePins.Count}, showIconPins={showIconPins}, showActiveRanges={showActiveRanges}, iconResolved={wardIcon != null}, iconPinTypeVisible={FormatNullableBool(iconPinTypeVisible)}, rangePinTypeVisible={FormatNullableBool(rangePinTypeVisible)}");
+        }
     }
 
     private static void UpsertIconPin(Minimap minimap, WardMinimapSnapshotEntry entry, Sprite? wardIcon)
@@ -303,7 +306,10 @@ internal static partial class WardMinimapPinsManager
 
         _pendingForceRefresh = true;
         _lastPendingRefreshReason = reason;
-        Plugin.LogWardDiagnosticVerbose("WardPins.State", $"Queued ward minimap rescan for next large map open. reason='{reason}'");
+        if (Plugin.ShouldLogWardDiagnosticVerbose())
+        {
+            Plugin.LogWardDiagnosticVerbose("WardPins.State", $"Queued ward minimap rescan for next large map open. reason='{reason}'");
+        }
     }
 
     private static void QueueRemoteSnapshotBootstrapRequest(string reason)
@@ -329,6 +335,11 @@ internal static partial class WardMinimapPinsManager
 
     private static void LogDisplayDecision(Player player, Minimap? minimap, bool canSeeAllWards, bool shouldDisplay, string reason)
     {
+        if (!Plugin.ShouldLogWardDiagnosticVerbose())
+        {
+            return;
+        }
+
         var decision =
             $"shouldDisplay={shouldDisplay}, reason={reason}, playerId={player.GetPlayerID()}, canSeeAllWards={canSeeAllWards}, noMap={Game.m_noMap}, pinScale={Plugin.WardMinimapPinScale?.Value}, rangesConfig={Plugin.WardMinimapActiveRanges?.Value}, hasMinimap={minimap != null}, hasZNet={ZNet.instance != null}, hasZdoMan={ZDOMan.instance != null}";
         if (decision == _lastDisplayDecision)
@@ -342,6 +353,11 @@ internal static partial class WardMinimapPinsManager
 
     private static void LogApplySummary(string summary)
     {
+        if (!Plugin.ShouldLogWardDiagnosticVerbose())
+        {
+            return;
+        }
+
         if (summary == _lastApplySummary)
         {
             return;
@@ -353,6 +369,11 @@ internal static partial class WardMinimapPinsManager
 
     private static void LogScanSummary(string summary)
     {
+        if (!Plugin.ShouldLogWardDiagnosticVerbose())
+        {
+            return;
+        }
+
         if (summary == _lastScanSummary)
         {
             return;

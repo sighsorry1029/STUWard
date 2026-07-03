@@ -6,6 +6,9 @@ namespace STUWard;
 internal static class ManagedWardPresenceService
 {
     private const float TrustedPresenceSweepActiveDurationSeconds = 15f;
+    private const float TrustedPlayerRangeBuffer = 8f;
+    private const float TrustedPresenceGraceSeconds = 10f;
+    private const float PresenceRefreshIntervalSeconds = 1f;
 
     private static readonly List<PrivateArea> TrustedPresenceCandidateBuffer = new();
     private static readonly List<PrivateArea> TrustedPresenceCoverageBuffer = new();
@@ -69,8 +72,7 @@ internal static class ManagedWardPresenceService
         }
 
         SweepTrustedPlayerPresence(now);
-        var refreshInterval = Mathf.Max(0.1f, Plugin.UnattendedWardPresenceRefreshInterval?.Value ?? 0.5f);
-        _nextTrustedPresenceSweepTime = now + refreshInterval;
+        _nextTrustedPresenceSweepTime = now + PresenceRefreshIntervalSeconds;
     }
 
     internal static bool ShouldBlockHostileCreatureDamageToBuilding(Vector3 point)
@@ -86,7 +88,6 @@ internal static class ManagedWardPresenceService
     private static bool ShouldBlockUnattendedHostileCreatureDamageToBuilding(Vector3 point)
     {
         var now = Time.time;
-        var graceSeconds = Mathf.Max(0f, Plugin.UnattendedWardTrustedPresenceGraceSeconds?.Value ?? 0f);
         WardAccess.FillCandidateManagedWards(point, 0f, requireEnabled: true, TrustedPresenceCandidateBuffer);
         if (TrustedPresenceCandidateBuffer.Count == 0)
         {
@@ -110,11 +111,11 @@ internal static class ManagedWardPresenceService
             return false;
         }
 
-        EnsureTrustedPlayerPresenceSweepActivity(now, TrustedPresenceCoverageBuffer, graceSeconds);
+        EnsureTrustedPlayerPresenceSweepActivity(now, TrustedPresenceCoverageBuffer, TrustedPresenceGraceSeconds);
         for (var index = 0; index < TrustedPresenceCoverageBuffer.Count; index++)
         {
             var area = TrustedPresenceCoverageBuffer[index];
-            if (!IsWardConsideredAttended(area, now, graceSeconds))
+            if (!IsWardConsideredAttended(area, now, TrustedPresenceGraceSeconds))
             {
                 return true;
             }
@@ -155,12 +156,11 @@ internal static class ManagedWardPresenceService
         IReadOnlyList<PrivateArea> coveringAreas,
         float graceSeconds)
     {
-        var refreshInterval = Mathf.Max(0.1f, Plugin.UnattendedWardPresenceRefreshInterval?.Value ?? 0.5f);
         var isCurrentlyActive = _trustedPresenceSweepWasActive && now <= _trustedPresenceSweepActiveUntilTime;
         if (!isCurrentlyActive || HasUnattendedPresenceState(coveringAreas, now, graceSeconds))
         {
             RefreshTrustedPlayerPresenceForAreas(now, coveringAreas);
-            _nextTrustedPresenceSweepTime = now + refreshInterval;
+            _nextTrustedPresenceSweepTime = now + PresenceRefreshIntervalSeconds;
         }
 
         _trustedPresenceSweepWasActive = true;
@@ -175,8 +175,7 @@ internal static class ManagedWardPresenceService
             return;
         }
 
-        var rangeBuffer = Mathf.Max(0f, Plugin.UnattendedWardTrustedPlayerRangeBuffer?.Value ?? 0f);
-        var candidateQueryRadius = Mathf.Max(0f, WardSettings.MaxRadius + rangeBuffer);
+        var candidateQueryRadius = Mathf.Max(0f, WardSettings.MaxRadius + TrustedPlayerRangeBuffer);
         for (var index = 0; index < players.Count; index++)
         {
             var player = players[index];
@@ -201,7 +200,7 @@ internal static class ManagedWardPresenceService
             for (var areaIndex = 0; areaIndex < TrustedPresenceCandidateBuffer.Count; areaIndex++)
             {
                 var area = TrustedPresenceCandidateBuffer[areaIndex];
-                if (area == null || !area.IsInside(playerPosition, rangeBuffer))
+                if (area == null || !area.IsInside(playerPosition, TrustedPlayerRangeBuffer))
                 {
                     continue;
                 }
@@ -229,7 +228,6 @@ internal static class ManagedWardPresenceService
             return;
         }
 
-        var rangeBuffer = Mathf.Max(0f, Plugin.UnattendedWardTrustedPlayerRangeBuffer?.Value ?? 0f);
         for (var playerIndex = 0; playerIndex < players.Count; playerIndex++)
         {
             var player = players[playerIndex];
@@ -249,7 +247,7 @@ internal static class ManagedWardPresenceService
             for (var areaIndex = 0; areaIndex < areas.Count; areaIndex++)
             {
                 var area = areas[areaIndex];
-                if (area == null || !area.IsInside(playerPosition, rangeBuffer))
+                if (area == null || !area.IsInside(playerPosition, TrustedPlayerRangeBuffer))
                 {
                     continue;
                 }

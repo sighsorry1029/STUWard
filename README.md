@@ -121,3 +121,6 @@ Players normally see wards they are allowed to see. Admin debug control can show
 - A ward's guild identity is stored on the ward when metadata is captured.
 - Changing guild later does not automatically rewrite old wards.
 - To move a ward to a different shared group, remove it and place a new one.
+
+## Github
+https://github.com/sighsorry1029/STUWard

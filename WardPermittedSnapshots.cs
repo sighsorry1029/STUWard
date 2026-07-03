@@ -414,9 +414,7 @@ internal static class PrivateAreaAddPermittedSnapshotPatch
         }
 
         WardPermittedSnapshots.Capture(__instance, playerID);
-        ManagedWardRuntimeInvalidationService.PublishWardPermissionsChanged(
-            ward,
-            "ward permitted player added");
+        ManagedWardPresenceService.Invalidate();
         ManagedWardMapStateService.NotifyLiveWardMutation(
             __instance,
             ManagedWardMapMutationKind.IndexAndPins,
@@ -437,9 +435,7 @@ internal static class PrivateAreaRemovePermittedSnapshotPatch
         }
 
         WardPermittedSnapshots.Remove(__instance, playerID);
-        ManagedWardRuntimeInvalidationService.PublishWardPermissionsChanged(
-            ward,
-            "ward permitted player removed");
+        ManagedWardPresenceService.Invalidate();
         ManagedWardMapStateService.NotifyLiveWardMutation(
             __instance,
             ManagedWardMapMutationKind.IndexAndPins,

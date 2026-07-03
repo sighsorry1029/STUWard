@@ -4,6 +4,53 @@ using UnityEngine;
 
 namespace STUWard;
 
+[Flags]
+internal enum WardRestrictionOptions
+{
+    None = 0,
+    Doors = 1 << 0,
+    Portals = 1 << 1,
+    Pickup = 1 << 2,
+    PlacedConsumables = 1 << 3,
+    ItemStands = 1 << 4,
+    ArmorStands = 1 << 5,
+    Containers = 1 << 6,
+    CraftingStations = 1 << 7,
+    TameablesAndSaddles = 1 << 8,
+    All = Doors |
+          Portals |
+          Pickup |
+          PlacedConsumables |
+          ItemStands |
+          ArmorStands |
+          Containers |
+          CraftingStations |
+          TameablesAndSaddles
+}
+
+internal readonly struct WardRestrictionDefinition
+{
+    internal WardRestrictionDefinition(
+        WardRestrictionOptions restriction,
+        string configName,
+        string configDescription,
+        string localizationToken,
+        string localizationFallback)
+    {
+        Restriction = restriction;
+        ConfigName = configName;
+        ConfigDescription = configDescription;
+        LocalizationToken = localizationToken;
+        LocalizationFallback = localizationFallback;
+    }
+
+    internal WardRestrictionOptions Restriction { get; }
+    internal string ConfigName { get; }
+    internal string ConfigDescription { get; }
+    internal string LocalizationToken { get; }
+    internal string LocalizationFallback { get; }
+}
+
 internal readonly struct WardConfiguration
 {
     internal WardConfiguration(
@@ -13,7 +60,8 @@ internal readonly struct WardConfiguration
         float radius,
         float autoCloseDelay,
         bool warningSoundEnabled,
-        bool warningFlashEnabled)
+        bool warningFlashEnabled,
+        WardRestrictionOptions restrictions = WardRestrictionOptions.All)
     {
         ShowAreaMarker = showAreaMarker;
         AreaMarkerSpeedMultiplier = areaMarkerSpeedMultiplier;
@@ -22,6 +70,7 @@ internal readonly struct WardConfiguration
         AutoCloseDelay = autoCloseDelay;
         WarningSoundEnabled = warningSoundEnabled;
         WarningFlashEnabled = warningFlashEnabled;
+        Restrictions = restrictions;
     }
 
     internal bool ShowAreaMarker { get; }
@@ -31,20 +80,27 @@ internal readonly struct WardConfiguration
     internal float AutoCloseDelay { get; }
     internal bool WarningSoundEnabled { get; }
     internal bool WarningFlashEnabled { get; }
+    internal WardRestrictionOptions Restrictions { get; }
     internal bool AutoCloseDoors => AutoCloseDelay > 0f;
 }
 
 internal readonly struct CachedWardConfiguration
 {
-    internal CachedWardConfiguration(uint dataRevision, float maxRadius, WardConfiguration configuration)
+    internal CachedWardConfiguration(
+        uint dataRevision,
+        float maxRadius,
+        WardRestrictionOptions forcedRestrictions,
+        WardConfiguration configuration)
     {
         DataRevision = dataRevision;
         MaxRadius = maxRadius;
+        ForcedRestrictions = forcedRestrictions;
         Configuration = configuration;
     }
 
     internal uint DataRevision { get; }
     internal float MaxRadius { get; }
+    internal WardRestrictionOptions ForcedRestrictions { get; }
     internal WardConfiguration Configuration { get; }
 }
 
@@ -160,6 +216,7 @@ internal static class WardSettings
     private const string AutoCloseDelayKey = "stuw_auto_close_delay";
     private const string WarningSoundEnabledKey = "stuw_warning_sound_enabled";
     private const string WarningFlashEnabledKey = "stuw_warning_flash_enabled";
+    private const string RestrictionOptionsKey = "stuw_restriction_options";
     private const float FallbackAreaMarkerSpeed = 0.1f;
     private const float MinimumAreaMarkerBrightness = 0.35f;
     private const float AreaMarkerBrightnessGamma = 1.8f;
@@ -167,11 +224,200 @@ internal static class WardSettings
     private static readonly string[] AreaMarkerColorProperties = { "_Color", "_BaseColor", "_TintColor" };
 
     private static readonly MaterialPropertyBlock AreaMarkerPropertyBlock = new();
+    private static readonly WardRestrictionDefinition[] RestrictionDefinitionValues =
+    {
+        new(
+            WardRestrictionOptions.Doors,
+            "Doors",
+            "Controls whether door interaction is always blocked by foreign enabled wards or can be turned off per ward.",
+            WardLocalization.UiRestrictionDoorsToken,
+            WardLocalization.UiRestrictionDoorsFallback),
+        new(
+            WardRestrictionOptions.Portals,
+            "Portals",
+            "Controls whether portal entry and TargetPortal routing are always blocked by foreign enabled wards or can be turned off per ward.",
+            WardLocalization.UiRestrictionPortalsToken,
+            WardLocalization.UiRestrictionPortalsFallback),
+        new(
+            WardRestrictionOptions.Pickup,
+            "Pickup",
+            "Controls whether normal item pickup is always blocked by foreign enabled wards or can be turned off per ward.",
+            WardLocalization.UiRestrictionPickupToken,
+            WardLocalization.UiRestrictionPickupFallback),
+        new(
+            WardRestrictionOptions.PlacedConsumables,
+            "Placed Consumables",
+            "Controls whether eating hammer-placed consumables and feasts is always blocked by foreign enabled wards or can be turned off per ward.",
+            WardLocalization.UiRestrictionPlacedConsumablesToken,
+            WardLocalization.UiRestrictionPlacedConsumablesFallback),
+        new(
+            WardRestrictionOptions.ItemStands,
+            "Item Stands",
+            "Controls whether item stand interaction is always blocked by foreign enabled wards or can be turned off per ward.",
+            WardLocalization.UiRestrictionItemStandsToken,
+            WardLocalization.UiRestrictionItemStandsFallback),
+        new(
+            WardRestrictionOptions.ArmorStands,
+            "Armor Stands",
+            "Controls whether armor stand item placement is always blocked by foreign enabled wards or can be turned off per ward.",
+            WardLocalization.UiRestrictionArmorStandsToken,
+            WardLocalization.UiRestrictionArmorStandsFallback),
+        new(
+            WardRestrictionOptions.Containers,
+            "Containers",
+            "Controls whether container interaction and remote container access are always blocked by foreign enabled wards or can be turned off per ward.",
+            WardLocalization.UiRestrictionContainersToken,
+            WardLocalization.UiRestrictionContainersFallback),
+        new(
+            WardRestrictionOptions.CraftingStations,
+            "Crafting Stations",
+            "Controls whether crafting station interaction is always blocked by foreign enabled wards or can be turned off per ward.",
+            WardLocalization.UiRestrictionCraftingStationsToken,
+            WardLocalization.UiRestrictionCraftingStationsFallback),
+        new(
+            WardRestrictionOptions.TameablesAndSaddles,
+            "Tameables And Saddles",
+            "Controls whether tameable and saddle interaction is always blocked by foreign enabled wards or can be turned off per ward.",
+            WardLocalization.UiRestrictionTameablesAndSaddlesToken,
+            WardLocalization.UiRestrictionTameablesAndSaddlesFallback)
+    };
+
     private static long _nextConfigurationRequestId = 1L;
+    internal static IReadOnlyList<WardRestrictionDefinition> RestrictionDefinitions => RestrictionDefinitionValues;
+
     internal static float MaxRadius => Mathf.Clamp(
         Plugin.MaxWardRadius?.Value ?? DefaultMaxRadius,
         MinRadius,
         MaxRadiusLimit);
+
+    internal static WardRestrictionOptions ForcedRestrictions
+    {
+        get
+        {
+            var restrictions = WardRestrictionOptions.None;
+            for (var index = 0; index < RestrictionDefinitionValues.Length; index++)
+            {
+                var definition = RestrictionDefinitionValues[index];
+                AddForcedRestriction(
+                    ref restrictions,
+                    definition.Restriction,
+                    GetRestrictionConfigEntry(definition.Restriction));
+            }
+
+            return restrictions;
+        }
+    }
+
+    internal static bool IsRestrictionForced(WardRestrictionOptions restriction)
+    {
+        return (ForcedRestrictions & restriction) != WardRestrictionOptions.None;
+    }
+
+    internal static bool HasRestriction(WardConfiguration configuration, WardRestrictionOptions restriction)
+    {
+        return (configuration.Restrictions & restriction) != WardRestrictionOptions.None;
+    }
+
+    internal static WardConfiguration WithRestriction(WardConfiguration configuration, WardRestrictionOptions restriction, bool enabled)
+    {
+        var restrictions = enabled
+            ? configuration.Restrictions | restriction
+            : configuration.Restrictions & ~restriction;
+        return WithRestrictions(configuration, restrictions);
+    }
+
+    internal static WardConfiguration WithAreaMarkerSpeedMultiplier(WardConfiguration configuration, float value)
+    {
+        return new WardConfiguration(
+            configuration.ShowAreaMarker,
+            Mathf.Clamp(value, MinAreaMarkerSpeedMultiplier, MaxAreaMarkerSpeedMultiplier),
+            configuration.AreaMarkerAlpha,
+            configuration.Radius,
+            configuration.AutoCloseDelay,
+            configuration.WarningSoundEnabled,
+            configuration.WarningFlashEnabled,
+            configuration.Restrictions);
+    }
+
+    internal static WardConfiguration WithAreaMarkerAlpha(WardConfiguration configuration, float value)
+    {
+        return new WardConfiguration(
+            configuration.ShowAreaMarker,
+            configuration.AreaMarkerSpeedMultiplier,
+            Mathf.Clamp(value, MinAreaMarkerAlpha, MaxAreaMarkerAlpha),
+            configuration.Radius,
+            configuration.AutoCloseDelay,
+            configuration.WarningSoundEnabled,
+            configuration.WarningFlashEnabled,
+            configuration.Restrictions);
+    }
+
+    internal static WardConfiguration WithRadius(WardConfiguration configuration, float value)
+    {
+        return new WardConfiguration(
+            configuration.ShowAreaMarker,
+            configuration.AreaMarkerSpeedMultiplier,
+            configuration.AreaMarkerAlpha,
+            Mathf.Clamp(value, MinRadius, MaxRadius),
+            configuration.AutoCloseDelay,
+            configuration.WarningSoundEnabled,
+            configuration.WarningFlashEnabled,
+            configuration.Restrictions);
+    }
+
+    internal static WardConfiguration WithAutoCloseDelay(WardConfiguration configuration, float value)
+    {
+        return new WardConfiguration(
+            configuration.ShowAreaMarker,
+            configuration.AreaMarkerSpeedMultiplier,
+            configuration.AreaMarkerAlpha,
+            configuration.Radius,
+            Mathf.Clamp(value, MinAutoCloseDelay, MaxAutoCloseDelay),
+            configuration.WarningSoundEnabled,
+            configuration.WarningFlashEnabled,
+            configuration.Restrictions);
+    }
+
+    internal static WardConfiguration WithRestrictions(WardConfiguration configuration, WardRestrictionOptions restrictions)
+    {
+        return new WardConfiguration(
+            configuration.ShowAreaMarker,
+            configuration.AreaMarkerSpeedMultiplier,
+            configuration.AreaMarkerAlpha,
+            configuration.Radius,
+            configuration.AutoCloseDelay,
+            configuration.WarningSoundEnabled,
+            configuration.WarningFlashEnabled,
+            NormalizeRestrictions(restrictions));
+    }
+
+    private static void AddForcedRestriction(
+        ref WardRestrictionOptions restrictions,
+        WardRestrictionOptions restriction,
+        BepInEx.Configuration.ConfigEntry<Plugin.RestrictionServerMode>? config)
+    {
+        if (config != null && config.Value == Plugin.RestrictionServerMode.ForcedOn)
+        {
+            restrictions |= restriction;
+        }
+    }
+
+    private static BepInEx.Configuration.ConfigEntry<Plugin.RestrictionServerMode>? GetRestrictionConfigEntry(WardRestrictionOptions restriction)
+    {
+        return restriction switch
+        {
+            WardRestrictionOptions.Doors => Plugin.DoorsRestriction,
+            WardRestrictionOptions.Portals => Plugin.PortalsRestriction,
+            WardRestrictionOptions.Pickup => Plugin.PickupRestriction,
+            WardRestrictionOptions.PlacedConsumables => Plugin.PlacedConsumablesRestriction,
+            WardRestrictionOptions.ItemStands => Plugin.ItemStandsRestriction,
+            WardRestrictionOptions.ArmorStands => Plugin.ArmorStandsRestriction,
+            WardRestrictionOptions.Containers => Plugin.ContainersRestriction,
+            WardRestrictionOptions.CraftingStations => Plugin.CraftingStationsRestriction,
+            WardRestrictionOptions.TameablesAndSaddles => Plugin.TameablesAndSaddlesRestriction,
+            _ => null
+        };
+    }
 
     internal static void CaptureAreaDefaults(PrivateArea area)
     {
@@ -220,6 +466,7 @@ internal static class WardSettings
         InitializeArea(area);
         var zdo = GetZdo(area);
         var maxRadius = MaxRadius;
+        var forcedRestrictions = ForcedRestrictions;
         if (zdo != null)
         {
             var revision = zdo.DataRevision;
@@ -228,7 +475,8 @@ internal static class WardSettings
             {
                 var cachedConfiguration = context.CachedConfiguration;
                 if (cachedConfiguration.DataRevision == revision &&
-                    Mathf.Approximately(cachedConfiguration.MaxRadius, maxRadius))
+                    Mathf.Approximately(cachedConfiguration.MaxRadius, maxRadius) &&
+                    cachedConfiguration.ForcedRestrictions == forcedRestrictions)
                 {
                     return cachedConfiguration.Configuration;
                 }
@@ -249,6 +497,9 @@ internal static class WardSettings
             MaxAutoCloseDelay);
         var warningSoundEnabled = zdo?.GetBool(WarningSoundEnabledKey, DefaultWarningSoundEnabled) ?? DefaultWarningSoundEnabled;
         var warningFlashEnabled = zdo?.GetBool(WarningFlashEnabledKey, DefaultWarningFlashEnabled) ?? DefaultWarningFlashEnabled;
+        var restrictions = ApplyForcedRestrictions(
+            NormalizeRestrictions((WardRestrictionOptions)(zdo?.GetInt(RestrictionOptionsKey, (int)WardRestrictionOptions.All) ?? (int)WardRestrictionOptions.All)),
+            forcedRestrictions);
 
         var configuration = new WardConfiguration(
             showAreaMarker,
@@ -257,11 +508,12 @@ internal static class WardSettings
             radius,
             autoCloseDelay,
             warningSoundEnabled,
-            warningFlashEnabled);
+            warningFlashEnabled,
+            restrictions);
         if (zdo != null)
         {
             var context = ManagedWardRuntimeContexts.GetOrCreate(area);
-            context.CachedConfiguration = new CachedWardConfiguration(zdo.DataRevision, maxRadius, configuration);
+            context.CachedConfiguration = new CachedWardConfiguration(zdo.DataRevision, maxRadius, forcedRestrictions, configuration);
             context.HasCachedConfiguration = true;
         }
 
@@ -338,9 +590,8 @@ internal static class WardSettings
 
         if (radiusChanged)
         {
-            ManagedWardRuntimeInvalidationService.PublishWardRadiusChanged(
-                ward,
-                "managed ward radius changed");
+            ManagedWardPresenceService.Invalidate();
+            ManagedWardPlacementPreviewService.Invalidate();
             WardAccess.RefreshManagedWardSpatialIndexEntry(ward);
         }
     }
@@ -576,7 +827,8 @@ internal static class WardSettings
             configuration.Radius,
             configuration.AutoCloseDelay,
             enabled,
-            configuration.WarningFlashEnabled);
+            configuration.WarningFlashEnabled,
+            configuration.Restrictions);
     }
 
     internal static WardConfiguration WithWarningFlashEnabled(WardConfiguration configuration, bool enabled)
@@ -588,7 +840,8 @@ internal static class WardSettings
             configuration.Radius,
             configuration.AutoCloseDelay,
             configuration.WarningSoundEnabled,
-            enabled);
+            enabled,
+            configuration.Restrictions);
     }
 
     internal static float GetMaxNonOverlappingRadius(PrivateArea area)
@@ -830,6 +1083,7 @@ internal static class WardSettings
         float autoCloseDelay,
         bool warningSoundEnabled,
         bool warningFlashEnabled,
+        WardRestrictionOptions restrictions,
         out WardConfiguration configuration)
     {
         configuration = default;
@@ -848,7 +1102,8 @@ internal static class WardSettings
             Mathf.Clamp(radius, MinRadius, MaxRadius),
             Mathf.Clamp(autoCloseDelay, MinAutoCloseDelay, MaxAutoCloseDelay),
             warningSoundEnabled,
-            warningFlashEnabled);
+            warningFlashEnabled,
+            NormalizeRestrictions(restrictions));
         return true;
     }
 
@@ -861,6 +1116,7 @@ internal static class WardSettings
         pkg.Write(configuration.AutoCloseDelay);
         pkg.Write(configuration.WarningSoundEnabled);
         pkg.Write(configuration.WarningFlashEnabled);
+        pkg.Write((int)configuration.Restrictions);
     }
 
     private static void SaveConfiguration(PrivateArea area, WardConfiguration currentConfiguration, WardConfiguration configuration)
@@ -911,8 +1167,13 @@ internal static class WardSettings
             zdo.Set(WarningFlashEnabledKey, configuration.WarningFlashEnabled);
         }
 
+        if (currentConfiguration.Restrictions != configuration.Restrictions)
+        {
+            zdo.Set(RestrictionOptionsKey, (int)configuration.Restrictions);
+        }
+
         var context = ManagedWardRuntimeContexts.GetOrCreate(area);
-        context.CachedConfiguration = new CachedWardConfiguration(zdo.DataRevision, MaxRadius, configuration);
+        context.CachedConfiguration = new CachedWardConfiguration(zdo.DataRevision, MaxRadius, ForcedRestrictions, configuration);
         context.HasCachedConfiguration = true;
     }
 
@@ -962,7 +1223,8 @@ internal static class WardSettings
             clampedRadius,
             configuration.AutoCloseDelay,
             configuration.WarningSoundEnabled,
-            configuration.WarningFlashEnabled);
+            configuration.WarningFlashEnabled,
+            ApplyForcedRestrictions(configuration.Restrictions));
     }
 
     private static void ApplyAreaMarkerVisuals(CircleProjector marker, WardConfiguration configuration)
@@ -1261,6 +1523,7 @@ internal static class WardSettings
             var autoCloseDelay = pkg.ReadSingle();
             var warningSoundEnabled = pkg.ReadBool();
             var warningFlashEnabled = pkg.ReadBool();
+            var restrictions = (WardRestrictionOptions)pkg.ReadInt();
             return TryCreateConfiguration(
                 showAreaMarker,
                 areaMarkerSpeedMultiplier,
@@ -1269,6 +1532,7 @@ internal static class WardSettings
                 autoCloseDelay,
                 warningSoundEnabled,
                 warningFlashEnabled,
+                restrictions,
                 out configuration);
         }
         catch
@@ -1302,7 +1566,25 @@ internal static class WardSettings
                Mathf.Approximately(left.Radius, right.Radius) &&
                Mathf.Approximately(left.AutoCloseDelay, right.AutoCloseDelay) &&
                left.WarningSoundEnabled == right.WarningSoundEnabled &&
-               left.WarningFlashEnabled == right.WarningFlashEnabled;
+               left.WarningFlashEnabled == right.WarningFlashEnabled &&
+               left.Restrictions == right.Restrictions;
+    }
+
+    private static WardRestrictionOptions ApplyForcedRestrictions(WardRestrictionOptions restrictions)
+    {
+        return ApplyForcedRestrictions(restrictions, ForcedRestrictions);
+    }
+
+    private static WardRestrictionOptions ApplyForcedRestrictions(
+        WardRestrictionOptions restrictions,
+        WardRestrictionOptions forcedRestrictions)
+    {
+        return NormalizeRestrictions(restrictions) | forcedRestrictions;
+    }
+
+    private static WardRestrictionOptions NormalizeRestrictions(WardRestrictionOptions restrictions)
+    {
+        return restrictions & WardRestrictionOptions.All;
     }
 
     private static ZNetView? GetNView(PrivateArea area)

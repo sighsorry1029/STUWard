@@ -69,6 +69,12 @@ internal static class WardAccess
     private static readonly ManagedWardIndex AllWardIndex = new(area => IsTrackableManagedWard(area, requireEnabled: false));
     private static readonly ManagedWardIndex EnabledWardIndex = new(area => IsTrackableManagedWard(area, requireEnabled: true));
     private static readonly List<PrivateArea> SpatialQueryBuffer = new();
+    [ThreadStatic]
+    private static int _restrictionScopeDepth;
+    [ThreadStatic]
+    private static WardRestrictionOptions _restrictionScope;
+    [ThreadStatic]
+    private static int _managedWardAllowScopeDepth;
     private static bool _wardCacheInitialized;
     private static bool _managedWardSpatialIndexRequiresFullRebuild = true;
     private static float _managedWardSpatialIndexMaxRadius = -1f;
@@ -91,6 +97,79 @@ internal static class WardAccess
         internal AccessDecision Decision { get; }
         internal bool IsDenied => Decision == AccessDecision.Denied;
         internal bool IsCoveredAndAllowed => Decision == AccessDecision.Allowed;
+    }
+
+    internal readonly struct RestrictionScope : IDisposable
+    {
+        private readonly bool _active;
+        private readonly WardRestrictionOptions _previousRestriction;
+
+        internal RestrictionScope(WardRestrictionOptions restriction)
+        {
+            _active = true;
+            _previousRestriction = _restrictionScope;
+            _restrictionScope = restriction;
+            _restrictionScopeDepth++;
+        }
+
+        public void Dispose()
+        {
+            if (!_active || _restrictionScopeDepth <= 0)
+            {
+                return;
+            }
+
+            _restrictionScopeDepth--;
+            if (_restrictionScopeDepth == 0)
+            {
+                _restrictionScope = WardRestrictionOptions.None;
+                return;
+            }
+
+            _restrictionScope = _previousRestriction;
+        }
+    }
+
+    internal readonly struct ManagedWardAllowScope : IDisposable
+    {
+        private readonly bool _active;
+
+        internal ManagedWardAllowScope(bool active)
+        {
+            _active = active;
+            if (_active)
+            {
+                _managedWardAllowScopeDepth++;
+            }
+        }
+
+        public void Dispose()
+        {
+            if (!_active || _managedWardAllowScopeDepth <= 0)
+            {
+                return;
+            }
+
+            _managedWardAllowScopeDepth--;
+        }
+    }
+
+    internal static RestrictionScope EnterRestrictionScope(WardRestrictionOptions restriction)
+    {
+        return new RestrictionScope(restriction);
+    }
+
+    internal static ManagedWardAllowScope EnterManagedWardAllowScope()
+    {
+        return new ManagedWardAllowScope(active: true);
+    }
+
+    internal static bool IsManagedWardAllowScopeActive => _managedWardAllowScopeDepth > 0;
+
+    internal static bool TryGetRestrictionScope(out WardRestrictionOptions restriction)
+    {
+        restriction = _restrictionScope;
+        return _restrictionScopeDepth > 0 && restriction != WardRestrictionOptions.None;
     }
 
     internal static void RegisterManagedWard(PrivateArea? area)
@@ -151,7 +230,8 @@ internal static class WardAccess
 
         if (enabledMembershipChanged)
         {
-            ManagedWardRuntimeInvalidationService.PublishWardEnabledChanged(ward, "managed ward enabled membership changed");
+            ManagedWardPresenceService.Invalidate();
+            ManagedWardPlacementPreviewService.Invalidate();
         }
     }
 
@@ -189,7 +269,8 @@ internal static class WardAccess
 
         if (enabledMembershipChanged)
         {
-            ManagedWardRuntimeInvalidationService.PublishWardEnabledChanged(ward, "managed ward unregistered");
+            ManagedWardPresenceService.Invalidate();
+            ManagedWardPlacementPreviewService.Invalidate();
         }
     }
 
@@ -201,20 +282,20 @@ internal static class WardAccess
 
     internal static void InvalidateWardPresenceCache()
     {
-        ManagedWardRuntimeInvalidationService.PublishPresencePolicyChanged("ward presence cache invalidated");
+        ManagedWardPresenceService.Invalidate();
     }
 
     internal static void InvalidateManagedWardSpatialIndex()
     {
         if (_managedWardSpatialIndexRequiresFullRebuild)
         {
-            ManagedWardRuntimeInvalidationService.PublishSpatialIndexChanged("managed ward spatial index rebuild already pending");
+            ManagedWardPlacementPreviewService.Invalidate();
             return;
         }
 
         _managedWardSpatialIndexRequiresFullRebuild = true;
         BumpManagedWardSpatialRevision();
-        ManagedWardRuntimeInvalidationService.PublishSpatialIndexChanged("managed ward spatial index invalidated");
+        ManagedWardPlacementPreviewService.Invalidate();
     }
 
     internal static void RefreshManagedWardSpatialIndexEntry(PrivateArea? area)
@@ -240,7 +321,7 @@ internal static class WardAccess
                 BumpManagedWardSpatialRevision();
             }
 
-            ManagedWardRuntimeInvalidationService.PublishSpatialIndexChanged("managed ward spatial index requires rebuild");
+            ManagedWardPlacementPreviewService.Invalidate();
             return;
         }
 
@@ -260,12 +341,12 @@ internal static class WardAccess
         AllWardIndex.Clear();
         EnabledWardIndex.Clear();
         SpatialQueryBuffer.Clear();
-        ManagedWardRuntimeInvalidationService.ResetPresence();
+        ManagedWardPresenceService.ResetRuntimeState();
         _wardCacheInitialized = false;
         _managedWardSpatialIndexRequiresFullRebuild = true;
         _managedWardSpatialIndexMaxRadius = -1f;
         _managedWardSpatialIndexRevision = 0;
-        ManagedWardRuntimeInvalidationService.PublishSpatialIndexChanged("managed ward cache reset");
+        ManagedWardPlacementPreviewService.Invalidate();
     }
 
     internal static void UpdateTrustedPlayerPresenceSweep()
@@ -298,6 +379,47 @@ internal static class WardAccess
         bool flash = true,
         bool wardCheck = false)
     {
+        return EvaluateAccessAgainstCandidates(point, radius, playerId, areas, null, flash, wardCheck);
+    }
+
+    internal static bool CheckRestrictionAccess(WardRestrictionOptions restriction, Vector3 point, float radius, long playerId, bool flash = true, bool wardCheck = false)
+    {
+        return !EvaluateRestrictionAccess(restriction, point, radius, playerId, flash, wardCheck).IsDenied;
+    }
+
+    internal static AccessResult EvaluateRestrictionAccess(
+        WardRestrictionOptions restriction,
+        Vector3 point,
+        float radius,
+        long playerId,
+        bool flash = true,
+        bool wardCheck = false)
+    {
+        var areas = GetCandidateManagedWards(point, radius, requireEnabled: true);
+        return EvaluateRestrictionAccessAgainstCandidates(restriction, point, radius, playerId, areas, flash, wardCheck);
+    }
+
+    internal static AccessResult EvaluateRestrictionAccessAgainstCandidates(
+        WardRestrictionOptions restriction,
+        Vector3 point,
+        float radius,
+        long playerId,
+        IReadOnlyList<PrivateArea> areas,
+        bool flash = true,
+        bool wardCheck = false)
+    {
+        return EvaluateAccessAgainstCandidates(point, radius, playerId, areas, restriction, flash, wardCheck);
+    }
+
+    private static AccessResult EvaluateAccessAgainstCandidates(
+        Vector3 point,
+        float radius,
+        long playerId,
+        IReadOnlyList<PrivateArea> areas,
+        WardRestrictionOptions? restriction,
+        bool flash,
+        bool wardCheck)
+    {
         if (areas.Count == 0)
         {
             return new AccessResult(AccessDecision.NoWard);
@@ -312,6 +434,11 @@ internal static class WardAccess
         foreach (var area in areas)
         {
             if (area == null || !area.IsInside(point, radius))
+            {
+                continue;
+            }
+
+            if (restriction.HasValue && !WardSettings.HasRestriction(WardSettings.GetConfiguration(area), restriction.Value))
             {
                 continue;
             }
@@ -412,6 +539,20 @@ internal static class WardAccess
         return false;
     }
 
+    internal static bool TryBlockInteraction(WardRestrictionOptions restriction, Component target, Player? player, ref bool result)
+    {
+        var blocked = ShouldBlockRestriction(restriction, target, player, 0f);
+        LogLocalInteractionAttemptVerbose($"Interaction.{restriction}", target, player, blocked);
+        if (!blocked)
+        {
+            return true;
+        }
+
+        ShowNoAccessMessage(player);
+        result = true;
+        return false;
+    }
+
     internal static bool TryBlockAction(Component target, Player? player, ref bool result)
     {
         var blocked = ShouldBlock(target, player, 0f);
@@ -430,6 +571,19 @@ internal static class WardAccess
     {
         var blocked = ShouldBlock(target, player, 0f);
         LogLocalInteractionAttemptVerbose("Void", target, player, blocked);
+        if (!blocked)
+        {
+            return true;
+        }
+
+        ShowNoAccessMessage(player);
+        return false;
+    }
+
+    internal static bool TryBlockVoid(WardRestrictionOptions restriction, Component target, Player? player)
+    {
+        var blocked = ShouldBlockRestriction(restriction, target, player, 0f);
+        LogLocalInteractionAttemptVerbose($"Void.{restriction}", target, player, blocked);
         if (!blocked)
         {
             return true;
@@ -620,6 +774,31 @@ internal static class WardAccess
         return EvaluateAccess(point, radius, player.GetPlayerID(), flash).IsDenied;
     }
 
+    internal static bool ShouldBlockRestriction(WardRestrictionOptions restriction, Component? target, Player? player, float radius, bool flash = true)
+    {
+        if (target == null)
+        {
+            return false;
+        }
+
+        return ShouldBlockRestriction(restriction, target.transform.position, radius, player, flash);
+    }
+
+    internal static bool ShouldBlockRestriction(WardRestrictionOptions restriction, Vector3 point, float radius, Player? player, bool flash = true)
+    {
+        if (player == null)
+        {
+            return false;
+        }
+
+        if (!HasEnabledManagedWards())
+        {
+            return false;
+        }
+
+        return EvaluateRestrictionAccess(restriction, point, radius, player.GetPlayerID(), flash).IsDenied;
+    }
+
     internal static bool ShouldBlockPickup(GameObject? go, Player? player)
     {
         if (go == null || !WardItemPrefabPolicy.CanAnyPickupBeBlocked())
@@ -627,7 +806,14 @@ internal static class WardAccess
             return false;
         }
 
-        return WardItemPrefabPolicy.ShouldBlockPickup(go) && ShouldBlock(go.transform.position, 0f, player);
+        var itemDrop = go.GetComponent<ItemDrop>();
+        if (IsPlacedConsumable(itemDrop))
+        {
+            return false;
+        }
+
+        return WardItemPrefabPolicy.ShouldBlockPickup(go) &&
+               ShouldBlockRestriction(WardRestrictionOptions.Pickup, go.transform.position, 0f, player);
     }
 
     internal static bool ShouldBlockPickup(ItemDrop? itemDrop, Player? player)
@@ -637,7 +823,16 @@ internal static class WardAccess
             return false;
         }
 
-        return WardItemPrefabPolicy.ShouldBlockPickup(itemDrop) && ShouldBlock(itemDrop, player, 0f);
+        return !IsPlacedConsumable(itemDrop) &&
+               WardItemPrefabPolicy.ShouldBlockPickup(itemDrop) &&
+               ShouldBlockRestriction(WardRestrictionOptions.Pickup, itemDrop, player, 0f);
+    }
+
+    internal static bool IsPlacedConsumable(ItemDrop? itemDrop)
+    {
+        return itemDrop != null &&
+               itemDrop.IsPiece() &&
+               itemDrop.m_itemData?.m_shared?.m_itemType == ItemDrop.ItemData.ItemType.Consumable;
     }
 
     internal static void ShowNoAccessMessage(Player? player)
@@ -1315,7 +1510,7 @@ internal static class WardAccess
 
             if (updateAllWardIndex)
             {
-                ManagedWardRuntimeInvalidationService.PublishSpatialIndexChanged("managed ward spatial index deferred rebuild");
+                ManagedWardPlacementPreviewService.Invalidate();
             }
 
             return;
@@ -1325,7 +1520,7 @@ internal static class WardAccess
         {
             AllWardIndex.UpdateSpatialIndex(area, instanceId, AllWardIndex.Contains(instanceId));
             BumpManagedWardSpatialRevision();
-            ManagedWardRuntimeInvalidationService.PublishSpatialIndexChanged("managed ward spatial index membership changed");
+            ManagedWardPlacementPreviewService.Invalidate();
         }
 
         if (updateEnabledWardIndex)

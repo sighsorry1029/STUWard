@@ -51,6 +51,24 @@ internal static class WardInteractionPatchTargets
         yield return RequireDeclaredMethod(typeof(ItemDrop), nameof(ItemDrop.Interact));
     }
 
+    internal static bool TryGetRestriction(Component? target, out WardRestrictionOptions restriction)
+    {
+        restriction = target switch
+        {
+            Door => WardRestrictionOptions.Doors,
+            TeleportWorld => WardRestrictionOptions.Portals,
+            Feast => WardRestrictionOptions.PlacedConsumables,
+            ItemStand => WardRestrictionOptions.ItemStands,
+            ArmorStand => WardRestrictionOptions.ArmorStands,
+            Container => WardRestrictionOptions.Containers,
+            CraftingStation => WardRestrictionOptions.CraftingStations,
+            Tameable => WardRestrictionOptions.TameablesAndSaddles,
+            Sadle => WardRestrictionOptions.TameablesAndSaddles,
+            _ => WardRestrictionOptions.None
+        };
+        return restriction != WardRestrictionOptions.None;
+    }
+
     private static MethodBase RequireDeclaredMethod(Type type, string methodName)
     {
         var method = AccessTools.DeclaredMethod(type, methodName);
@@ -63,6 +81,28 @@ internal static class WardInteractionPatchTargets
     }
 }
 
+internal struct WardCheckScopeState
+{
+    private WardAccess.RestrictionScope _restrictionScope;
+    private WardAccess.ManagedWardAllowScope _allowScope;
+
+    internal void EnterRestriction(WardRestrictionOptions restriction)
+    {
+        _restrictionScope = WardAccess.EnterRestrictionScope(restriction);
+    }
+
+    internal void EnterManagedWardAllow()
+    {
+        _allowScope = WardAccess.EnterManagedWardAllowScope();
+    }
+
+    internal void Dispose()
+    {
+        _restrictionScope.Dispose();
+        _allowScope.Dispose();
+    }
+}
+
 [HarmonyPatch]
 internal static class DirectInteractionPatches
 {
@@ -71,15 +111,11 @@ internal static class DirectInteractionPatches
         return WardInteractionPatchTargets.GetDirectInteractTargets();
     }
 
-    private static bool Prefix(Component __instance, Humanoid __0, ref bool __result)
+    private static bool Prefix(Component __instance, Humanoid __0, ref bool __result, out WardCheckScopeState __state)
     {
+        __state = default;
         var player = WardAccess.GetPlayer(__0);
-        if (__instance is ItemDrop itemDrop && !WardAccess.ShouldBlockPickup(itemDrop, player))
-        {
-            return true;
-        }
-
-        var continueOriginal = WardAccess.TryBlockInteraction(__instance, player, ref __result);
+        var continueOriginal = TryHandleDirectInteraction(__instance, player, ref __result, ref __state);
         if (Plugin.ShouldLogWardDiagnosticVerbose() && __instance != null && player != null)
         {
             Plugin.LogWardDiagnosticVerbose(
@@ -90,8 +126,10 @@ internal static class DirectInteractionPatches
         return continueOriginal;
     }
 
-    private static void Postfix(Component __instance, Humanoid __0, ref bool __result)
+    private static void Postfix(Component __instance, Humanoid __0, ref bool __result, WardCheckScopeState __state)
     {
+        __state.Dispose();
+
         var player = WardAccess.GetPlayer(__0);
         if (!Plugin.ShouldLogWardDiagnosticVerbose() || __instance == null || player == null)
         {
@@ -101,6 +139,51 @@ internal static class DirectInteractionPatches
         Plugin.LogWardDiagnosticVerbose(
             "Access.DirectInteract.Result",
             $"Completed direct interact. targetType={__instance.GetType().Name}, targetName='{__instance.name}', playerId={player.GetPlayerID()}, result={__result}, position={__instance.transform.position}");
+    }
+
+    private static bool TryHandleDirectInteraction(Component target, Player? player, ref bool result, ref WardCheckScopeState scopeState)
+    {
+        if (target is ItemDrop itemDrop)
+        {
+            if (WardAccess.IsPlacedConsumable(itemDrop))
+            {
+                return TryBlockWithRestriction(WardRestrictionOptions.PlacedConsumables, itemDrop, player, ref result, ref scopeState);
+            }
+
+            if (!WardItemPrefabPolicy.CanAnyPickupBeBlocked() || !WardItemPrefabPolicy.ShouldBlockPickup(itemDrop))
+            {
+                scopeState.EnterManagedWardAllow();
+                return true;
+            }
+
+            if (!WardAccess.ShouldBlockPickup(itemDrop, player))
+            {
+                scopeState.EnterRestriction(WardRestrictionOptions.Pickup);
+                return true;
+            }
+
+            WardAccess.ShowNoAccessMessage(player);
+            result = true;
+            return false;
+        }
+
+        if (WardInteractionPatchTargets.TryGetRestriction(target, out var restriction))
+        {
+            return TryBlockWithRestriction(restriction, target, player, ref result, ref scopeState);
+        }
+
+        return WardAccess.TryBlockInteraction(target, player, ref result);
+    }
+
+    private static bool TryBlockWithRestriction(WardRestrictionOptions restriction, Component target, Player? player, ref bool result, ref WardCheckScopeState scopeState)
+    {
+        var continueOriginal = WardAccess.TryBlockInteraction(restriction, target, player, ref result);
+        if (continueOriginal)
+        {
+            scopeState.EnterRestriction(restriction);
+        }
+
+        return continueOriginal;
     }
 }
 
@@ -123,18 +206,25 @@ internal static class PrivateAreaHaveLocalAccessManagedPatch
         if (WardAdminDebugAccess.CanLocallyControlAnyWard(__instance, player))
         {
             __result = true;
-            Plugin.LogWardDiagnosticVerbose(
-                "Access.HaveLocalAccess",
-                $"Granted HaveLocalAccess through admin debug control. playerId={player.GetPlayerID()}, wardZdo={(WardPrivateAreaSafeAccess.GetZdo(__instance)?.m_uid.ToString() ?? "none")}");
+            if (Plugin.ShouldLogWardDiagnosticVerbose())
+            {
+                Plugin.LogWardDiagnosticVerbose(
+                    "Access.HaveLocalAccess",
+                    $"Granted HaveLocalAccess through admin debug control. playerId={player.GetPlayerID()}, wardZdo={(WardPrivateAreaSafeAccess.GetZdo(__instance)?.m_uid.ToString() ?? "none")}");
+            }
+
             return;
         }
 
         if (WardAccess.IsPlayerInWardGuild(player, __instance))
         {
             __result = true;
-            Plugin.LogWardDiagnosticVerbose(
-                "Access.HaveLocalAccess",
-                $"Granted HaveLocalAccess through guild match. playerId={player.GetPlayerID()}, wardGuildId={GuildsCompat.GetWardGuildId(__instance)}, wardGuildName='{GuildsCompat.GetWardGuildName(__instance)}', wardZdo={(WardPrivateAreaSafeAccess.GetZdo(__instance)?.m_uid.ToString() ?? "none")}");
+            if (Plugin.ShouldLogWardDiagnosticVerbose())
+            {
+                Plugin.LogWardDiagnosticVerbose(
+                    "Access.HaveLocalAccess",
+                    $"Granted HaveLocalAccess through guild match. playerId={player.GetPlayerID()}, wardGuildId={GuildsCompat.GetWardGuildId(__instance)}, wardGuildName='{GuildsCompat.GetWardGuildName(__instance)}', wardZdo={(WardPrivateAreaSafeAccess.GetZdo(__instance)?.m_uid.ToString() ?? "none")}");
+            }
         }
     }
 }
@@ -163,21 +253,47 @@ internal static class PrivateAreaCheckAccessManagedPatch
         }
 
         var candidates = WardAccess.GetCandidateManagedWards(point, effectiveRadius, requireEnabled: true);
-        var access = WardAccess.EvaluateAccessAgainstCandidates(
-            point,
-            effectiveRadius,
-            player.GetPlayerID(),
-            candidates,
-            flash,
-            wardCheck);
+        if (WardAccess.IsManagedWardAllowScopeActive && WardAccess.IsInsideAnyManagedWard(point, effectiveRadius, candidates))
+        {
+            __result = true;
+            return false;
+        }
+
+        var hasRestrictionScope = WardAccess.TryGetRestrictionScope(out var scopedRestriction);
+        var access = hasRestrictionScope
+            ? WardAccess.EvaluateRestrictionAccessAgainstCandidates(
+                scopedRestriction,
+                point,
+                effectiveRadius,
+                player.GetPlayerID(),
+                candidates,
+                flash,
+                wardCheck)
+            : WardAccess.EvaluateAccessAgainstCandidates(
+                point,
+                effectiveRadius,
+                player.GetPlayerID(),
+                candidates,
+                flash,
+                wardCheck);
         if (access.Decision == WardAccess.AccessDecision.NoWard)
         {
+            if (hasRestrictionScope && WardAccess.IsInsideAnyManagedWard(point, effectiveRadius, candidates))
+            {
+                __result = true;
+                return false;
+            }
+
             return true;
         }
 
-        Plugin.LogWardDiagnosticVerbose(
-            "Access.PrivateArea",
-            $"Evaluated PrivateArea.CheckAccess. playerId={player.GetPlayerID()}, decision={access.Decision}, flash={flash}, wardCheck={wardCheck}, radius={radius}, effectiveRadius={effectiveRadius}, point={point}");
+        if (Plugin.ShouldLogWardDiagnosticVerbose())
+        {
+            Plugin.LogWardDiagnosticVerbose(
+                "Access.PrivateArea",
+                $"Evaluated PrivateArea.CheckAccess. playerId={player.GetPlayerID()}, decision={access.Decision}, restriction={(hasRestrictionScope ? scopedRestriction.ToString() : "None")}, flash={flash}, wardCheck={wardCheck}, radius={radius}, effectiveRadius={effectiveRadius}, point={point}");
+        }
+
         __result = !access.IsDenied;
         return false;
     }
@@ -193,15 +309,32 @@ internal static class ContainerCheckAccessManagedPatch
             return true;
         }
 
-        var access = WardAccess.EvaluateAccess(__instance.transform.position, 0f, playerID, flash: false);
+        var candidates = WardAccess.GetCandidateManagedWards(__instance.transform.position, 0f, requireEnabled: true);
+        var access = WardAccess.EvaluateRestrictionAccessAgainstCandidates(
+            WardRestrictionOptions.Containers,
+            __instance.transform.position,
+            0f,
+            playerID,
+            candidates,
+            flash: false);
         if (access.Decision == WardAccess.AccessDecision.NoWard)
         {
+            if (WardAccess.IsInsideAnyManagedWard(__instance.transform.position, 0f, candidates))
+            {
+                __result = true;
+                return false;
+            }
+
             return true;
         }
 
-        Plugin.LogWardDiagnosticVerbose(
-            "Access.Container",
-            $"Evaluated Container.CheckAccess. playerId={playerID}, decision={access.Decision}, position={__instance.transform.position}");
+        if (Plugin.ShouldLogWardDiagnosticVerbose())
+        {
+            Plugin.LogWardDiagnosticVerbose(
+                "Access.Container",
+                $"Evaluated Container.CheckAccess. playerId={playerID}, decision={access.Decision}, position={__instance.transform.position}");
+        }
+
         __result = !access.IsDenied;
         return false;
     }
@@ -215,10 +348,18 @@ internal static class UseItemInteractionPatches
         return WardInteractionPatchTargets.GetCommonTargets(nameof(Container.UseItem));
     }
 
-    private static bool Prefix(Component __instance, Humanoid __0, ref bool __result)
+    private static bool Prefix(Component __instance, Humanoid __0, ref bool __result, out WardCheckScopeState __state)
     {
+        __state = default;
         var player = WardAccess.GetPlayer(__0);
-        var continueOriginal = WardAccess.TryBlockInteraction(__instance, player, ref __result);
+        var continueOriginal = WardInteractionPatchTargets.TryGetRestriction(__instance, out var restriction)
+            ? WardAccess.TryBlockInteraction(restriction, __instance, player, ref __result)
+            : WardAccess.TryBlockInteraction(__instance, player, ref __result);
+        if (continueOriginal && restriction != WardRestrictionOptions.None)
+        {
+            __state.EnterRestriction(restriction);
+        }
+
         if (Plugin.ShouldLogWardDiagnosticVerbose() && __instance != null && player != null)
         {
             Plugin.LogWardDiagnosticVerbose(
@@ -227,6 +368,11 @@ internal static class UseItemInteractionPatches
         }
 
         return continueOriginal;
+    }
+
+    private static void Postfix(WardCheckScopeState __state)
+    {
+        __state.Dispose();
     }
 }
 
@@ -241,10 +387,18 @@ internal static class StationUsePatches
         yield return AccessTools.DeclaredMethod(typeof(MapTable), nameof(MapTable.OnWrite));
     }
 
-    private static bool Prefix(Component __instance, Humanoid __1, ref bool __result)
+    private static bool Prefix(Component __instance, Humanoid __1, ref bool __result, out WardCheckScopeState __state)
     {
+        __state = default;
         var player = WardAccess.GetPlayer(__1);
-        var continueOriginal = WardAccess.TryBlockInteraction(__instance, player, ref __result);
+        var continueOriginal = WardInteractionPatchTargets.TryGetRestriction(__instance, out var restriction)
+            ? WardAccess.TryBlockInteraction(restriction, __instance, player, ref __result)
+            : WardAccess.TryBlockInteraction(__instance, player, ref __result);
+        if (continueOriginal && restriction != WardRestrictionOptions.None)
+        {
+            __state.EnterRestriction(restriction);
+        }
+
         if (Plugin.ShouldLogWardDiagnosticVerbose() && __instance != null && player != null)
         {
             Plugin.LogWardDiagnosticVerbose(
@@ -253,6 +407,11 @@ internal static class StationUsePatches
         }
 
         return continueOriginal;
+    }
+
+    private static void Postfix(WardCheckScopeState __state)
+    {
+        __state.Dispose();
     }
 }
 
@@ -275,9 +434,21 @@ internal static class ProcessingInteractionPatches
 [HarmonyPatch(typeof(TeleportWorld), nameof(TeleportWorld.Teleport))]
 internal static class TeleportWorldTeleportPatch
 {
-    private static bool Prefix(TeleportWorld __instance, Player player)
+    private static bool Prefix(TeleportWorld __instance, Player player, out WardCheckScopeState __state)
     {
-        return WardAccess.TryBlockVoid(__instance, player);
+        __state = default;
+        var continueOriginal = WardAccess.TryBlockVoid(WardRestrictionOptions.Portals, __instance, player);
+        if (continueOriginal)
+        {
+            __state.EnterRestriction(WardRestrictionOptions.Portals);
+        }
+
+        return continueOriginal;
+    }
+
+    private static void Postfix(WardCheckScopeState __state)
+    {
+        __state.Dispose();
     }
 }
 
@@ -286,8 +457,9 @@ internal static class TeleportWorldTeleportPatch
 [HarmonyBefore(new[] { "org.bepinex.plugins.targetportal" })]
 internal static class TeleportWorldTriggerPatch
 {
-    private static bool Prefix(TeleportWorldTrigger __instance, Collider colliderIn)
+    private static bool Prefix(TeleportWorldTrigger __instance, Collider colliderIn, out WardCheckScopeState __state)
     {
+        __state = default;
         var player = WardAccess.GetPlayer(colliderIn);
         if (player == null)
         {
@@ -301,8 +473,9 @@ internal static class TeleportWorldTriggerPatch
             return true;
         }
 
-        if (WardAccess.TryBlockVoid(portal, player))
+        if (WardAccess.TryBlockVoid(WardRestrictionOptions.Portals, portal, player))
         {
+            __state.EnterRestriction(WardRestrictionOptions.Portals);
             TargetPortalCompat.ClearBlockedPortalEntry(player);
             return true;
         }
@@ -310,6 +483,11 @@ internal static class TeleportWorldTriggerPatch
         TargetPortalCompat.MarkBlockedPortalEntry(player);
         TargetPortalCompat.ClosePortalSelection();
         return false;
+    }
+
+    private static void Postfix(WardCheckScopeState __state)
+    {
+        __state.Dispose();
     }
 }
 
@@ -441,7 +619,7 @@ internal static class TargetPortalCompat
             return true;
         }
 
-        if (WardAccess.TryBlockVoid(portal, player))
+        if (WardAccess.TryBlockVoid(WardRestrictionOptions.Portals, portal, player))
         {
             ClearBlockedPortalEntry(player);
             return true;
@@ -461,7 +639,8 @@ internal static class TargetPortalCompat
             return true;
         }
 
-        if (!_blockedPortalEntry && !WardAccess.ShouldBlock(player.transform.position, 0f, player, flash: false))
+        if (!_blockedPortalEntry &&
+            !WardAccess.ShouldBlockRestriction(WardRestrictionOptions.Portals, player.transform.position, 0f, player, flash: false))
         {
             return true;
         }
@@ -484,7 +663,7 @@ internal static class TargetPortalCompat
             return true;
         }
 
-        return !WardAccess.ShouldBlock(__0, player, 0f, flash: false);
+        return !WardAccess.ShouldBlockRestriction(WardRestrictionOptions.Portals, __0, player, 0f, flash: false);
     }
 
     private static bool TargetPortalOnPortalModeChangePrefix(long __0, ZDOID __1)
@@ -500,7 +679,7 @@ internal static class TargetPortalCompat
             return true;
         }
 
-        return WardAccess.CheckAccess(portalZdo.GetPosition(), 0f, playerId, flash: false);
+        return WardAccess.CheckRestrictionAccess(WardRestrictionOptions.Portals, portalZdo.GetPosition(), 0f, playerId, flash: false);
     }
 
 }
@@ -508,32 +687,58 @@ internal static class TargetPortalCompat
 [HarmonyPatch(typeof(ItemDrop), nameof(ItemDrop.Pickup))]
 internal static class ItemDropPickupPatch
 {
-    private static bool Prefix(ItemDrop __instance, Humanoid character)
+    private static bool Prefix(ItemDrop __instance, Humanoid character, out WardCheckScopeState __state)
     {
+        __state = default;
         var player = WardAccess.GetPlayer(character);
+        if (!WardItemPrefabPolicy.CanAnyPickupBeBlocked() || !WardItemPrefabPolicy.ShouldBlockPickup(__instance))
+        {
+            __state.EnterManagedWardAllow();
+            return true;
+        }
+
         if (!WardAccess.ShouldBlockPickup(__instance, player))
         {
+            __state.EnterRestriction(WardRestrictionOptions.Pickup);
             return true;
         }
 
         WardAccess.ShowNoAccessMessage(player);
         return false;
     }
+
+    private static void Postfix(WardCheckScopeState __state)
+    {
+        __state.Dispose();
+    }
 }
 
 [HarmonyPatch(typeof(Humanoid), nameof(Humanoid.Pickup))]
 internal static class HumanoidPickupPatch
 {
-    private static bool Prefix(Humanoid __instance, GameObject go, ref bool __result)
+    private static bool Prefix(Humanoid __instance, GameObject go, ref bool __result, out WardCheckScopeState __state)
     {
+        __state = default;
         var player = WardAccess.GetPlayer(__instance);
+        if (!WardItemPrefabPolicy.CanAnyPickupBeBlocked() || !WardItemPrefabPolicy.ShouldBlockPickup(go))
+        {
+            __state.EnterManagedWardAllow();
+            return true;
+        }
+
         if (!WardAccess.ShouldBlockPickup(go, player))
         {
+            __state.EnterRestriction(WardRestrictionOptions.Pickup);
             return true;
         }
 
         __result = false;
         return false;
+    }
+
+    private static void Postfix(WardCheckScopeState __state)
+    {
+        __state.Dispose();
     }
 }
 
@@ -795,9 +1000,25 @@ internal static class WearNTearRemovePatch
 [HarmonyPatch(typeof(WearNTear), "RPC_Remove")]
 internal static class WearNTearRpcRemovePatch
 {
-    private static bool Prefix(WearNTear __instance, long sender)
+    private static bool Prefix(WearNTear __instance, long sender, bool blockDrop)
     {
         var piece = __instance.GetComponent<Piece>();
+        if (blockDrop && WardPatchHelpers.IsPlacedConsumablePiece(piece))
+        {
+            var consumeDecision = WardPatchHelpers.EvaluatePlacedConsumableRemovalBySender(piece, sender);
+            if (consumeDecision == WardPatchHelpers.ProtectedRpcDecision.Allow)
+            {
+                return true;
+            }
+
+            if (consumeDecision == WardPatchHelpers.ProtectedRpcDecision.Deny)
+            {
+                WardAccess.ShowNoAccessMessage(WardPatchHelpers.GetLocalPlayerForSender(sender));
+            }
+
+            return false;
+        }
+
         var decision = WardPatchHelpers.EvaluateRemovalBySender(piece, sender);
         if (decision == WardPatchHelpers.ProtectedRpcDecision.Allow)
         {
@@ -880,7 +1101,10 @@ internal static class FeastRpcTryEatPatch
 {
     private static bool Prefix(Feast __instance, long sender)
     {
-        var decision = WardPatchHelpers.EvaluateInteractionBySender(__instance.transform.position, sender);
+        var decision = WardPatchHelpers.EvaluateInteractionBySender(
+            __instance.transform.position,
+            sender,
+            WardRestrictionOptions.PlacedConsumables);
         if (decision == WardPatchHelpers.ProtectedRpcDecision.Allow)
         {
             return true;
@@ -1119,7 +1343,7 @@ internal static class AzuCraftyBoxesNearbyContainersPatch
             return true;
         }
 
-        blocked = WardAccess.ShouldBlock(position, 0f, player, flash: false);
+        blocked = WardAccess.ShouldBlockRestriction(WardRestrictionOptions.Containers, position, 0f, player, flash: false);
         FrameBlockCache[__instance] = blocked;
         if (!blocked)
         {
@@ -1480,6 +1704,28 @@ internal static class WardPatchHelpers
             : ProtectedRpcDecision.Deny;
     }
 
+    internal static bool IsPlacedConsumablePiece(Piece? piece)
+    {
+        return piece != null && WardAccess.IsPlacedConsumable(piece.GetComponent<ItemDrop>());
+    }
+
+    internal static ProtectedRpcDecision EvaluatePlacedConsumableRemovalBySender(Piece? piece, long sender)
+    {
+        if (piece == null)
+        {
+            return ProtectedRpcDecision.Allow;
+        }
+
+        if (!TryResolveAuthoritativeSenderPlayerId(sender, "Protected.PlacedConsumableRemove", out var playerId))
+        {
+            return ProtectedRpcDecision.Unresolved;
+        }
+
+        return WardAccess.CheckRestrictionAccess(WardRestrictionOptions.PlacedConsumables, piece.transform.position, 0f, playerId)
+            ? ProtectedRpcDecision.Allow
+            : ProtectedRpcDecision.Deny;
+    }
+
     internal static ProtectedRpcDecision EvaluateDamageBySender(Vector3 point, long sender)
     {
         if (!TryResolveAuthoritativeSenderPlayerId(sender, "Protected.Damage", out var playerId))
@@ -1533,6 +1779,18 @@ internal static class WardPatchHelpers
         }
 
         return WardAccess.CheckAccess(point, 0f, playerId)
+            ? ProtectedRpcDecision.Allow
+            : ProtectedRpcDecision.Deny;
+    }
+
+    internal static ProtectedRpcDecision EvaluateInteractionBySender(Vector3 point, long sender, WardRestrictionOptions restriction)
+    {
+        if (!TryResolveAuthoritativeSenderPlayerId(sender, "Protected.Interaction", out var playerId))
+        {
+            return ProtectedRpcDecision.Unresolved;
+        }
+
+        return WardAccess.CheckRestrictionAccess(restriction, point, 0f, playerId)
             ? ProtectedRpcDecision.Allow
             : ProtectedRpcDecision.Deny;
     }

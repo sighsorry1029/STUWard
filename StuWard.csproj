@@ -507,7 +507,6 @@
         <Compile Include="WardMinimapSnapshotEntry.cs"/>
         <Compile Include="WardMinimapVisibilityIndex.cs"/>
         <Compile Include="WardMapRangeSprites.cs"/>
-        <Compile Include="WardOwnershipOverrides.cs"/>
         <Compile Include="WardOwnershipReport.cs"/>
         <Compile Include="WardPatches.cs"/>
         <Compile Include="WardSettings.cs"/>

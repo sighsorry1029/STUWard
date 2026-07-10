@@ -819,7 +819,7 @@ internal static class PlayerCheckCanRemovePiecePatch
     [HarmonyPriority(Priority.Last)]
     private static void Postfix(Player __instance, Piece __0, ref bool __result)
     {
-        if (__0 == null || !WardAccess.ShouldBlock(__0.transform.position, 0f, __instance))
+        if (!WardPatchHelpers.ShouldBlockRemoval(__0, __instance))
         {
             return;
         }
@@ -832,25 +832,17 @@ internal static class PlayerCheckCanRemovePiecePatch
 [HarmonyPatch(typeof(Player), nameof(Player.RemovePiece))]
 internal static class PlayerRemovePiecePatch
 {
-    private static bool Prefix(Player __instance, ref bool __result, out bool __state)
+    private static bool Prefix(Player __instance, ref bool __result)
     {
         var piece = WardPatchHelpers.FindRemoveTarget(__instance);
-        __state = ManagedWardIdentity.IsManaged(piece != null ? piece.GetComponent<PrivateArea>() : null);
-        if (piece == null || !WardAccess.ShouldBlock(piece.transform.position, 0f, __instance))
+        if (!WardPatchHelpers.ShouldBlockRemoval(piece, __instance))
         {
             return true;
         }
 
-        __state = false;
         WardAccess.ShowNoAccessMessage(__instance);
         __result = false;
         return false;
-    }
-
-    private static void Postfix(Player __instance, bool __state)
-    {
-        _ = __instance;
-        _ = __state;
     }
 }
 
@@ -1473,14 +1465,13 @@ internal static class AzuCraftyBoxesNearbyContainersPatch
 [HarmonyPatch(typeof(Player), "AutoPickup")]
 internal static class PlayerAutoPickupPatch
 {
-    private static readonly FieldInfo? EnableAutoPickupField = AccessTools.DeclaredField(typeof(Player), "m_enableAutoPickup");
-    private static readonly int AutoPickupMask = LayerMask.GetMask("item");
+    private const int MaxBufferedAutoPickupColliders = 4096;
     private static Collider[] _autoPickupColliders = new Collider[64];
     private static readonly List<PrivateArea> DeniedAutoPickupWardCandidates = new();
 
     private static bool Prefix(Player __instance, float dt)
     {
-        if (__instance.IsTeleporting() || !IsAutoPickupEnabled())
+        if (__instance.IsTeleporting() || !Player.m_enableAutoPickup)
         {
             return false;
         }
@@ -1494,16 +1485,34 @@ internal static class PlayerAutoPickupPatch
         var wardAccessEvaluated = false;
         DeniedAutoPickupWardCandidates.Clear();
         var hasDeniedWardCandidates = false;
-        var colliderCount = Physics.OverlapSphereNonAlloc(pickupPoint, autoPickupRange, _autoPickupColliders, AutoPickupMask);
-        if (colliderCount == _autoPickupColliders.Length)
+        var colliders = _autoPickupColliders;
+        var colliderCount = Physics.OverlapSphereNonAlloc(
+            pickupPoint,
+            autoPickupRange,
+            colliders,
+            __instance.m_autoPickupMask);
+        while (colliderCount == colliders.Length && colliders.Length < MaxBufferedAutoPickupColliders)
         {
-            Array.Resize(ref _autoPickupColliders, _autoPickupColliders.Length * 2);
-            colliderCount = Physics.OverlapSphereNonAlloc(pickupPoint, autoPickupRange, _autoPickupColliders, AutoPickupMask);
+            Array.Resize(
+                ref _autoPickupColliders,
+                Math.Min(_autoPickupColliders.Length * 2, MaxBufferedAutoPickupColliders));
+            colliders = _autoPickupColliders;
+            colliderCount = Physics.OverlapSphereNonAlloc(
+                pickupPoint,
+                autoPickupRange,
+                colliders,
+                __instance.m_autoPickupMask);
+        }
+
+        if (colliderCount == colliders.Length)
+        {
+            colliders = Physics.OverlapSphere(pickupPoint, autoPickupRange, __instance.m_autoPickupMask);
+            colliderCount = colliders.Length;
         }
 
         for (var index = 0; index < colliderCount; index++)
         {
-            var collider = _autoPickupColliders[index];
+            var collider = colliders[index];
             if (collider == null || collider.attachedRigidbody == null)
             {
                 continue;
@@ -1549,6 +1558,7 @@ internal static class PlayerAutoPickupPatch
                     WardAccess.CollectDeniedManagedWardCandidates(
                         playerId,
                         WardAccess.GetCandidateManagedWards(pickupPoint, autoPickupRange, requireEnabled: true),
+                        WardRestrictionOptions.Pickup,
                         DeniedAutoPickupWardCandidates) > 0;
                 wardAccessEvaluated = true;
             }
@@ -1595,11 +1605,6 @@ internal static class PlayerAutoPickupPatch
         }
 
         return false;
-    }
-
-    private static bool IsAutoPickupEnabled()
-    {
-        return EnableAutoPickupField == null || (bool)EnableAutoPickupField.GetValue(null)!;
     }
 }
 
@@ -1670,13 +1675,20 @@ internal static class WardPatchHelpers
             return false;
         }
 
-        var area = piece.GetComponent<PrivateArea>();
-        if (ManagedWardIdentity.EnsureManagedComponent(area))
+        return ShouldBlockRemoval(piece, player);
+    }
+
+    internal static bool ShouldBlockRemoval(Piece? piece, Player? player)
+    {
+        if (piece == null || player == null)
         {
-            return !WardAccess.CanControlManagedWard(area, player.GetPlayerID());
+            return false;
         }
 
-        return WardAccess.ShouldBlock(piece.transform.position, 0f, player);
+        var area = piece.GetComponent<PrivateArea>();
+        return ManagedWardIdentity.EnsureManagedComponent(area)
+            ? !WardAccess.CanControlManagedWard(area, player.GetPlayerID())
+            : WardAccess.ShouldBlock(piece.transform.position, 0f, player);
     }
 
     internal static ProtectedRpcDecision EvaluateRemovalBySender(Piece? piece, long sender)

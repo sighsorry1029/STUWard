@@ -7,6 +7,7 @@ internal static partial class WardMinimapPinsManager
     private const string RequestWardPinsRpc = "STUWard_RequestWardPins";
     private const string ReceiveWardPinsRpc = "STUWard_ReceiveWardPins";
     private const string PushWardPinsRpc = "STUWard_PushWardPins";
+    private const int MaxSnapshotEntryCount = 16384;
 
     private enum WardPinsResponseKind
     {
@@ -183,10 +184,13 @@ internal static partial class WardMinimapPinsManager
             $"Pushed ward minimap {(fullSnapshot ? "full snapshot" : "delta")}. receiverUid={receiverUid}, viewerRevisionToken={viewerRevisionToken}, playerId={playerId}, canSeeAllWards={canSeeAllWards}, indexedWardCount={indexedWardCount}, candidateWardCount={candidateWardCount}, visibleWardCount={visibleWardCount}, enabledWardCount={enabledWardCount}, upsertedWardCount={snapshotEntries.Count}, removedWardCount={removedWardIds.Count}{DescribeFirstEntry(firstEntry)}");
     }
 
-    private static void HandleReceiveWardPins(long _, ZPackage pkg)
+    private static void HandleReceiveWardPins(long sender, ZPackage pkg)
     {
-        if (pkg == null)
+        if (!WardOwnership.IsAuthoritativeServerSender(sender) || pkg == null)
         {
+            Plugin.LogWardDiagnosticFailure(
+                "WardPins.Response",
+                $"Rejected ward minimap response from a non-server sender. sender={sender}");
             return;
         }
 
@@ -301,10 +305,13 @@ internal static partial class WardMinimapPinsManager
         };
     }
 
-    private static void HandlePushWardPins(long _, ZPackage pkg)
+    private static void HandlePushWardPins(long sender, ZPackage pkg)
     {
-        if (pkg == null)
+        if (!WardOwnership.IsAuthoritativeServerSender(sender) || pkg == null)
         {
+            Plugin.LogWardDiagnosticFailure(
+                "WardPins.Push",
+                $"Rejected ward minimap push from a non-server sender. sender={sender}");
             return;
         }
 
@@ -428,6 +435,13 @@ internal static partial class WardMinimapPinsManager
         out WardMinimapSnapshotEntry[] snapshotEntries,
         out WardMinimapSnapshotEntry? firstEntry)
     {
+        if (snapshotCount < 0 || snapshotCount > MaxSnapshotEntryCount)
+        {
+            snapshotEntries = System.Array.Empty<WardMinimapSnapshotEntry>();
+            firstEntry = null;
+            return false;
+        }
+
         snapshotEntries = snapshotCount <= 0
             ? System.Array.Empty<WardMinimapSnapshotEntry>()
             : new WardMinimapSnapshotEntry[snapshotCount];
@@ -456,6 +470,12 @@ internal static partial class WardMinimapPinsManager
 
     private static bool TryReadRemovedWardIds(ZPackage pkg, int removedWardCount, out ZDOID[] removedWardIds)
     {
+        if (removedWardCount < 0 || removedWardCount > MaxSnapshotEntryCount)
+        {
+            removedWardIds = System.Array.Empty<ZDOID>();
+            return false;
+        }
+
         removedWardIds = removedWardCount <= 0
             ? System.Array.Empty<ZDOID>()
             : new ZDOID[removedWardCount];

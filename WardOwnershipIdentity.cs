@@ -218,6 +218,12 @@ internal static partial class WardOwnership
         return false;
     }
 
+    internal static bool IsAuthoritativeServerSender(long sender)
+    {
+        var routedRpc = ZRoutedRpc.instance;
+        return sender != 0L && routedRpc != null && sender == routedRpc.GetServerPeerID();
+    }
+
     internal static string GetAuthoritativeAccountIdFromSender(long sender, long playerId = 0L)
     {
         if (sender != 0L)

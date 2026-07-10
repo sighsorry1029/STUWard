@@ -200,8 +200,16 @@ internal static class WardAdminDebugAccess
         SendAdminDebugStateResponse(sender, true);
     }
 
-    private static void HandleReceiveAdminDebugState(long _, bool enabled)
+    private static void HandleReceiveAdminDebugState(long sender, bool enabled)
     {
+        if (!WardOwnership.IsAuthoritativeServerSender(sender))
+        {
+            Plugin.LogWardDiagnosticFailure(
+                "AdminDebug.Sync",
+                $"Rejected admin debug approval from a non-server sender. sender={sender}");
+            return;
+        }
+
         _serverApprovedLocalDebugState = enabled;
         _lastLocalDebugAdminSyncUtc = DateTime.UtcNow;
         Plugin.LogWardDiagnosticVerbose(

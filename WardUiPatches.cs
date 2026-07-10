@@ -90,7 +90,6 @@ internal static class ManagedWardLifecycle
             WardAccess.RegisterManagedWard(ward);
             WardPermittedSnapshots.Backfill(ward);
             WardSettings.RegisterRpcHandlers(ward);
-            WardOwnership.RegisterManagedWardRpcHandlers(area);
             WardSettings.ApplyAreaState(ward);
             context.NetworkInitializationComplete = true;
         }
@@ -240,7 +239,6 @@ internal static class PrivateAreaUpdateStatusPatch
 
         ManagedWardMapStateService.NotifyLiveWardMutation(
             __instance,
-            ManagedWardMapMutationKind.IndexAndPins,
             notifyEnabledChange && notifyDataRevisionChange
                 ? "ward update status changed enabled state and data revision"
                 : notifyEnabledChange
@@ -1220,7 +1218,6 @@ internal static class PrivateAreaSetEnabledWardMinimapVisibilityPatch
         var ward = ManagedWardRef.FromArea(__instance);
         ManagedWardMapStateService.NotifyLiveWardMutation(
             __instance,
-            ManagedWardMapMutationKind.IndexAndPins,
             "ward set enabled state changed");
         WardOwnership.ForceSyncManagedWardZdoToServer(ward, "ToggleEnabled.Sync");
     }

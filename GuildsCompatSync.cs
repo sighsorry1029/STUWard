@@ -185,13 +185,34 @@ internal static partial class GuildsCompat
 
     private static void HandleSyncPlayerGuild(long sender, ZPackage pkg)
     {
-        if (ZNet.instance == null || !ZNet.instance.IsServer())
+        if (ZNet.instance == null || !ZNet.instance.IsServer() || pkg == null)
         {
             return;
         }
 
-        var guildId = pkg.ReadInt();
-        var guildName = pkg.ReadString();
+        int guildId;
+        string guildName;
+        try
+        {
+            guildId = pkg.ReadInt();
+            guildName = pkg.ReadString();
+        }
+        catch
+        {
+            Plugin.LogWardDiagnosticFailure(
+                "GuildsCompat.Sync",
+                $"Failed to deserialize player guild sync. sender={sender}");
+            return;
+        }
+
+        if (guildName.Length > 256)
+        {
+            Plugin.LogWardDiagnosticFailure(
+                "GuildsCompat.Sync",
+                $"Rejected player guild sync with an oversized guild name. sender={sender}, length={guildName.Length}");
+            return;
+        }
+
         if (!TryApplySyncedGuildIdentity(sender, guildId, guildName))
         {
             PendingPlayerGuildSyncsBySender[sender] = new PendingPlayerGuildSync(sender, guildId, guildName, DateTime.UtcNow);
@@ -214,6 +235,9 @@ internal static partial class GuildsCompat
             {
                 expiredSenders ??= new List<long>();
                 expiredSenders.Add(entry.Key);
+                Plugin.LogWardDiagnosticFailure(
+                    "GuildsCompat.Sync",
+                    $"Dropped player guild sync because server-authoritative identity lookup did not become available. sender={entry.Value.SenderUid}, reportedGuildId={entry.Value.GuildId}");
                 continue;
             }
 
@@ -263,10 +287,19 @@ internal static partial class GuildsCompat
             return false;
         }
 
-        var guild = guildId != 0
-            ? new WardGuildIdentity(guildId, guildName)
-            : default;
         var playerName = WardOwnership.GetPlayerName(playerId);
+        if (!TryResolveAuthoritativeGuildIdentity(playerId, accountId, playerName, out var guild))
+        {
+            return false;
+        }
+
+        if (guild.Id != guildId)
+        {
+            Plugin.LogWardDiagnosticFailure(
+                "GuildsCompat.Sync",
+                $"Ignored client-reported guild identity that did not match the server Guilds API. sender={sender}, playerId={playerId}, reportedGuildId={guildId}, authoritativeGuildId={guild.Id}");
+        }
+
         if (UpsertSyncedGuildIdentity(playerId, accountId, playerName, guild, out var previousGuild))
         {
             WardOwnership.RefreshServerPlayerAccountIdForResolvedPlayer(playerId, accountId);

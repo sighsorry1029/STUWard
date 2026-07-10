@@ -9,14 +9,12 @@ internal readonly struct ManagedWardRegistryEntry
         ZDOID zdoId,
         long ownerPlayerId,
         string accountId,
-        string ownerName,
         string characterKey,
         int guildId)
     {
         ZdoId = zdoId;
         OwnerPlayerId = ownerPlayerId;
         AccountId = accountId ?? string.Empty;
-        OwnerName = ownerName ?? string.Empty;
         CharacterKey = characterKey ?? string.Empty;
         GuildId = guildId;
     }
@@ -24,37 +22,22 @@ internal readonly struct ManagedWardRegistryEntry
     internal ZDOID ZdoId { get; }
     internal long OwnerPlayerId { get; }
     internal string AccountId { get; }
-    internal string OwnerName { get; }
     internal string CharacterKey { get; }
     internal int GuildId { get; }
 }
 
 internal static class ManagedWardRegistry
 {
-    private sealed class ManagedWardRegistryState
-    {
-        internal readonly Dictionary<ZDOID, ManagedWardRegistryEntry> EntriesByZdoId = new();
-        internal readonly Dictionary<string, int> CountByAccountId = new(StringComparer.Ordinal);
-        internal readonly Dictionary<string, HashSet<ZDOID>> WardIdsByAccountId = new(StringComparer.Ordinal);
-        internal readonly Dictionary<long, HashSet<ZDOID>> WardIdsByOwnerPlayerId = new();
-        internal readonly Dictionary<int, HashSet<ZDOID>> WardIdsByGuildId = new();
-        internal readonly Dictionary<string, HashSet<ZDOID>> WardIdsByCharacterKey = new(StringComparer.Ordinal);
-    }
-
-    private static readonly ManagedWardRegistryState ManagedWardRegistryData = new();
-
-    private static Dictionary<ZDOID, ManagedWardRegistryEntry> ManagedWardRegistryEntriesByZdoId => ManagedWardRegistryData.EntriesByZdoId;
-    private static Dictionary<string, int> ManagedWardCountsByAccountId => ManagedWardRegistryData.CountByAccountId;
-    private static Dictionary<string, HashSet<ZDOID>> ManagedWardIdsByAccountId => ManagedWardRegistryData.WardIdsByAccountId;
-    private static Dictionary<long, HashSet<ZDOID>> ManagedWardIdsByOwnerPlayerId => ManagedWardRegistryData.WardIdsByOwnerPlayerId;
-    private static Dictionary<int, HashSet<ZDOID>> ManagedWardIdsByGuildId => ManagedWardRegistryData.WardIdsByGuildId;
-    private static Dictionary<string, HashSet<ZDOID>> ManagedWardIdsByCharacterKey => ManagedWardRegistryData.WardIdsByCharacterKey;
+    private static readonly Dictionary<ZDOID, ManagedWardRegistryEntry> ManagedWardRegistryEntriesByZdoId = new();
+    private static readonly Dictionary<string, int> ManagedWardCountsByAccountId = new(StringComparer.Ordinal);
+    private static readonly Dictionary<long, HashSet<ZDOID>> ManagedWardIdsByOwnerPlayerId = new();
+    private static readonly Dictionary<int, HashSet<ZDOID>> ManagedWardIdsByGuildId = new();
+    private static readonly Dictionary<string, HashSet<ZDOID>> ManagedWardIdsByCharacterKey = new(StringComparer.Ordinal);
 
     internal static void Reset()
     {
         ManagedWardRegistryEntriesByZdoId.Clear();
         ManagedWardCountsByAccountId.Clear();
-        ManagedWardIdsByAccountId.Clear();
         ManagedWardIdsByOwnerPlayerId.Clear();
         ManagedWardIdsByGuildId.Clear();
         ManagedWardIdsByCharacterKey.Clear();
@@ -190,7 +173,6 @@ internal static class ManagedWardRegistry
             zdo.m_uid,
             ownerPlayerId,
             accountId,
-            ownerName,
             characterKey,
             guildId);
     }
@@ -202,7 +184,6 @@ internal static class ManagedWardRegistry
             ManagedWardCountsByAccountId[entry.AccountId] = ManagedWardCountsByAccountId.TryGetValue(entry.AccountId, out var existingCount)
                 ? existingCount + 1
                 : 1;
-            AddManagedWardRegistryId(ManagedWardIdsByAccountId, entry.AccountId, entry.ZdoId);
         }
 
         if (entry.OwnerPlayerId != 0L)
@@ -237,7 +218,6 @@ internal static class ManagedWardRegistry
                 }
             }
 
-            RemoveManagedWardRegistryId(ManagedWardIdsByAccountId, entry.AccountId, entry.ZdoId);
         }
 
         if (entry.OwnerPlayerId != 0L)

@@ -53,15 +53,12 @@ internal sealed class WardGuiController : MonoBehaviour
     private bool _suppressUiEvents;
     private bool _configurationCommitPending;
     private bool _configurationPushPending;
-    private bool _layoutRebuildPending;
     private float _nextConfigurationPushTime;
     private float _pendingConfigurationRequestedAt;
     private int _lastPermittedRevision = int.MinValue;
     private int _permittedRefreshGeneration;
     private long _pendingConfigurationRequestId;
     private PermittedRowView? _emptyPermittedRow;
-
-    internal bool IsVisible => _visible;
 
     private void Awake()
     {
@@ -92,12 +89,6 @@ internal sealed class WardGuiController : MonoBehaviour
 
     private void Update()
     {
-        if (_layoutRebuildPending && !IsTextInputFocused())
-        {
-            _layoutRebuildPending = false;
-            RebuildLayout();
-        }
-
         if (!_visible)
         {
             SetShortcutHintVisible(false);
@@ -516,16 +507,6 @@ internal sealed class WardGuiController : MonoBehaviour
         layout.childForceExpandHeight = false;
         layout.spacing = 6f;
         layout.padding = new RectOffset(8, 8, 8, 8);
-    }
-
-    internal void RebuildLayout()
-    {
-        BuildGui();
-    }
-
-    internal void ScheduleLayoutRebuild()
-    {
-        _layoutRebuildPending = true;
     }
 
     private void SetVisible(bool visible)
@@ -1676,32 +1657,6 @@ internal sealed class WardGuiController : MonoBehaviour
         internal Toggle Toggle { get; }
         internal Text Label { get; }
         internal Text StateText { get; }
-    }
-
-    private static bool IsTextInputFocused()
-    {
-        var selected = EventSystem.current != null ? EventSystem.current.currentSelectedGameObject : null;
-        if (selected == null)
-        {
-            return false;
-        }
-
-        if (selected.GetComponent<InputField>() != null)
-        {
-            return true;
-        }
-
-        var components = selected.GetComponents<Component>();
-        for (var index = 0; index < components.Length; index++)
-        {
-            var component = components[index];
-            if (component != null && component.GetType().Name.Contains("InputField", System.StringComparison.Ordinal))
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     private sealed class SliderCommitHandler : MonoBehaviour, IEndDragHandler, IPointerUpHandler

@@ -19,7 +19,7 @@ internal sealed class ConfigurationManagerAttributes
 public sealed class Plugin : BaseUnityPlugin
 {
     internal const string ModName = "STUWard";
-    internal const string ModVersion = "1.2.1";
+    internal const string ModVersion = "1.2.2";
     internal const string Author = "sighsorry";
     internal const string ModGuid = $"{Author}.{ModName}";
 
@@ -41,15 +41,7 @@ public sealed class Plugin : BaseUnityPlugin
     internal static ConfigEntry<float> MaxWardRadius = null!;
     internal static ConfigEntry<PickupBlockRule> PickupBlockMode = null!;
     internal static ConfigEntry<HostileCreatureStructureProtectionMode> HostileCreatureStructureProtection = null!;
-    internal static ConfigEntry<RestrictionServerMode> DoorsRestriction = null!;
-    internal static ConfigEntry<RestrictionServerMode> PortalsRestriction = null!;
-    internal static ConfigEntry<RestrictionServerMode> PickupRestriction = null!;
-    internal static ConfigEntry<RestrictionServerMode> PlacedConsumablesRestriction = null!;
-    internal static ConfigEntry<RestrictionServerMode> ItemStandsRestriction = null!;
-    internal static ConfigEntry<RestrictionServerMode> ArmorStandsRestriction = null!;
-    internal static ConfigEntry<RestrictionServerMode> ContainersRestriction = null!;
-    internal static ConfigEntry<RestrictionServerMode> CraftingStationsRestriction = null!;
-    internal static ConfigEntry<RestrictionServerMode> TameablesAndSaddlesRestriction = null!;
+    internal static readonly Dictionary<WardRestrictionOptions, ConfigEntry<RestrictionServerMode>> RestrictionModes = new();
     internal static ConfigEntry<Toggle> DisableVanillaGuardStoneRecipe = null!;
     internal static ConfigEntry<string> StuWardRecipe = null!;
     internal static ConfigEntry<KeyboardShortcut> WardSettingsShortcut = null!;
@@ -93,12 +85,12 @@ public sealed class Plugin : BaseUnityPlugin
     {
         Instance = this;
         Log = Logger;
-        WardPluginBootstrap.InitializeCore();
 
         var saveOnSet = Config.SaveOnConfigSet;
         Config.SaveOnConfigSet = false;
         try
         {
+            WardPluginBootstrap.InitializeCore();
             WardPluginConfigBindings.BindAll();
             WardPluginBootstrap.InitializeFeatures();
 
@@ -107,6 +99,29 @@ public sealed class Plugin : BaseUnityPlugin
             WardGui = CreateOrReuseWardGuiController();
 
             Config.Save();
+        }
+        catch (System.Exception exception)
+        {
+            try
+            {
+                _harmony?.UnpatchSelf();
+            }
+            catch (System.Exception cleanupException)
+            {
+                Log.LogWarning($"Failed to remove Harmony patches after STUWard startup failure: {cleanupException.Message}");
+            }
+
+            try
+            {
+                WardPluginBootstrap.Shutdown();
+            }
+            catch (System.Exception cleanupException)
+            {
+                Log.LogWarning($"Failed to shut down services after STUWard startup failure: {cleanupException.Message}");
+            }
+
+            Log.LogError($"STUWard startup failed: {exception}");
+            throw;
         }
         finally
         {

@@ -186,27 +186,6 @@ internal static class WardMinimapVisibilityIndex
         Plugin.LogWardDiagnosticVerbose("WardPins.Index", $"Invalidated ward minimap visibility index. reason='{reason}'");
     }
 
-    internal static void ObserveSyncedWardState(
-        ZDOID zdoId,
-        uint dataRevision,
-        long ownerPlayerId,
-        int wardGuildId,
-        UnityEngine.Vector3 position,
-        float radius,
-        bool isEnabled,
-        long[] permittedPlayerIds)
-    {
-        var entry = new WardMinimapVisibilityIndexedEntry(
-            zdoId,
-            ownerPlayerId,
-            wardGuildId,
-            position,
-            radius,
-            isEnabled,
-            permittedPlayerIds ?? Array.Empty<long>());
-        ApplyEntry(entry, dataRevision);
-    }
-
     internal static int GetViewerRevisionToken(long playerId, int guildId, bool canSeeAllWards)
     {
         return GetOrBuildViewerCache(playerId, guildId, canSeeAllWards).ViewerRevisionToken;

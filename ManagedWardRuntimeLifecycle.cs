@@ -44,7 +44,7 @@ internal static class ManagedWardRuntimeLifecycle
         }
 
         GuildsCompat.Update();
-        WardAccess.UpdateTrustedPlayerPresenceSweep();
+        ManagedWardPresenceService.Update();
 
         if (WardMinimapPinsManager.HasPendingRuntimeWork())
         {

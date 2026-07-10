@@ -31,7 +31,6 @@ internal static class WardPluginConfigBindings
         }
 
         UnbindHandler(Plugin.MaxWardRadius, HandleMaxWardRadiusChanged);
-        UnbindHandler(Plugin.MaxWardsPerSteamId, HandleMaxWardLimitChanged);
         UnbindHandler(Plugin.HostileCreatureStructureProtection, HandleWardPresenceConfigChanged);
         UnbindHandler(Plugin.DisableVanillaGuardStoneRecipe, HandleRecipeSettingsChanged);
         UnbindHandler(Plugin.StuWardRecipe, HandleRecipeSettingsChanged);
@@ -102,16 +101,15 @@ internal static class WardPluginConfigBindings
 
     private static void BindRestrictions()
     {
+        Plugin.RestrictionModes.Clear();
         var definitions = WardSettings.RestrictionDefinitions;
         for (var index = 0; index < definitions.Count; index++)
         {
             var definition = definitions[index];
-            SetRestrictionConfigEntry(
-                definition.Restriction,
-                BindRestrictionMode(
-                    definition.ConfigName,
-                    definition.ConfigDescription,
-                    RestrictionOrderStart - index * OrderStep));
+            Plugin.RestrictionModes[definition.Restriction] = BindRestrictionMode(
+                definition.ConfigName,
+                definition.ConfigDescription,
+                RestrictionOrderStart - index * OrderStep);
         }
     }
 
@@ -123,40 +121,6 @@ internal static class WardPluginConfigBindings
             Plugin.RestrictionServerMode.ForcedOn,
             $"{description} ForcedOn preserves the server rule. NotForced lets each ward owner toggle this restriction in the ward settings UI.",
             configManagerOrder: configManagerOrder);
-    }
-
-    private static void SetRestrictionConfigEntry(WardRestrictionOptions restriction, ConfigEntry<Plugin.RestrictionServerMode> entry)
-    {
-        switch (restriction)
-        {
-            case WardRestrictionOptions.Doors:
-                Plugin.DoorsRestriction = entry;
-                break;
-            case WardRestrictionOptions.Portals:
-                Plugin.PortalsRestriction = entry;
-                break;
-            case WardRestrictionOptions.Pickup:
-                Plugin.PickupRestriction = entry;
-                break;
-            case WardRestrictionOptions.PlacedConsumables:
-                Plugin.PlacedConsumablesRestriction = entry;
-                break;
-            case WardRestrictionOptions.ItemStands:
-                Plugin.ItemStandsRestriction = entry;
-                break;
-            case WardRestrictionOptions.ArmorStands:
-                Plugin.ArmorStandsRestriction = entry;
-                break;
-            case WardRestrictionOptions.Containers:
-                Plugin.ContainersRestriction = entry;
-                break;
-            case WardRestrictionOptions.CraftingStations:
-                Plugin.CraftingStationsRestriction = entry;
-                break;
-            case WardRestrictionOptions.TameablesAndSaddles:
-                Plugin.TameablesAndSaddlesRestriction = entry;
-                break;
-        }
     }
 
     private static void BindClient()
@@ -205,7 +169,6 @@ internal static class WardPluginConfigBindings
     private static void BindHandlers()
     {
         BindHandler(Plugin.MaxWardRadius, HandleMaxWardRadiusChanged);
-        BindHandler(Plugin.MaxWardsPerSteamId, HandleMaxWardLimitChanged);
         BindHandler(Plugin.HostileCreatureStructureProtection, HandleWardPresenceConfigChanged);
         BindHandler(Plugin.DisableVanillaGuardStoneRecipe, HandleRecipeSettingsChanged);
         BindHandler(Plugin.StuWardRecipe, HandleRecipeSettingsChanged);
@@ -217,11 +180,6 @@ internal static class WardPluginConfigBindings
     private static void HandleMaxWardRadiusChanged(object? _, EventArgs __)
     {
         WardSettings.HandleMaxRadiusChanged();
-    }
-
-    private static void HandleMaxWardLimitChanged(object? _, EventArgs __)
-    {
-        WardOwnership.HandleWardLimitPolicyChanged();
     }
 
     private static void HandleWardPresenceConfigChanged(object? _, EventArgs __)

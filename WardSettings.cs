@@ -81,7 +81,6 @@ internal readonly struct WardConfiguration
     internal bool WarningSoundEnabled { get; }
     internal bool WarningFlashEnabled { get; }
     internal WardRestrictionOptions Restrictions { get; }
-    internal bool AutoCloseDoors => AutoCloseDelay > 0f;
 }
 
 internal readonly struct CachedWardConfiguration
@@ -212,7 +211,6 @@ internal static class WardSettings
     private const string AreaMarkerSpeedMultiplierKey = "stuw_area_marker_speed_multiplier";
     private const string AreaMarkerAlphaKey = "stuw_area_marker_alpha";
     private const string RadiusKey = "stuw_radius";
-    private const string AutoCloseDoorsKey = "stuw_auto_close_doors";
     private const string AutoCloseDelayKey = "stuw_auto_close_delay";
     private const string WarningSoundEnabledKey = "stuw_warning_sound_enabled";
     private const string WarningFlashEnabledKey = "stuw_warning_flash_enabled";
@@ -404,19 +402,7 @@ internal static class WardSettings
 
     private static BepInEx.Configuration.ConfigEntry<Plugin.RestrictionServerMode>? GetRestrictionConfigEntry(WardRestrictionOptions restriction)
     {
-        return restriction switch
-        {
-            WardRestrictionOptions.Doors => Plugin.DoorsRestriction,
-            WardRestrictionOptions.Portals => Plugin.PortalsRestriction,
-            WardRestrictionOptions.Pickup => Plugin.PickupRestriction,
-            WardRestrictionOptions.PlacedConsumables => Plugin.PlacedConsumablesRestriction,
-            WardRestrictionOptions.ItemStands => Plugin.ItemStandsRestriction,
-            WardRestrictionOptions.ArmorStands => Plugin.ArmorStandsRestriction,
-            WardRestrictionOptions.Containers => Plugin.ContainersRestriction,
-            WardRestrictionOptions.CraftingStations => Plugin.CraftingStationsRestriction,
-            WardRestrictionOptions.TameablesAndSaddles => Plugin.TameablesAndSaddlesRestriction,
-            _ => null
-        };
+        return Plugin.RestrictionModes.TryGetValue(restriction, out var config) ? config : null;
     }
 
     internal static void CaptureAreaDefaults(PrivateArea area)
@@ -483,7 +469,7 @@ internal static class WardSettings
             }
         }
 
-        var defaultRadius = GetDefaultRadius(area);
+        const float defaultRadius = MinRadius;
 
         var showAreaMarker = zdo?.GetBool(ShowAreaMarkerKey, true) ?? true;
         var areaMarkerSpeedMultiplier = Mathf.Clamp01(
@@ -667,26 +653,6 @@ internal static class WardSettings
         return Mathf.Clamp(zdo?.GetFloat(RadiusKey, defaultRadius) ?? defaultRadius, MinRadius, MaxRadius);
     }
 
-    internal static void ApplyPlacementPreviewMarker(CircleProjector marker, float radius)
-    {
-        if (marker == null)
-        {
-            return;
-        }
-
-        marker.m_radius = radius;
-        ApplyAreaMarkerVisuals(
-            marker,
-            new WardConfiguration(
-                showAreaMarker: true,
-                areaMarkerSpeedMultiplier: 0f,
-                areaMarkerAlpha: DefaultAreaMarkerAlpha,
-                radius: radius,
-                autoCloseDelay: 0f,
-                warningSoundEnabled: DefaultWarningSoundEnabled,
-                warningFlashEnabled: DefaultWarningFlashEnabled));
-    }
-
     internal static bool TryGetAutoCloseDoorDelay(Vector3 point, out float delay)
     {
         var allAreas = WardAccess.GetCandidateManagedWards(point, 0f, requireEnabled: true);
@@ -721,11 +687,6 @@ internal static class WardSettings
 
         delay = found ? selectedDelay : 0f;
         return found;
-    }
-
-    internal static float GetDefaultRadius(PrivateArea area)
-    {
-        return MinRadius;
     }
 
     internal static bool HandleManagedFlashEffect(PrivateArea area)
@@ -1036,8 +997,16 @@ internal static class WardSettings
         SendUpdateConfigurationResponse(nview, sender, requestId, result);
     }
 
-    private static void HandleUpdateConfigurationResponse(PrivateArea area, long _, ZPackage pkg)
+    private static void HandleUpdateConfigurationResponse(PrivateArea area, long sender, ZPackage pkg)
     {
+        if (!WardOwnership.IsAuthorizedManagedWardStateResponder(GetNView(area), sender))
+        {
+            Plugin.LogWardDiagnosticFailure(
+                "UpdateSettings.Response",
+                $"Rejected ward configuration response from an unauthorized sender. sender={sender}, {WardDiagnosticInfo.DescribeWard(area)}");
+            return;
+        }
+
         if (!TryReadConfigurationResponse(area, pkg, out var requestId, out var resultCode, out var configuration, out var showOverlapMessage))
         {
             return;
@@ -1147,11 +1116,6 @@ internal static class WardSettings
             zdo.Set(RadiusKey, configuration.Radius);
         }
 
-        if (currentConfiguration.AutoCloseDoors != configuration.AutoCloseDoors)
-        {
-            zdo.Set(AutoCloseDoorsKey, configuration.AutoCloseDoors);
-        }
-
         if (!Mathf.Approximately(currentConfiguration.AutoCloseDelay, configuration.AutoCloseDelay))
         {
             zdo.Set(AutoCloseDelayKey, configuration.AutoCloseDelay);
@@ -1201,7 +1165,6 @@ internal static class WardSettings
         {
             ManagedWardMapStateService.NotifyLiveWardMutation(
                 area,
-                ManagedWardMapMutationKind.IndexAndPins,
                 "ward radius updated");
             WardOwnership.ForceSyncManagedWardZdoToServer(ward, "UpdateSettings.Sync");
         }

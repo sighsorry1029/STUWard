@@ -140,14 +140,36 @@ internal static class ManagedWardReportService
         }
     }
 
-    private static void HandleReceiveWardReport(long _, ZPackage pkg)
+    private static void HandleReceiveWardReport(long sender, ZPackage pkg)
     {
-        var success = pkg.ReadBool();
-        var trackedAccounts = pkg.ReadInt();
-        var totalWards = pkg.ReadInt();
-        var unresolvedOwners = pkg.ReadInt();
-        var message = pkg.ReadString();
-        var reportContents = pkg.ReadString();
+        if (!WardOwnership.IsAuthoritativeServerSender(sender) || pkg == null)
+        {
+            Plugin.LogWardDiagnosticFailure(
+                "WardReport.Response",
+                $"Rejected ward report response from a non-server sender. sender={sender}");
+            return;
+        }
+
+        bool success;
+        int trackedAccounts;
+        int totalWards;
+        int unresolvedOwners;
+        string message;
+        string reportContents;
+        try
+        {
+            success = pkg.ReadBool();
+            trackedAccounts = pkg.ReadInt();
+            totalWards = pkg.ReadInt();
+            unresolvedOwners = pkg.ReadInt();
+            message = pkg.ReadString();
+            reportContents = pkg.ReadString();
+        }
+        catch (Exception exception)
+        {
+            Plugin.Log.LogWarning($"{Plugin.ModName}: failed to read ward report response: {exception.Message}");
+            return;
+        }
 
         if (!success)
         {

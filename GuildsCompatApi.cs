@@ -34,9 +34,6 @@ internal static partial class GuildsCompat
     private static readonly MethodInfo? GetPlayerGuildByReferenceMethod = ApiType != null && PlayerReferenceType != null
         ? AccessTools.Method(ApiType, "GetPlayerGuild", new[] { PlayerReferenceType })
         : null;
-    private static readonly MethodInfo? GetGuildsMethod = ApiType != null
-        ? AccessTools.Method(ApiType, "GetGuilds", Type.EmptyTypes)
-        : null;
     private static readonly MethodInfo? GetGuildByIdMethod = ApiType != null
         ? AccessTools.Method(ApiType, "GetGuild", new[] { typeof(int) })
         : null;

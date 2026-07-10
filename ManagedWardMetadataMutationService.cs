@@ -1,29 +1,8 @@
 namespace STUWard;
 
-internal readonly struct ManagedWardMetadataMutationResult
-{
-    internal ManagedWardMetadataMutationResult(
-        ManagedWardProjectionApplyResult projectionResult,
-        bool authoritativeMetadataChanged,
-        bool registrySynchronized,
-        bool fastSendTriggered)
-    {
-        ProjectionResult = projectionResult;
-        AuthoritativeMetadataChanged = authoritativeMetadataChanged;
-        RegistrySynchronized = registrySynchronized;
-        FastSendTriggered = fastSendTriggered;
-    }
-
-    internal ManagedWardProjectionApplyResult ProjectionResult { get; }
-    internal bool AuthoritativeMetadataChanged { get; }
-    internal bool RegistrySynchronized { get; }
-    internal bool FastSendTriggered { get; }
-    internal bool AnyMetadataChanged => AuthoritativeMetadataChanged || ProjectionResult.AnyChanged;
-}
-
 internal static class ManagedWardMetadataMutationService
 {
-    internal static ManagedWardMetadataMutationResult ObserveAuthoritativeWard(
+    internal static ManagedWardProjectionApplyResult ObserveAuthoritativeWard(
         ZDO? zdo,
         long ownerPlayerId,
         string wardSteamAccountId,
@@ -39,15 +18,14 @@ internal static class ManagedWardMetadataMutationService
             reason,
             forceSendWhenMetadataChanged: true,
             notifyObserved: true,
-            mutationKind: null,
+            notifyPins: false,
             liveDisplayRefresh);
     }
 
-    internal static ManagedWardMetadataMutationResult RefreshProjectedMetadata(
+    internal static ManagedWardProjectionApplyResult RefreshProjectedMetadata(
         ZDO? zdo,
         long ownerPlayerId,
         string wardSteamAccountId,
-        ManagedWardMapMutationKind mutationKind,
         string reason,
         bool forceSendWhenMetadataChanged = false,
         bool liveDisplayRefresh = false)
@@ -60,14 +38,13 @@ internal static class ManagedWardMetadataMutationService
             reason,
             forceSendWhenMetadataChanged,
             notifyObserved: false,
-            mutationKind,
+            notifyPins: false,
             liveDisplayRefresh);
     }
 
-    internal static ManagedWardMetadataMutationResult ApplyExplicitProjection(
+    internal static ManagedWardProjectionApplyResult ApplyExplicitProjection(
         ZDO? zdo,
         ManagedWardProjection projection,
-        ManagedWardMapMutationKind mutationKind,
         string reason,
         bool forceSendWhenMetadataChanged = true,
         bool liveDisplayRefresh = false)
@@ -80,14 +57,13 @@ internal static class ManagedWardMetadataMutationService
             reason,
             forceSendWhenMetadataChanged,
             notifyObserved: false,
-            mutationKind,
+            notifyPins: true,
             liveDisplayRefresh);
     }
 
-    internal static ManagedWardMetadataMutationResult ApplyOwnedLocalProjection(
+    internal static ManagedWardProjectionApplyResult ApplyOwnedLocalProjection(
         ZDO? zdo,
         ManagedWardProjection projection,
-        ManagedWardMapMutationKind mutationKind,
         string reason,
         bool forceSendWhenMetadataChanged = true,
         bool liveDisplayRefresh = false)
@@ -103,61 +79,51 @@ internal static class ManagedWardMetadataMutationService
             reason,
             forceSendWhenMetadataChanged,
             notifyObserved: false,
-            mutationKind,
+            notifyPins: true,
             liveDisplayRefresh);
     }
 
     internal static void SynchronizeRegistryEntry(ZDO? zdo)
     {
-        if (!CanSynchronizeRegistry(zdo))
+        if (CanSynchronizeRegistry(zdo))
         {
-            return;
+            ManagedWardRegistry.UpsertEntry(zdo);
         }
-
-        ManagedWardRegistry.UpsertEntry(zdo);
     }
 
-    private static ManagedWardMetadataMutationResult FinalizeMutation(
+    private static ManagedWardProjectionApplyResult FinalizeMutation(
         ZDO? zdo,
         ManagedWardProjectionApplyResult projectionResult,
         bool authoritativeMetadataChanged,
         string reason,
         bool forceSendWhenMetadataChanged,
         bool notifyObserved,
-        ManagedWardMapMutationKind? mutationKind,
+        bool notifyPins,
         bool liveDisplayRefresh)
     {
-        var registrySynchronized = false;
         if (CanSynchronizeRegistry(zdo))
         {
             ManagedWardRegistry.UpsertEntry(zdo);
-            registrySynchronized = true;
         }
 
-        var fastSendTriggered = false;
         if (zdo != null &&
             zdo.IsValid() &&
             forceSendWhenMetadataChanged &&
             (authoritativeMetadataChanged || projectionResult.AnyChanged))
         {
             ZDOMan.instance?.ForceSendZDO(zdo.m_uid);
-            fastSendTriggered = true;
         }
 
         if (notifyObserved)
         {
             ManagedWardMapStateService.NotifyWardObserved(zdo, reason, liveDisplayRefresh);
         }
-        else if (mutationKind.HasValue && projectionResult.AnyChanged)
+        else if (projectionResult.AnyChanged)
         {
-            ManagedWardMapStateService.NotifyZdoWardMutation(zdo, mutationKind.Value, reason, liveDisplayRefresh);
+            ManagedWardMapStateService.NotifyZdoWardMutation(zdo, reason, notifyPins, liveDisplayRefresh);
         }
 
-        return new ManagedWardMetadataMutationResult(
-            projectionResult,
-            authoritativeMetadataChanged,
-            registrySynchronized,
-            fastSendTriggered);
+        return projectionResult;
     }
 
     private static bool CanSynchronizeRegistry(ZDO? zdo)

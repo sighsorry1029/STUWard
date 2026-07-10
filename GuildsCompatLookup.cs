@@ -219,6 +219,57 @@ internal static partial class GuildsCompat
         }
     }
 
+    internal static bool TryResolveAuthoritativeGuildIdentity(
+        long playerId,
+        string accountId,
+        string playerName,
+        out WardGuildIdentity guild)
+    {
+        guild = default;
+        if (!IsAvailable())
+        {
+            return false;
+        }
+
+        var player = Player.GetPlayer(playerId);
+        if (player != null && GetPlayerGuildByPlayerMethod != null)
+        {
+            try
+            {
+                var guildObject = GetPlayerGuildByPlayerMethod.Invoke(null, new object[] { player });
+                TryParseGuild(guildObject, out guild);
+                return true;
+            }
+            catch
+            {
+            }
+        }
+
+        var normalizedAccountId = WardOwnership.NormalizeAccountIdValue(accountId);
+        var normalizedPlayerName = playerName?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(normalizedAccountId) ||
+            string.IsNullOrWhiteSpace(normalizedPlayerName) ||
+            GetPlayerGuildByReferenceMethod == null ||
+            PlayerReferenceFromStringMethod == null)
+        {
+            return false;
+        }
+
+        try
+        {
+            var playerReference = PlayerReferenceFromStringMethod.Invoke(
+                null,
+                new object[] { $"{normalizedAccountId}:{normalizedPlayerName}" });
+            var guildObject = GetPlayerGuildByReferenceMethod.Invoke(null, new[] { playerReference! });
+            TryParseGuild(guildObject, out guild);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private static bool TryGetGuildById(int guildId, out WardGuildIdentity guild)
     {
         guild = default;

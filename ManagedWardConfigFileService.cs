@@ -6,37 +6,17 @@ using YamlDotNet.Serialization;
 
 namespace STUWard;
 
-internal readonly struct ManagedWardItemPrefabPolicySnapshot
-{
-    internal ManagedWardItemPrefabPolicySnapshot(
-        IReadOnlyList<string> blockedItemPrefabs,
-        IReadOnlyList<string> pickupWhitelist,
-        IReadOnlyList<string> pickupBlacklist)
-    {
-        BlockedItemPrefabs = blockedItemPrefabs;
-        PickupWhitelist = pickupWhitelist;
-        PickupBlacklist = pickupBlacklist;
-    }
-
-    internal IReadOnlyList<string> BlockedItemPrefabs { get; }
-    internal IReadOnlyList<string> PickupWhitelist { get; }
-    internal IReadOnlyList<string> PickupBlacklist { get; }
-}
-
 internal readonly struct ManagedWardConfigSnapshot
 {
     internal ManagedWardConfigSnapshot(
         IReadOnlyDictionary<string, int> wardLimitOverrides,
-        ManagedWardItemPrefabPolicySnapshot itemPrefabPolicy,
         string itemPrefabPolicyYaml)
     {
         WardLimitOverrides = wardLimitOverrides;
-        ItemPrefabPolicy = itemPrefabPolicy;
         ItemPrefabPolicyYaml = itemPrefabPolicyYaml ?? string.Empty;
     }
 
     internal IReadOnlyDictionary<string, int> WardLimitOverrides { get; }
-    internal ManagedWardItemPrefabPolicySnapshot ItemPrefabPolicy { get; }
     internal string ItemPrefabPolicyYaml { get; }
 }
 
@@ -214,10 +194,9 @@ internal static class ManagedWardConfigFileService
             }
 
             var itemPolicyData = data.ItemPrefabPolicy ?? new ManagedWardItemPrefabPolicyYaml();
-            var itemPolicySnapshot = CreateItemPrefabPolicySnapshot(itemPolicyData);
             var itemPolicyYaml = SerializeItemPrefabPolicy(itemPolicyData);
 
-            snapshot = new ManagedWardConfigSnapshot(wardLimitOverrides, itemPolicySnapshot, itemPolicyYaml);
+            snapshot = new ManagedWardConfigSnapshot(wardLimitOverrides, itemPolicyYaml);
             return true;
         }
         catch (Exception exception)
@@ -225,37 +204,6 @@ internal static class ManagedWardConfigFileService
             Plugin.Log.LogWarning($"Failed to parse managed ward config YAML '{ConfigFileName}': {exception.Message}");
             return false;
         }
-    }
-
-    private static ManagedWardItemPrefabPolicySnapshot CreateItemPrefabPolicySnapshot(ManagedWardItemPrefabPolicyYaml data)
-    {
-        return new ManagedWardItemPrefabPolicySnapshot(
-            NormalizePrefabNames(data.BlockedItemPrefabs),
-            NormalizePrefabNames(data.PickupWhitelist),
-            NormalizePrefabNames(data.PickupBlacklist));
-    }
-
-    private static List<string> NormalizePrefabNames(IEnumerable<string>? prefabNames)
-    {
-        var result = new List<string>();
-        if (prefabNames == null)
-        {
-            return result;
-        }
-
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var prefabName in prefabNames)
-        {
-            var normalized = WardItemPrefabPolicy.NormalizePrefabName(prefabName);
-            if (string.IsNullOrWhiteSpace(normalized) || !seen.Add(normalized))
-            {
-                continue;
-            }
-
-            result.Add(normalized);
-        }
-
-        return result;
     }
 
     private static string SerializeItemPrefabPolicy(ManagedWardItemPrefabPolicyYaml data)
@@ -316,10 +264,8 @@ internal static class ManagedWardConfigFileService
             PickupBlacklist = new List<string>()
         };
 
-        var itemPolicySnapshot = CreateItemPrefabPolicySnapshot(itemPolicy);
         return new ManagedWardConfigSnapshot(
             new Dictionary<string, int>(StringComparer.Ordinal),
-            itemPolicySnapshot,
             SerializeItemPrefabPolicy(itemPolicy));
     }
 

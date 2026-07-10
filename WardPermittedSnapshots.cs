@@ -7,6 +7,7 @@ internal static class WardPermittedSnapshots
 {
     private const int BackfillBatchSize = 4;
     private const int SnapshotFormatVersion = 1;
+    private const int MaxSnapshotDataBytes = 1024 * 1024;
     private static readonly int SnapshotVersionKey = "stuw_perm_snapshot_version".GetStableHashCode();
     private static readonly int SnapshotDataKey = "stuw_perm_snapshot".GetStableHashCode();
     private static readonly int SnapshotRevisionKey = "stuw_perm_snapshot_revision".GetStableHashCode();
@@ -26,14 +27,14 @@ internal static class WardPermittedSnapshots
         internal int InstanceId { get; }
     }
 
-    internal static void Capture(PrivateArea? area, long playerId)
+    internal static void Refresh(PrivateArea? area)
     {
-        Refresh(area);
-    }
+        if (!TryGetOwnedSnapshotZdo(area, out var zdo, out _))
+        {
+            return;
+        }
 
-    internal static void Remove(PrivateArea? area, long playerId)
-    {
-        Refresh(area);
+        WriteSnapshot(zdo, BuildEntries(area!));
     }
 
     internal static void Backfill(PrivateArea? area)
@@ -130,50 +131,8 @@ internal static class WardPermittedSnapshots
         return zdo?.GetInt(SnapshotRevisionKey, 0) ?? 0;
     }
 
-    internal static void RefreshFromZdo(ZDO? zdo)
+    private static void WriteSnapshot(ZDO zdo, List<SnapshotEntry> entries)
     {
-        if (zdo == null || !zdo.IsValid() || ZNet.instance == null || !ZNet.instance.IsServer())
-        {
-            return;
-        }
-
-        var entries = BuildEntries(zdo);
-        var package = new ZPackage();
-        package.Write(SnapshotFormatVersion);
-        package.Write(entries.Count);
-
-        for (var index = 0; index < entries.Count; index++)
-        {
-            var entry = entries[index];
-            package.Write(entry.PlayerId);
-            package.Write(entry.GuildName);
-            package.Write(entry.PlatformId);
-        }
-
-        var snapshotData = package.GetArray();
-        var previousVersion = zdo.GetInt(SnapshotVersionKey, 0);
-        var previousData = zdo.GetByteArray(SnapshotDataKey, null);
-        var previousRevision = zdo.GetInt(SnapshotRevisionKey, 0);
-        if (previousVersion != SnapshotFormatVersion ||
-            previousRevision <= 0 ||
-            !ByteArraysEqual(previousData, snapshotData))
-        {
-            zdo.Set(SnapshotVersionKey, SnapshotFormatVersion);
-            zdo.Set(SnapshotDataKey, snapshotData);
-            zdo.Set(SnapshotRevisionKey, previousRevision == int.MaxValue ? 1 : previousRevision + 1);
-        }
-
-        SnapshotCache[zdo.m_uid] = new CachedSnapshot(zdo.DataRevision, ToLookup(entries));
-    }
-
-    private static void Refresh(PrivateArea? area)
-    {
-        if (!TryGetOwnedSnapshotZdo(area, out var zdo, out var nview))
-        {
-            return;
-        }
-
-        var entries = BuildEntries(area!);
         var package = new ZPackage();
         package.Write(SnapshotFormatVersion);
         package.Write(entries.Count);
@@ -207,6 +166,14 @@ internal static class WardPermittedSnapshots
         SnapshotCache.Clear();
         PendingBackfillRequests.Clear();
         PendingBackfillAreaIds.Clear();
+    }
+
+    internal static void Forget(ZDOID zdoId)
+    {
+        if (!zdoId.IsNone())
+        {
+            SnapshotCache.Remove(zdoId);
+        }
     }
 
     private static bool HasCurrentSnapshot(ZDO zdo)
@@ -307,38 +274,49 @@ internal static class WardPermittedSnapshots
     private static Dictionary<long, SnapshotEntry> Deserialize(ZDO zdo)
     {
         var entries = new Dictionary<long, SnapshotEntry>();
-        if (zdo.GetInt(SnapshotVersionKey, 0) != SnapshotFormatVersion)
+        try
         {
-            return entries;
-        }
-
-        var snapshotData = zdo.GetByteArray(SnapshotDataKey, null);
-        if (snapshotData == null || snapshotData.Length == 0)
-        {
-            return entries;
-        }
-
-        var package = new ZPackage(snapshotData);
-        if (package.ReadInt() != SnapshotFormatVersion)
-        {
-            return entries;
-        }
-
-        var count = package.ReadInt();
-        for (var index = 0; index < count; index++)
-        {
-            var playerId = package.ReadLong();
-            if (playerId == 0L)
+            if (zdo.GetInt(SnapshotVersionKey, 0) != SnapshotFormatVersion)
             {
-                package.ReadString();
-                package.ReadString();
-                continue;
+                return entries;
             }
 
-            entries[playerId] = new SnapshotEntry(playerId, package.ReadString(), package.ReadString());
-        }
+            var snapshotData = zdo.GetByteArray(SnapshotDataKey, null);
+            if (snapshotData == null || snapshotData.Length == 0 || snapshotData.Length > MaxSnapshotDataBytes)
+            {
+                return entries;
+            }
 
-        return entries;
+            var package = new ZPackage(snapshotData);
+            if (package.ReadInt() != SnapshotFormatVersion)
+            {
+                return entries;
+            }
+
+            var count = package.ReadInt();
+            if (count < 0 || count > WardPrivateAreaSafeAccess.MaxPermittedPlayers)
+            {
+                return entries;
+            }
+
+            for (var index = 0; index < count; index++)
+            {
+                var playerId = package.ReadLong();
+                var guildName = package.ReadString();
+                var platformId = package.ReadString();
+                if (playerId != 0L)
+                {
+                    entries[playerId] = new SnapshotEntry(playerId, guildName, platformId);
+                }
+            }
+
+            return entries;
+        }
+        catch
+        {
+            entries.Clear();
+            return entries;
+        }
     }
 
     private static Dictionary<long, SnapshotEntry> ToLookup(List<SnapshotEntry> entries)
@@ -413,11 +391,10 @@ internal static class PrivateAreaAddPermittedSnapshotPatch
             return;
         }
 
-        WardPermittedSnapshots.Capture(__instance, playerID);
+        WardPermittedSnapshots.Refresh(__instance);
         ManagedWardPresenceService.Invalidate();
         ManagedWardMapStateService.NotifyLiveWardMutation(
             __instance,
-            ManagedWardMapMutationKind.IndexAndPins,
             "ward permitted player added");
         WardOwnership.ForceSyncManagedWardZdoToServer(ward, "TogglePermitted.Sync");
     }
@@ -434,11 +411,10 @@ internal static class PrivateAreaRemovePermittedSnapshotPatch
             return;
         }
 
-        WardPermittedSnapshots.Remove(__instance, playerID);
+        WardPermittedSnapshots.Refresh(__instance);
         ManagedWardPresenceService.Invalidate();
         ManagedWardMapStateService.NotifyLiveWardMutation(
             __instance,
-            ManagedWardMapMutationKind.IndexAndPins,
             "ward permitted player removed");
         WardOwnership.ForceSyncManagedWardZdoToServer(ward, "TogglePermitted.Sync");
     }

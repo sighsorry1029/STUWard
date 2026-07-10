@@ -96,7 +96,6 @@ internal static class WardAccess
 
         internal AccessDecision Decision { get; }
         internal bool IsDenied => Decision == AccessDecision.Denied;
-        internal bool IsCoveredAndAllowed => Decision == AccessDecision.Allowed;
     }
 
     internal readonly struct RestrictionScope : IDisposable
@@ -280,24 +279,6 @@ internal static class WardAccess
         return EnabledWardIndex.Count > 0;
     }
 
-    internal static void InvalidateWardPresenceCache()
-    {
-        ManagedWardPresenceService.Invalidate();
-    }
-
-    internal static void InvalidateManagedWardSpatialIndex()
-    {
-        if (_managedWardSpatialIndexRequiresFullRebuild)
-        {
-            ManagedWardPlacementPreviewService.Invalidate();
-            return;
-        }
-
-        _managedWardSpatialIndexRequiresFullRebuild = true;
-        BumpManagedWardSpatialRevision();
-        ManagedWardPlacementPreviewService.Invalidate();
-    }
-
     internal static void RefreshManagedWardSpatialIndexEntry(PrivateArea? area)
     {
         RefreshManagedWardSpatialIndexEntry(ManagedWardRef.FromArea(area));
@@ -347,17 +328,6 @@ internal static class WardAccess
         _managedWardSpatialIndexMaxRadius = -1f;
         _managedWardSpatialIndexRevision = 0;
         ManagedWardPlacementPreviewService.Invalidate();
-    }
-
-    internal static void UpdateTrustedPlayerPresenceSweep()
-    {
-        ManagedWardPresenceService.Update();
-    }
-
-    internal static IReadOnlyList<PrivateArea> GetManagedWards(bool requireEnabled)
-    {
-        EnsureManagedWardCacheInitialized();
-        return requireEnabled ? EnabledWardIndex.Areas : AllWardIndex.Areas;
     }
 
     internal static bool CheckAccess(Vector3 point, float radius, long playerId, bool flash = true, bool wardCheck = false)
@@ -488,6 +458,7 @@ internal static class WardAccess
     internal static int CollectDeniedManagedWardCandidates(
         long playerId,
         IReadOnlyList<PrivateArea> areas,
+        WardRestrictionOptions restriction,
         List<PrivateArea> deniedAreas)
     {
         deniedAreas.Clear();
@@ -500,7 +471,9 @@ internal static class WardAccess
         var actor = ManagedWardAccessEvaluator.CreateActor(playerId);
         foreach (var area in areas)
         {
-            if (area == null || ManagedWardAccessEvaluator.HasPlayerAccess(area, actor, includeDiagnosticData))
+            if (area == null ||
+                !WardSettings.HasRestriction(WardSettings.GetConfiguration(area), restriction) ||
+                ManagedWardAccessEvaluator.HasPlayerAccess(area, actor, includeDiagnosticData))
             {
                 continue;
             }
@@ -948,11 +921,6 @@ internal static class WardAccess
         return terrainOp != null ? terrainOp.GetRadius() : 0f;
     }
 
-    internal static bool IsRelevantWard(PrivateArea? area)
-    {
-        return IsManagedWard(area, true);
-    }
-
     internal static bool IsManagedWard(PrivateArea? area, bool requireEnabled)
     {
         return IsManagedWard(ManagedWardRef.FromArea(area), requireEnabled);
@@ -1122,7 +1090,7 @@ internal static class WardAccess
 
     internal static long GetCanonicalCreatorPlayerId(PrivateArea? area)
     {
-        var zdoCreator = GetWardCreatorId(area);
+        var zdoCreator = ManagedWardRef.FromArea(area).CreatorPlayerId;
         if (zdoCreator != 0L)
         {
             return zdoCreator;
@@ -1130,11 +1098,6 @@ internal static class WardAccess
 
         var piece = area?.m_piece != null ? area.m_piece : area?.GetComponent<Piece>();
         return piece != null ? piece.GetCreator() : 0L;
-    }
-
-    internal static long GetWardCreatorId(PrivateArea? area)
-    {
-        return ManagedWardRef.FromArea(area).CreatorPlayerId;
     }
 
     internal static PrivateArea? FindNearestManagedWard(

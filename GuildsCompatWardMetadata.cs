@@ -75,13 +75,12 @@ internal static partial class GuildsCompat
             localPlayer.GetPlayerID(),
             WardOwnership.GetPlayerAccountId(localPlayer),
             guildIdentity);
-        var mutation = ManagedWardMetadataMutationService.ApplyOwnedLocalProjection(
+        var projectionResult = ManagedWardMetadataMutationService.ApplyOwnedLocalProjection(
             zdo,
             projection,
-            ManagedWardMapMutationKind.IndexAndPins,
             "local ward guild metadata stamp",
             forceSendWhenMetadataChanged: false);
-        return mutation.ProjectionResult.GuildChanged;
+        return projectionResult.GuildChanged;
     }
 
     internal static int GetWardGuildId(PrivateArea? area)
@@ -289,7 +288,6 @@ internal static partial class GuildsCompat
         _ = ManagedWardMetadataMutationService.ApplyExplicitProjection(
             zdo,
             ManagedWardProjectionService.ResolveExplicitProjection(ownerPlayerId, wardSteamAccountId, guild),
-            ManagedWardMapMutationKind.IndexAndPins,
             "resolved ward guild metadata");
     }
 
@@ -547,8 +545,7 @@ internal static partial class GuildsCompat
                     managedWardZdo,
                     ownerPlayerId,
                     wardAccountId,
-                    ManagedWardMapMutationKind.IndexOnly,
-                    "guild projection refreshed").ProjectionResult.AnyChanged)
+                    "guild projection refreshed").AnyChanged)
             {
                 continue;
             }

@@ -35,7 +35,6 @@ internal static class WardGuiLayoutSettings
     internal static Vector2 GetWarningFlashTogglePosition(float toggleSize) => GetWarningTogglePosition(GetSettingsSliderCenterX(), toggleSize);
     internal static Vector2 GetRegisteredPlayersRemoveButtonPosition() => new(395f, 0f);
     internal static Vector2 GetRegisteredPlayersHeaderPosition() => new(0f, 10f);
-    internal static Vector2 GetRegisteredPlayersHelpPosition() => new(0f, -128f);
     internal static Vector2 GetPermittedListPosition() => new(-15f, -190f);
     internal static Vector2 GetPermittedListSize() => new(960f, 360f);
     internal static Vector2 GetRestrictionsHeaderPosition() => new(0f, 285f);

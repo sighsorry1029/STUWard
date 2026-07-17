@@ -8,20 +8,17 @@ internal readonly struct ManagedWardRegistryEntry
     internal ManagedWardRegistryEntry(
         ZDOID zdoId,
         long ownerPlayerId,
-        string accountId,
         string characterKey,
         int guildId)
     {
         ZdoId = zdoId;
         OwnerPlayerId = ownerPlayerId;
-        AccountId = accountId ?? string.Empty;
         CharacterKey = characterKey ?? string.Empty;
         GuildId = guildId;
     }
 
     internal ZDOID ZdoId { get; }
     internal long OwnerPlayerId { get; }
-    internal string AccountId { get; }
     internal string CharacterKey { get; }
     internal int GuildId { get; }
 }
@@ -29,7 +26,6 @@ internal readonly struct ManagedWardRegistryEntry
 internal static class ManagedWardRegistry
 {
     private static readonly Dictionary<ZDOID, ManagedWardRegistryEntry> ManagedWardRegistryEntriesByZdoId = new();
-    private static readonly Dictionary<string, int> ManagedWardCountsByAccountId = new(StringComparer.Ordinal);
     private static readonly Dictionary<long, HashSet<ZDOID>> ManagedWardIdsByOwnerPlayerId = new();
     private static readonly Dictionary<int, HashSet<ZDOID>> ManagedWardIdsByGuildId = new();
     private static readonly Dictionary<string, HashSet<ZDOID>> ManagedWardIdsByCharacterKey = new(StringComparer.Ordinal);
@@ -37,7 +33,6 @@ internal static class ManagedWardRegistry
     internal static void Reset()
     {
         ManagedWardRegistryEntriesByZdoId.Clear();
-        ManagedWardCountsByAccountId.Clear();
         ManagedWardIdsByOwnerPlayerId.Clear();
         ManagedWardIdsByGuildId.Clear();
         ManagedWardIdsByCharacterKey.Clear();
@@ -74,27 +69,6 @@ internal static class ManagedWardRegistry
         }
 
         RemoveManagedWardRegistryIndexes(entry);
-    }
-
-    internal static int CountForAccount(string accountId, ZDOID ignoredZdoId = default)
-    {
-        var canonicalAccountId = WardOwnership.NormalizeAccountIdValue(accountId);
-        if (string.IsNullOrWhiteSpace(canonicalAccountId))
-        {
-            return 0;
-        }
-
-        var count = ManagedWardCountsByAccountId.TryGetValue(canonicalAccountId, out var indexedCount)
-            ? indexedCount
-            : 0;
-        if (!ignoredZdoId.IsNone() &&
-            ManagedWardRegistryEntriesByZdoId.TryGetValue(ignoredZdoId, out var ignoredEntry) &&
-            string.Equals(ignoredEntry.AccountId, canonicalAccountId, StringComparison.Ordinal))
-        {
-            count--;
-        }
-
-        return Math.Max(0, count);
     }
 
     internal static int GetIndexedCount()
@@ -172,20 +146,12 @@ internal static class ManagedWardRegistry
         return new ManagedWardRegistryEntry(
             zdo.m_uid,
             ownerPlayerId,
-            accountId,
             characterKey,
             guildId);
     }
 
     private static void AddManagedWardRegistryIndexes(ManagedWardRegistryEntry entry)
     {
-        if (!string.IsNullOrWhiteSpace(entry.AccountId))
-        {
-            ManagedWardCountsByAccountId[entry.AccountId] = ManagedWardCountsByAccountId.TryGetValue(entry.AccountId, out var existingCount)
-                ? existingCount + 1
-                : 1;
-        }
-
         if (entry.OwnerPlayerId != 0L)
         {
             AddManagedWardRegistryId(ManagedWardIdsByOwnerPlayerId, entry.OwnerPlayerId, entry.ZdoId);
@@ -204,22 +170,6 @@ internal static class ManagedWardRegistry
 
     private static void RemoveManagedWardRegistryIndexes(ManagedWardRegistryEntry entry)
     {
-        if (!string.IsNullOrWhiteSpace(entry.AccountId))
-        {
-            if (ManagedWardCountsByAccountId.TryGetValue(entry.AccountId, out var existingCount))
-            {
-                if (existingCount <= 1)
-                {
-                    ManagedWardCountsByAccountId.Remove(entry.AccountId);
-                }
-                else
-                {
-                    ManagedWardCountsByAccountId[entry.AccountId] = existingCount - 1;
-                }
-            }
-
-        }
-
         if (entry.OwnerPlayerId != 0L)
         {
             RemoveManagedWardRegistryId(ManagedWardIdsByOwnerPlayerId, entry.OwnerPlayerId, entry.ZdoId);

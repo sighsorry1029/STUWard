@@ -228,27 +228,24 @@ internal static partial class WardOwnership
                ZNet.instance.IsServer();
     }
 
-    internal static bool CanHandleManagedWardStateRpc(ZNetView? nview)
+    internal static bool TryInvokeManagedWardStateRpcOnServer(ZNetView? nview, string method, params object[] parameters)
     {
-        return nview != null &&
-               nview.IsValid() &&
-               (nview.IsOwner() || (ZNet.instance != null && ZNet.instance.IsServer()));
-    }
-
-    internal static bool IsAuthorizedManagedWardStateResponder(ZNetView? nview, long sender)
-    {
-        if (sender == 0L || nview == null || !nview.IsValid())
+        if (nview == null || !nview.IsValid() || string.IsNullOrWhiteSpace(method) ||
+            !TryGetServerPeerId(out var serverPeerId))
         {
             return false;
         }
 
-        if (IsAuthoritativeServerSender(sender))
-        {
-            return true;
-        }
+        nview.InvokeRPC(serverPeerId, method, parameters);
+        return true;
+    }
 
-        var zdo = WardPrivateAreaSafeAccess.GetZdo(nview);
-        return zdo != null && zdo.IsValid() && zdo.GetOwner() == sender;
+    internal static bool CanHandleManagedWardStateRpc(ZNetView? nview)
+    {
+        return nview != null &&
+               nview.IsValid() &&
+               ZNet.instance != null &&
+               ZNet.instance.IsServer();
     }
 
     internal static bool TryGetServerPeerId(out long serverPeerId)
@@ -302,7 +299,7 @@ internal static partial class WardOwnership
             return;
         }
 
-        ObserveManagedWard(zdo);
+        ObserveAuthoritativeManagedWardPlacement(zdo);
         Plugin.LogWardDiagnosticVerbose(
             "Placement.Notify",
             $"Observed managed ward from placement notify. sender={sender}, requesterId={requesterId}, {DescribeManagedWardZdo(zdo)}");
@@ -370,7 +367,7 @@ internal static partial class WardOwnership
                 continue;
             }
 
-            ObserveManagedWard(zdo);
+            ObserveAuthoritativeManagedWardPlacement(zdo);
             completedWardIds ??= new List<ZDOID>();
             completedWardIds.Add(entry.Key);
             Plugin.LogWardDiagnosticVerbose(

@@ -850,10 +850,22 @@ internal static class WardSettings
         var requestPackage = new ZPackage();
         requestPackage.Write(requestId);
         WriteConfiguration(requestPackage, configuration);
+        if (!WardOwnership.TryInvokeManagedWardStateRpcOnServer(nview, RpcUpdateSettings, requestPackage))
+        {
+            Plugin.LogWardDiagnosticFailure(
+                "UpdateSettings.Send",
+                $"Failed to route per-ward UpdateSettings RPC to the server. playerId={player.GetPlayerID()}, requestId={requestId}, {WardDiagnosticInfo.DescribeWard(area)}");
+            return new WardConfigurationRequestSubmission(
+                isPending: false,
+                requestId: 0L,
+                WardConfigurationRequestResultCode.InvalidState,
+                currentConfiguration,
+                showOverlapMessage: false);
+        }
+
         Plugin.LogWardDiagnosticVerbose(
             "UpdateSettings.Send",
-            $"Sending per-ward UpdateSettings RPC for playerId={player.GetPlayerID()}, requestId={requestId}, {WardDiagnosticInfo.DescribeWard(area)}");
-        nview.InvokeRPC(RpcUpdateSettings, new object[] { requestPackage });
+            $"Sent per-ward UpdateSettings RPC to the server. playerId={player.GetPlayerID()}, requestId={requestId}, {WardDiagnosticInfo.DescribeWard(area)}");
         return new WardConfigurationRequestSubmission(
             isPending: true,
             requestId: requestId,
@@ -890,10 +902,17 @@ internal static class WardSettings
 
         var requestPackage = new ZPackage();
         requestPackage.Write(targetPlayerId);
+        if (!WardOwnership.TryInvokeManagedWardStateRpcOnServer(nview, RpcRemovePermitted, requestPackage))
+        {
+            Plugin.LogWardDiagnosticFailure(
+                "RemovePermitted.Send",
+                $"Failed to route per-ward RemovePermitted RPC to the server. playerId={player.GetPlayerID()}, targetPlayerId={targetPlayerId}, {WardDiagnosticInfo.DescribeWard(area)}");
+            return;
+        }
+
         Plugin.LogWardDiagnosticVerbose(
             "RemovePermitted.Send",
-            $"Sending per-ward RemovePermitted RPC for playerId={player.GetPlayerID()}, targetPlayerId={targetPlayerId}, {WardDiagnosticInfo.DescribeWard(area)}");
-        nview.InvokeRPC(RpcRemovePermitted, new object[] { requestPackage });
+            $"Sent per-ward RemovePermitted RPC to the server. playerId={player.GetPlayerID()}, targetPlayerId={targetPlayerId}, {WardDiagnosticInfo.DescribeWard(area)}");
     }
 
     internal static void RegisterRpcHandlers(PrivateArea area)
@@ -939,19 +958,12 @@ internal static class WardSettings
     private static void HandleUpdateConfiguration(PrivateArea area, long sender, ZPackage pkg)
     {
         var nview = GetNView(area);
-        var currentConfiguration = GetConfiguration(area);
         if (nview == null || !WardOwnership.CanHandleManagedWardStateRpc(nview))
         {
-            SendUpdateConfigurationResponse(
-                nview,
-                sender,
-                0L,
-                new WardConfigurationUpdateResult(
-                    WardConfigurationRequestResultCode.InvalidState,
-                    currentConfiguration,
-                    showOverlapMessage: false));
             return;
         }
+
+        var currentConfiguration = GetConfiguration(area);
 
         if (!TryReadConfigurationRequest(pkg, out var requestId, out var configuration))
         {
@@ -999,7 +1011,7 @@ internal static class WardSettings
 
     private static void HandleUpdateConfigurationResponse(PrivateArea area, long sender, ZPackage pkg)
     {
-        if (!WardOwnership.IsAuthorizedManagedWardStateResponder(GetNView(area), sender))
+        if (!WardOwnership.IsAuthoritativeServerSender(sender))
         {
             Plugin.LogWardDiagnosticFailure(
                 "UpdateSettings.Response",

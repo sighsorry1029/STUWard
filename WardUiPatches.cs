@@ -501,11 +501,18 @@ internal static class ManagedWardInteractionRpc
             return true;
         }
 
+        var expectedEnabled = !area.IsEnabled();
+        if (!WardOwnership.TryInvokeManagedWardStateRpcOnServer(nview, "ToggleEnabled", player.GetPlayerID()))
+        {
+            Plugin.LogWardDiagnosticFailure(
+                "ToggleEnabled.Send",
+                $"Failed to route ToggleEnabled request to the server. playerId={player.GetPlayerID()}, {WardDiagnosticInfo.DescribeInteractionState(area, player.GetPlayerID())}");
+            return false;
+        }
+
         Plugin.LogWardDiagnosticVerbose(
             "ToggleEnabled.Send",
-            $"Sending vanilla ToggleEnabled request for playerId={player.GetPlayerID()}, {WardDiagnosticInfo.DescribeInteractionState(area, player.GetPlayerID())}");
-        var expectedEnabled = !area.IsEnabled();
-        nview.InvokeRPC("ToggleEnabled", new object[] { player.GetPlayerID() });
+            $"Sent ToggleEnabled request to the server. playerId={player.GetPlayerID()}, {WardDiagnosticInfo.DescribeInteractionState(area, player.GetPlayerID())}");
 
         PendingLocalEnabledToggleRequests[zdo.m_uid] = new PendingLocalEnabledToggleRequest(
             expectedEnabled,
@@ -536,11 +543,22 @@ internal static class ManagedWardInteractionRpc
             return true;
         }
 
+        var expectedPermitted = !isPermitted;
+        if (!WardOwnership.TryInvokeManagedWardStateRpcOnServer(
+                nview,
+                "TogglePermitted",
+                player.GetPlayerID(),
+                player.GetPlayerName()))
+        {
+            Plugin.LogWardDiagnosticFailure(
+                "TogglePermitted.Send",
+                $"Failed to route TogglePermitted request to the server. playerId={player.GetPlayerID()}, {WardDiagnosticInfo.DescribeInteractionState(area, player.GetPlayerID())}");
+            return false;
+        }
+
         Plugin.LogWardDiagnosticVerbose(
             "TogglePermitted.Send",
-            $"Sending vanilla TogglePermitted request for playerId={player.GetPlayerID()}, {WardDiagnosticInfo.DescribeInteractionState(area, player.GetPlayerID())}");
-        var expectedPermitted = !isPermitted;
-        nview.InvokeRPC("TogglePermitted", new object[] { player.GetPlayerID(), player.GetPlayerName() });
+            $"Sent TogglePermitted request to the server. playerId={player.GetPlayerID()}, {WardDiagnosticInfo.DescribeInteractionState(area, player.GetPlayerID())}");
 
         PendingLocalPermittedToggleRequests[zdo.m_uid] = new PendingLocalPermittedToggleRequest(
             expectedPermitted,

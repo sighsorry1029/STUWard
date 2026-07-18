@@ -205,7 +205,7 @@ internal static class ManagedWardPresenceService
                     continue;
                 }
 
-                if (!ManagedWardAccessEvaluator.HasPlayerAccess(area, actor, includeDiagnosticData: false, logDiagnostic: false))
+                if (!ManagedWardAccessEvaluator.HasPlayerAccess(area, actor))
                 {
                     continue;
                 }
@@ -252,7 +252,7 @@ internal static class ManagedWardPresenceService
                     continue;
                 }
 
-                if (!ManagedWardAccessEvaluator.HasPlayerAccess(area, actor, includeDiagnosticData: false, logDiagnostic: false))
+                if (!ManagedWardAccessEvaluator.HasPlayerAccess(area, actor))
                 {
                     continue;
                 }

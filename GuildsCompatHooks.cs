@@ -16,10 +16,6 @@ internal static partial class GuildsCompat
         EnsureHooksRegistered();
         if (_saveGuildPatched || harmony == null || SaveGuildMethod == null)
         {
-            if (SaveGuildMethod == null)
-            {
-                Plugin.LogWardDiagnosticFailure("GuildsCompat.Patch", "Skipped SaveGuild postfix patch because SaveGuildMethod could not be resolved.");
-            }
             return;
         }
 
@@ -31,7 +27,6 @@ internal static partial class GuildsCompat
 
         harmony.Patch(SaveGuildMethod, postfix: new HarmonyMethod(postfix));
         _saveGuildPatched = true;
-        Plugin.LogWardDiagnosticVerbose("GuildsCompat.Patch", "Patched Guilds.API.SaveGuild postfix for ward guild projection refresh.");
     }
 
     private static void EnsureHooksRegistered()
@@ -44,7 +39,6 @@ internal static partial class GuildsCompat
 
         if (ApiType == null)
         {
-            Plugin.LogWardDiagnosticFailure("GuildsCompat.Patch", "Skipped guild event hook registration because Guilds API type could not be resolved.");
             return;
         }
 
@@ -54,7 +48,6 @@ internal static partial class GuildsCompat
         RegisterGuildHook(RegisterOnGuildDeletedMethod, GuildDeletedDelegateType, nameof(HandleGuildDeletedEvent));
         _guildHooksRegistered = true;
         _guildHooksActive = true;
-        Plugin.LogWardDiagnosticVerbose("GuildsCompat.Patch", "Registered Guilds API event hooks for joined/left/created/deleted.");
     }
 
     internal static void TryShutdownHooks()
@@ -72,25 +65,16 @@ internal static partial class GuildsCompat
     {
         if (registerMethod == null || delegateType == null)
         {
-            Plugin.LogWardDiagnosticFailure(
-                "GuildsCompat.Patch",
-                $"Skipped guild hook registration for handler '{handlerName}' because the register method or delegate type was unresolved.");
             return;
         }
 
         var callback = CreateGuildCallback(delegateType, handlerName);
         if (callback == null)
         {
-            Plugin.LogWardDiagnosticFailure(
-                "GuildsCompat.Patch",
-                $"Failed to create guild callback delegate for handler '{handlerName}'.");
             return;
         }
 
         registerMethod.Invoke(null, new object[] { callback });
-        Plugin.LogWardDiagnosticVerbose(
-            "GuildsCompat.Patch",
-            $"Registered guild hook '{registerMethod.Name}' -> '{handlerName}'.");
     }
 
     private static Delegate? CreateGuildCallback(Type delegateType, string handlerName)
@@ -125,16 +109,10 @@ internal static partial class GuildsCompat
 
         if (!TryCreateCharacterIdentityFromPlayerReference(playerReference, out var identity))
         {
-            Plugin.LogWardDiagnosticFailure(
-                "GuildsCompat.Event",
-                $"Received GuildJoined event with an unresolved player reference. Falling back to full ward guild refresh, guild={DescribeGuildObject(guild)}.");
             RefreshAllWardGuildProjections(liveDisplayRefresh: true);
             return;
         }
 
-        Plugin.LogWardDiagnosticVerbose(
-            "GuildsCompat.Event",
-            $"Received GuildJoined event for accountId='{identity.AccountId}', playerName='{identity.PlayerName}', guild={DescribeGuildObject(guild)}.");
         RefreshWardGuildProjectionForCharacter(
             identity,
             liveDisplayRefresh: true,
@@ -150,16 +128,10 @@ internal static partial class GuildsCompat
 
         if (!TryCreateCharacterIdentityFromPlayerReference(playerReference, out var identity))
         {
-            Plugin.LogWardDiagnosticFailure(
-                "GuildsCompat.Event",
-                $"Received GuildLeft event with an unresolved player reference. Falling back to full ward guild refresh, guild={DescribeGuildObject(guild)}.");
             RefreshAllWardGuildProjections(liveDisplayRefresh: true);
             return;
         }
 
-        Plugin.LogWardDiagnosticVerbose(
-            "GuildsCompat.Event",
-            $"Received GuildLeft event for accountId='{identity.AccountId}', playerName='{identity.PlayerName}', guild={DescribeGuildObject(guild)}.");
         RefreshWardGuildProjectionForCharacter(
             identity,
             liveDisplayRefresh: true,
@@ -173,9 +145,6 @@ internal static partial class GuildsCompat
             return;
         }
 
-        Plugin.LogWardDiagnosticVerbose(
-            "GuildsCompat.Event",
-            $"Received GuildCreated event, guild={DescribeGuildObject(guild)}. Refreshing all ward guild projections.");
         RefreshAllWardGuildProjections(liveDisplayRefresh: true);
     }
 
@@ -186,9 +155,6 @@ internal static partial class GuildsCompat
             return;
         }
 
-        Plugin.LogWardDiagnosticVerbose(
-            "GuildsCompat.Event",
-            $"Received GuildDeleted event, guild={DescribeGuildObject(guild)}. Refreshing all ward guild projections.");
         RefreshAllWardGuildProjections(liveDisplayRefresh: true);
     }
 }
@@ -207,9 +173,6 @@ internal static class GuildsSaveGuildPatch
             return;
         }
 
-        Plugin.LogWardDiagnosticVerbose(
-            "GuildsCompat.Event",
-            $"Observed SaveGuild postfix, guild={GuildsCompat.DescribeGuildObject(__args[0])}.");
         GuildsCompat.HandleGuildSaved(__args[0]);
     }
 }

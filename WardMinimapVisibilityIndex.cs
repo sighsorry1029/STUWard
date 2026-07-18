@@ -104,7 +104,7 @@ internal static class WardMinimapVisibilityIndex
         ResetRuntimeState();
     }
 
-    internal static bool TryPrepare(ZDOMan? zdoMan, string reason)
+    internal static bool TryPrepare(ZDOMan? zdoMan)
     {
         if (_prepared)
         {
@@ -123,7 +123,6 @@ internal static class WardMinimapVisibilityIndex
         }
 
         IndexedWards.Clear();
-        var observedWardCount = 0;
         for (var index = 0; index < PrepareBuffer.Count; index++)
         {
             if (!TryBuildEntry(PrepareBuffer[index], out var entry))
@@ -132,14 +131,10 @@ internal static class WardMinimapVisibilityIndex
             }
 
             IndexedWards[entry.ZdoId] = entry;
-            observedWardCount++;
         }
 
         _prepared = true;
         BumpIndexRevision();
-        Plugin.LogWardDiagnosticVerbose(
-            "WardPins.Index",
-            $"Prepared ward minimap visibility index. reason='{reason}', scannedWardCount={PrepareBuffer.Count}, indexedWardCount={observedWardCount}");
         return true;
     }
 
@@ -175,7 +170,7 @@ internal static class WardMinimapVisibilityIndex
         return true;
     }
 
-    internal static void InvalidateAll(string reason)
+    internal static void InvalidateAll()
     {
         IndexedWards.Clear();
         IndexedWardDataRevisions.Clear();
@@ -183,7 +178,6 @@ internal static class WardMinimapVisibilityIndex
         PrepareBuffer.Clear();
         _prepared = false;
         BumpIndexRevision();
-        Plugin.LogWardDiagnosticVerbose("WardPins.Index", $"Invalidated ward minimap visibility index. reason='{reason}'");
     }
 
     internal static int GetViewerRevisionToken(long playerId, int guildId, bool canSeeAllWards)
@@ -220,11 +214,7 @@ internal static class WardMinimapVisibilityIndex
 
         if (activePlayerIds.Count == 0)
         {
-            var clearedCount = ViewerCaches.Count;
             ViewerCaches.Clear();
-            Plugin.LogWardDiagnosticVerbose(
-                "WardPins.Index",
-                $"Pruned ward minimap viewer caches. removedCacheCount={clearedCount}, activePlayerCount=0");
             return;
         }
 
@@ -249,10 +239,6 @@ internal static class WardMinimapVisibilityIndex
         {
             ViewerCaches.Remove(staleKeys[index]);
         }
-
-        Plugin.LogWardDiagnosticVerbose(
-            "WardPins.Index",
-            $"Pruned ward minimap viewer caches. removedCacheCount={staleKeys.Count}, activePlayerCount={activePlayerIds.Count}");
     }
 
     private static ViewerCacheState GetOrBuildViewerCache(long playerId, int guildId, bool canSeeAllWards)

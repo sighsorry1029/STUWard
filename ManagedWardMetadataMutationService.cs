@@ -7,7 +7,6 @@ internal static class ManagedWardMetadataMutationService
         long ownerPlayerId,
         string wardSteamAccountId,
         bool authoritativeMetadataChanged,
-        string reason,
         bool liveDisplayRefresh = false)
     {
         var projectionResult = ManagedWardProjectionService.RefreshProjection(zdo, ownerPlayerId, wardSteamAccountId);
@@ -15,7 +14,6 @@ internal static class ManagedWardMetadataMutationService
             zdo,
             projectionResult,
             authoritativeMetadataChanged,
-            reason,
             forceSendWhenMetadataChanged: true,
             notifyObserved: true,
             notifyPins: false,
@@ -26,7 +24,6 @@ internal static class ManagedWardMetadataMutationService
         ZDO? zdo,
         long ownerPlayerId,
         string wardSteamAccountId,
-        string reason,
         bool forceSendWhenMetadataChanged = false,
         bool liveDisplayRefresh = false)
     {
@@ -35,7 +32,6 @@ internal static class ManagedWardMetadataMutationService
             zdo,
             projectionResult,
             authoritativeMetadataChanged: false,
-            reason,
             forceSendWhenMetadataChanged,
             notifyObserved: false,
             notifyPins: false,
@@ -45,7 +41,6 @@ internal static class ManagedWardMetadataMutationService
     internal static ManagedWardProjectionApplyResult ApplyExplicitProjection(
         ZDO? zdo,
         ManagedWardProjection projection,
-        string reason,
         bool forceSendWhenMetadataChanged = true,
         bool liveDisplayRefresh = false)
     {
@@ -54,7 +49,6 @@ internal static class ManagedWardMetadataMutationService
             zdo,
             projectionResult,
             authoritativeMetadataChanged: false,
-            reason,
             forceSendWhenMetadataChanged,
             notifyObserved: false,
             notifyPins: true,
@@ -64,7 +58,6 @@ internal static class ManagedWardMetadataMutationService
     internal static ManagedWardProjectionApplyResult ApplyOwnedLocalProjection(
         ZDO? zdo,
         ManagedWardProjection projection,
-        string reason,
         bool forceSendWhenMetadataChanged = true,
         bool liveDisplayRefresh = false)
     {
@@ -76,7 +69,6 @@ internal static class ManagedWardMetadataMutationService
             zdo,
             projectionResult,
             authoritativeMetadataChanged: false,
-            reason,
             forceSendWhenMetadataChanged,
             notifyObserved: false,
             notifyPins: true,
@@ -95,7 +87,6 @@ internal static class ManagedWardMetadataMutationService
         ZDO? zdo,
         ManagedWardProjectionApplyResult projectionResult,
         bool authoritativeMetadataChanged,
-        string reason,
         bool forceSendWhenMetadataChanged,
         bool notifyObserved,
         bool notifyPins,
@@ -116,11 +107,11 @@ internal static class ManagedWardMetadataMutationService
 
         if (notifyObserved)
         {
-            ManagedWardMapStateService.NotifyWardObserved(zdo, reason, liveDisplayRefresh);
+            ManagedWardMapStateService.NotifyWardObserved(zdo, liveDisplayRefresh);
         }
         else if (projectionResult.AnyChanged)
         {
-            ManagedWardMapStateService.NotifyZdoWardMutation(zdo, reason, notifyPins, liveDisplayRefresh);
+            ManagedWardMapStateService.NotifyZdoWardMutation(zdo, notifyPins, liveDisplayRefresh);
         }
 
         return projectionResult;

@@ -70,14 +70,8 @@ internal static class ManagedWardIdentity
 
         if (!matchedByComponent && matchedByZdo && repairComponent)
         {
-            var repaired = ward.EnsureManagedComponent(out var added);
+            var repaired = ward.EnsureManagedComponent(out _);
             matchedByComponent = repaired.HasManagedComponent;
-            if (added)
-            {
-                Plugin.LogWardDiagnosticVerbose(
-                    "Placement.Identity",
-                    $"Restored missing StuWardArea component from managed ward ZDO identity. {WardDiagnosticInfo.DescribeWard(repaired.Area)}");
-            }
         }
 
         return matchedByComponent || matchedByZdo;
@@ -97,10 +91,7 @@ internal sealed class StuWardPlacedHook : MonoBehaviour, IPlaced
 
         WardOwnership.TryStampLocalManagedWardOwnerAccount(ward);
         WardOwnership.NotifyServerManagedWardPlaced(ward);
-        ManagedWardMapStateService.NotifyLiveWardMutation(area, "local managed ward placed");
-        Plugin.LogWardDiagnosticVerbose(
-            "Placement.OnPlaced",
-            $"IPlaced.OnPlaced hit for managed ward. {WardDiagnosticInfo.DescribeWard(area)}");
+        ManagedWardMapStateService.NotifyLiveWardMutation(area);
     }
 }
 
@@ -234,7 +225,6 @@ internal static class StuWardPrefab
         if (_lastLoggedPieceIconState != state)
         {
             _lastLoggedPieceIconState = state;
-            Plugin.LogWardDiagnosticVerbose("WardPins.Icon", $"Resolved piece_stuward icon from {source}.");
         }
 
         return icon;
@@ -246,7 +236,6 @@ internal static class StuWardPrefab
         if (_lastLoggedPieceIconState != state)
         {
             _lastLoggedPieceIconState = state;
-            Plugin.LogWardDiagnosticFailure("WardPins.Icon", $"Failed to resolve piece_stuward icon. {context}");
         }
 
         return null;

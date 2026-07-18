@@ -10,7 +10,6 @@ internal static class WardPluginConfigBindings
     private const int GeneralOrderStart = 700;
     private const int RestrictionOrderStart = 900;
     private const int ClientOrderStart = 300;
-    private const int DebugOrderStart = 100;
     private const int OrderStep = 10;
 
     internal static void BindAll()
@@ -19,7 +18,6 @@ internal static class WardPluginConfigBindings
         BindGeneral();
         BindRestrictions();
         BindClient();
-        BindDebug();
         BindHandlers();
     }
 
@@ -152,18 +150,6 @@ internal static class WardPluginConfigBindings
             configManagerOrder: ClientOrderStart - OrderStep * 2
         );
 
-    }
-
-    private static void BindDebug()
-    {
-        Plugin.WardDiagnosticLogging = Plugin.BindConfigEntry(
-            "4 - Debug",
-            "Ward Diagnostic Logging",
-            Plugin.DiagnosticLogMode.Off,
-            "Local-only scalar diagnostic logging for ward ownership/toggle flows. Use Failures for rejection paths only, or Verbose for request and state tracing. Enable separately on each client/server instance you want logs from.",
-            synchronizedSetting: false,
-            configManagerOrder: DebugOrderStart
-        );
     }
 
     private static void BindHandlers()

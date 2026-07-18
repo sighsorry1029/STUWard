@@ -30,9 +30,7 @@ public sealed class ManagedWardAccessPolicyTests
         var subject = new ManagedWardAccessSubject(
             ownerPlayerId,
             new WardGuildIdentity(wardGuildId, string.Empty),
-            permitted,
-            string.Empty,
-            "test-zdo");
+            permitted);
 
         var result = ManagedWardAccessPolicy.Evaluate(actor, subject);
 
@@ -66,9 +64,7 @@ public sealed class ManagedWardAccessPolicyTests
         var subject = new ManagedWardAccessSubject(
             ownerPlayerId: 100L,
             wardGuild: new WardGuildIdentity(77, "Guild"),
-            permitted: false,
-            wardSteamAccountId: string.Empty,
-            wardZdoLabel: "dedicated-server-ward");
+            permitted: false);
 
         var result = ManagedWardAccessPolicy.Evaluate(actor, subject);
 
@@ -90,9 +86,7 @@ public sealed class ManagedWardAccessPolicyTests
         var subject = new ManagedWardAccessSubject(
             ownerPlayerId: 100L,
             wardGuild: new WardGuildIdentity(wardGuildId, "Guild"),
-            permitted: false,
-            wardSteamAccountId: string.Empty,
-            wardZdoLabel: "dedicated-server-ward");
+            permitted: false);
 
         var result = ManagedWardAccessPolicy.Evaluate(actor, subject);
 

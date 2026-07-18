@@ -31,6 +31,7 @@ internal static class ManagedWardRuntimeLifecycle
 
     internal static void Update()
     {
+        BindNetwork();
         ManagedWardConfigFileService.Update();
 
         if (WardPermittedSnapshots.HasPendingRuntimeWork())

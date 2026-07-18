@@ -10,16 +10,14 @@ internal static class ManagedWardMapStateService
     // - Display-only requests do not mutate the visibility index.
     internal static void NotifyLiveWardMutation(
         PrivateArea? area,
-        string reason,
         bool liveDisplayRefresh = false)
     {
         WardMinimapVisibilityIndex.NotifyWardStateChanged(area);
-        WardMinimapPinsManager.NotifyWardDataMayHaveChanged(reason, liveDisplayRefresh);
+        WardMinimapPinsManager.NotifyWardDataMayHaveChanged(liveDisplayRefresh);
     }
 
     internal static void NotifyZdoWardMutation(
         ZDO? zdo,
-        string reason,
         bool notifyPins = true,
         bool liveDisplayRefresh = false)
     {
@@ -27,11 +25,11 @@ internal static class ManagedWardMapStateService
 
         if (notifyPins)
         {
-            WardMinimapPinsManager.NotifyWardDataMayHaveChanged(reason, liveDisplayRefresh);
+            WardMinimapPinsManager.NotifyWardDataMayHaveChanged(liveDisplayRefresh);
         }
     }
 
-    internal static void NotifyWardObserved(ZDO? zdo, string reason, bool liveDisplayRefresh = false)
+    internal static void NotifyWardObserved(ZDO? zdo, bool liveDisplayRefresh = false)
     {
         if (zdo == null)
         {
@@ -39,46 +37,44 @@ internal static class ManagedWardMapStateService
         }
 
         WardMinimapVisibilityIndex.ObserveManagedWard(zdo);
-        WardMinimapPinsManager.NotifyWardDataMayHaveChanged(reason, liveDisplayRefresh);
+        WardMinimapPinsManager.NotifyWardDataMayHaveChanged(liveDisplayRefresh);
     }
 
-    internal static void NotifyWardRemoved(ZDOID zdoId, string reason, bool liveDisplayRefresh = false)
+    internal static void NotifyWardRemoved(ZDOID zdoId, bool liveDisplayRefresh = false)
     {
         if (!zdoId.IsNone() && WardMinimapVisibilityIndex.ForgetWard(zdoId))
         {
-            WardMinimapPinsManager.NotifyWardDataMayHaveChanged(reason, liveDisplayRefresh);
+            WardMinimapPinsManager.NotifyWardDataMayHaveChanged(liveDisplayRefresh);
         }
     }
 
     internal static void NotifyViewerProjectionChanged(
-        string reason,
         bool fullRefresh,
         HashSet<long>? recipientPeerUids = null,
         bool refreshImmediatelyIfVisible = false)
     {
-        WardMinimapPinsManager.NotifyLocalWardDataMayHaveChanged(reason, refreshImmediatelyIfVisible);
+        WardMinimapPinsManager.NotifyLocalWardDataMayHaveChanged(refreshImmediatelyIfVisible);
         if (ZNet.instance != null && ZNet.instance.IsServer())
         {
             WardMinimapPinsManager.QueueServerViewerRefreshRecipients(
-                fullRefresh ? null : recipientPeerUids,
-                reason);
+                fullRefresh ? null : recipientPeerUids);
         }
     }
 
-    internal static void InvalidateProjection(string reason, bool liveDisplayRefresh = false)
+    internal static void InvalidateProjection(bool liveDisplayRefresh = false)
     {
-        WardMinimapVisibilityIndex.InvalidateAll(reason);
-        WardMinimapPinsManager.NotifyWardDataMayHaveChanged(reason, liveDisplayRefresh);
+        WardMinimapVisibilityIndex.InvalidateAll();
+        WardMinimapPinsManager.NotifyWardDataMayHaveChanged(liveDisplayRefresh);
     }
 
-    internal static void RequestLocalDisplayRefresh(string reason, bool refreshImmediatelyIfVisible = false)
+    internal static void RequestLocalDisplayRefresh(bool refreshImmediatelyIfVisible = false)
     {
-        WardMinimapPinsManager.NotifyLocalWardDataMayHaveChanged(reason, refreshImmediatelyIfVisible);
+        WardMinimapPinsManager.NotifyLocalWardDataMayHaveChanged(refreshImmediatelyIfVisible);
     }
 
-    internal static void RequestDisplayRefresh(string reason, bool liveDisplayRefresh = false)
+    internal static void RequestDisplayRefresh(bool liveDisplayRefresh = false)
     {
-        WardMinimapPinsManager.NotifyWardDataMayHaveChanged(reason, liveDisplayRefresh);
+        WardMinimapPinsManager.NotifyWardDataMayHaveChanged(liveDisplayRefresh);
     }
 
 }

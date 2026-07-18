@@ -113,7 +113,7 @@ internal static class ManagedWardReportService
             return;
         }
 
-        if (!WardOwnership.TryResolveAuthoritativePlayerIdFromSender(sender, "WardReport.Request", out var playerId))
+        if (!WardOwnership.TryResolveAuthoritativePlayerIdFromSender(sender, out var playerId))
         {
             SendWardReportResponse(sender, success: false, string.Empty, 0, 0, 0, "Could not resolve the requesting player on the server.");
             return;
@@ -144,9 +144,6 @@ internal static class ManagedWardReportService
     {
         if (!WardOwnership.IsAuthoritativeServerSender(sender) || pkg == null)
         {
-            Plugin.LogWardDiagnosticFailure(
-                "WardReport.Response",
-                $"Rejected ward report response from a non-server sender. sender={sender}");
             return;
         }
 

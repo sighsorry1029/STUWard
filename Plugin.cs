@@ -19,7 +19,7 @@ internal sealed class ConfigurationManagerAttributes
 public sealed class Plugin : BaseUnityPlugin
 {
     internal const string ModName = "STUWard";
-    internal const string ModVersion = "1.2.3";
+    internal const string ModVersion = "1.2.5";
     internal const string Author = "sighsorry";
     internal const string ModGuid = $"{Author}.{ModName}";
 
@@ -47,7 +47,6 @@ public sealed class Plugin : BaseUnityPlugin
     internal static ConfigEntry<KeyboardShortcut> WardSettingsShortcut = null!;
     internal static ConfigEntry<int> WardMinimapPinScale = null!;
     internal static ConfigEntry<Toggle> WardMinimapActiveRanges = null!;
-    internal static ConfigEntry<DiagnosticLogMode> WardDiagnosticLogging = null!;
 
     internal enum Toggle
     {
@@ -72,13 +71,6 @@ public sealed class Plugin : BaseUnityPlugin
     {
         NotForced = 0,
         ForcedOn = 1
-    }
-
-    internal enum DiagnosticLogMode
-    {
-        Off = 0,
-        Failures = 1,
-        Verbose = 2
     }
 
     private void Awake()
@@ -233,36 +225,6 @@ public sealed class Plugin : BaseUnityPlugin
         int? configManagerOrder = null)
     {
         return Instance.BindConfig(group, name, value, description, synchronizedSetting, configManagerOrder);
-    }
-
-    internal static bool ShouldLogWardDiagnosticFailures()
-    {
-        return WardDiagnosticLogging != null && WardDiagnosticLogging.Value != DiagnosticLogMode.Off;
-    }
-
-    internal static bool ShouldLogWardDiagnosticVerbose()
-    {
-        return WardDiagnosticLogging != null && WardDiagnosticLogging.Value == DiagnosticLogMode.Verbose;
-    }
-
-    internal static void LogWardDiagnosticFailure(string context, string message)
-    {
-        if (!ShouldLogWardDiagnosticFailures() || Log == null)
-        {
-            return;
-        }
-
-        Log.LogWarning($"[WardDiag:{context}] {message}");
-    }
-
-    internal static void LogWardDiagnosticVerbose(string context, string message)
-    {
-        if (!ShouldLogWardDiagnosticVerbose() || Log == null)
-        {
-            return;
-        }
-
-        Log.LogInfo($"[WardDiag:{context}] {message}");
     }
 
     private static WardGuiController CreateOrReuseWardGuiController()

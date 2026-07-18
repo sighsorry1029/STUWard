@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Splatform;
 
 namespace STUWard;
 
@@ -24,26 +25,22 @@ internal readonly struct ServerSessionIdentity
 internal static partial class WardOwnership
 {
     // Server-side identity/auth state:
-    // sender -> session identity resolution, playerId -> accountId cache, and grace-window tracking.
+    // sender -> session identity resolution and playerId -> accountId cache.
     private sealed class IdentityAuthState
     {
         internal readonly Dictionary<long, string> ServerPlayerAccountIdsByPlayerId = new();
         internal readonly Dictionary<long, ServerSessionIdentity> ServerSessionIdentitiesBySender = new();
-        internal readonly Dictionary<long, DateTime> SenderResolveFailureFirstSeenUtcBySender = new();
     }
 
-    private static readonly TimeSpan ProtectedRpcSenderResolveGraceWindow = TimeSpan.FromSeconds(5);
     private static readonly IdentityAuthState IdentityAuthData = new();
 
     private static Dictionary<long, string> ServerPlayerAccountIdsByPlayerId => IdentityAuthData.ServerPlayerAccountIdsByPlayerId;
     private static Dictionary<long, ServerSessionIdentity> ServerSessionIdentitiesBySender => IdentityAuthData.ServerSessionIdentitiesBySender;
-    private static Dictionary<long, DateTime> SenderResolveFailureFirstSeenUtcBySender => IdentityAuthData.SenderResolveFailureFirstSeenUtcBySender;
 
     private static void ResetIdentityAuthState()
     {
         ServerPlayerAccountIdsByPlayerId.Clear();
         ServerSessionIdentitiesBySender.Clear();
-        SenderResolveFailureFirstSeenUtcBySender.Clear();
     }
 
     internal static string GetWardSteamAccountId(PrivateArea? area)
@@ -205,16 +202,14 @@ internal static partial class WardOwnership
         return resolvedPlayerId != 0L ? resolvedPlayerId : GetLocalHostPlayerId(sender);
     }
 
-    internal static bool TryResolveAuthoritativePlayerIdFromSender(long sender, string context, out long playerId)
+    internal static bool TryResolveAuthoritativePlayerIdFromSender(long sender, out long playerId)
     {
         playerId = ResolvePlayerIdFromSender(sender);
         if (playerId != 0L)
         {
-            SenderResolveFailureFirstSeenUtcBySender.Remove(sender);
             return true;
         }
 
-        LogProtectedRpcSenderResolveFailure(context, sender);
         return false;
     }
 
@@ -248,14 +243,11 @@ internal static partial class WardOwnership
         return playerId == 0L ? string.Empty : GetPlayerAccountId(playerId);
     }
 
-    internal static bool TryResolveClaimedPlayerIdFromSender(long sender, long claimedPlayerId, string context, out long playerId)
+    internal static bool TryResolveClaimedPlayerIdFromSender(long sender, long claimedPlayerId, out long playerId)
     {
         playerId = 0L;
         if (claimedPlayerId == 0L)
         {
-            Plugin.LogWardDiagnosticFailure(
-                context,
-                $"Rejected protected RPC because claimed player id was empty. sender={sender}.");
             return false;
         }
 
@@ -273,9 +265,6 @@ internal static partial class WardOwnership
             return true;
         }
 
-        Plugin.LogWardDiagnosticFailure(
-            context,
-            $"Rejected protected RPC because sender/player could not be validated. sender={sender}, claimedPlayerId={claimedPlayerId}, resolvedPlayerId={resolvedPlayerId}.");
         return false;
     }
 
@@ -294,6 +283,10 @@ internal static partial class WardOwnership
         var characterId = !characterIdOverride.IsNone() ? characterIdOverride : peer.m_characterID;
         var playerId = GetPlayerId(characterId);
         var accountId = ResolveServerSessionAccountId(playerId, characterId);
+        if (string.IsNullOrWhiteSpace(accountId))
+        {
+            accountId = ResolveServerPeerAccountId(peer);
+        }
         var playerName = ResolveServerSessionPlayerName(peer, characterId, playerId);
         ServerSessionIdentitiesBySender[peer.m_uid] = new ServerSessionIdentity(
             peer.m_uid,
@@ -301,7 +294,6 @@ internal static partial class WardOwnership
             playerId,
             accountId,
             playerName);
-        SenderResolveFailureFirstSeenUtcBySender.Remove(peer.m_uid);
     }
 
     internal static void ForgetServerSessionIdentity(ZNetPeer? peer)
@@ -318,44 +310,6 @@ internal static partial class WardOwnership
         }
 
         ServerSessionIdentitiesBySender.Remove(peer.m_uid);
-        SenderResolveFailureFirstSeenUtcBySender.Remove(peer.m_uid);
-    }
-
-    private static void LogProtectedRpcSenderResolveFailure(string context, long sender)
-    {
-        if (!ShouldUseProtectedRpcSenderResolveGraceWindow(context))
-        {
-            Plugin.LogWardDiagnosticFailure(
-                context,
-                $"Rejected protected RPC because sender could not be resolved authoritatively. sender={sender}.");
-            return;
-        }
-
-        var now = DateTime.UtcNow;
-        if (!SenderResolveFailureFirstSeenUtcBySender.TryGetValue(sender, out var firstSeenUtc))
-        {
-            firstSeenUtc = now;
-            SenderResolveFailureFirstSeenUtcBySender[sender] = firstSeenUtc;
-        }
-
-        if (now - firstSeenUtc < ProtectedRpcSenderResolveGraceWindow)
-        {
-            Plugin.LogWardDiagnosticVerbose(
-                context,
-                $"Deferred protected RPC during join grace window because sender could not yet be resolved authoritatively. sender={sender}.");
-            return;
-        }
-
-        Plugin.LogWardDiagnosticFailure(
-            context,
-            $"Rejected protected RPC because sender could not be resolved authoritatively. sender={sender}.");
-    }
-
-    private static bool ShouldUseProtectedRpcSenderResolveGraceWindow(string context)
-    {
-        return context == "AdminDebug.Sync" ||
-               context == "WardPins.Request" ||
-               context == "GuildsCompat.Sync";
     }
 
     private static bool TryResolvePlayerIdFromSessionId(long sender, out long playerId)
@@ -534,6 +488,21 @@ internal static partial class WardOwnership
             }
 
             return accountId;
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    private static string ResolveServerPeerAccountId(ZNetPeer peer)
+    {
+        try
+        {
+            var platformUserId = (int)ZNet.m_onlineBackend == 0
+                ? new PlatformUserID(ZNet.instance.m_steamPlatform, peer.m_socket.GetHostName())
+                : new PlatformUserID(peer.m_socket.GetHostName());
+            return NormalizeAccountId(platformUserId.m_userID.ToString());
         }
         catch
         {

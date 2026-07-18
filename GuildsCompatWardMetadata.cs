@@ -15,7 +15,6 @@ internal static partial class GuildsCompat
 
         internal bool PendingFullRefresh;
         internal bool PendingLiveDisplayRefresh;
-        internal string PendingLiveDisplayReason = string.Empty;
         internal DateTime FlushAtUtc = DateTime.MinValue;
     }
 
@@ -29,7 +28,6 @@ internal static partial class GuildsCompat
         PendingWardGuildProjectionRefresh.AffectedGuildIds.Clear();
         PendingWardGuildProjectionRefresh.PendingFullRefresh = false;
         PendingWardGuildProjectionRefresh.PendingLiveDisplayRefresh = false;
-        PendingWardGuildProjectionRefresh.PendingLiveDisplayReason = string.Empty;
         PendingWardGuildProjectionRefresh.FlushAtUtc = DateTime.MinValue;
     }
 
@@ -78,7 +76,6 @@ internal static partial class GuildsCompat
         var projectionResult = ManagedWardMetadataMutationService.ApplyOwnedLocalProjection(
             zdo,
             projection,
-            "local ward guild metadata stamp",
             forceSendWhenMetadataChanged: false);
         return projectionResult.GuildChanged;
     }
@@ -287,24 +284,17 @@ internal static partial class GuildsCompat
 
         _ = ManagedWardMetadataMutationService.ApplyExplicitProjection(
             zdo,
-            ManagedWardProjectionService.ResolveExplicitProjection(ownerPlayerId, wardSteamAccountId, guild),
-            "resolved ward guild metadata");
+            ManagedWardProjectionService.ResolveExplicitProjection(ownerPlayerId, wardSteamAccountId, guild));
     }
 
     internal static void HandleGuildSaved(object? guild)
     {
-        Plugin.LogWardDiagnosticVerbose(
-            "GuildsCompat.Refresh",
-            $"Queued guild save refresh for guild={DescribeGuildObject(guild)}.");
         RefreshWardGuildProjectionForGuild(guild);
     }
 
     internal static void RefreshAllWardGuildProjections(bool liveDisplayRefresh = false)
     {
-        Plugin.LogWardDiagnosticVerbose(
-            "GuildsCompat.Refresh",
-            "Queued full ward guild projection refresh.");
-        QueueWardGuildProjectionRefreshForAll(liveDisplayRefresh, "full guild projection refresh");
+        QueueWardGuildProjectionRefreshForAll(liveDisplayRefresh);
     }
 
     private static void RefreshWardGuildProjectionForGuild(object? guild)
@@ -313,16 +303,10 @@ internal static partial class GuildsCompat
         var memberIdentities = CollectGuildMemberCharacterIdentities(guild, out var hadUnresolvedMembers);
         if (memberIdentities.Count == 0 || hadUnresolvedMembers)
         {
-            Plugin.LogWardDiagnosticFailure(
-                "GuildsCompat.Refresh",
-                $"Could not extract complete guild member character identities from guild={DescribeGuildObject(guild)}. Falling back to full ward guild refresh.");
-            QueueWardGuildProjectionRefreshForAll(liveDisplayRefresh: false, "full guild projection refresh");
+            QueueWardGuildProjectionRefreshForAll(liveDisplayRefresh: false);
             return;
         }
 
-        Plugin.LogWardDiagnosticVerbose(
-            "GuildsCompat.Refresh",
-            $"Queued ward guild projection refresh for {memberIdentities.Count} guild member character(s) from guild={DescribeGuildObject(guild)}.");
         foreach (var identity in memberIdentities)
         {
             RefreshWardGuildProjectionForCharacter(identity, affectedGuildId: resolvedGuildId);
@@ -340,9 +324,6 @@ internal static partial class GuildsCompat
             return;
         }
 
-        Plugin.LogWardDiagnosticVerbose(
-            "GuildsCompat.Refresh",
-            $"Queued ward guild projection refresh for character playerId={identity.PlayerId}, accountId='{identity.AccountId}', playerName='{identity.PlayerName}'.");
         if (!string.IsNullOrWhiteSpace(identity.AccountId))
         {
             InvalidateGuildCacheForAccountId(identity.AccountId);
@@ -351,7 +332,6 @@ internal static partial class GuildsCompat
         QueueWardGuildProjectionRefreshForCharacter(
             identity,
             liveDisplayRefresh,
-            $"guild projection refresh for playerId={identity.PlayerId}, accountId='{identity.AccountId}'",
             affectedGuildId,
             previousGuildId);
     }
@@ -379,9 +359,6 @@ internal static partial class GuildsCompat
 
         var pendingFullRefresh = pendingState.PendingFullRefresh;
         var pendingLiveDisplayRefresh = pendingState.PendingLiveDisplayRefresh;
-        var pendingLiveDisplayReason = string.IsNullOrWhiteSpace(pendingState.PendingLiveDisplayReason)
-            ? "guild projection refreshed"
-            : pendingState.PendingLiveDisplayReason;
         var targetPlayerIds = pendingState.TargetIdentitiesByPlayerId.Count == 0
             ? null
             : new HashSet<long>(pendingState.TargetIdentitiesByPlayerId.Keys);
@@ -398,22 +375,20 @@ internal static partial class GuildsCompat
             targetCharacterKeys,
             affectedGuildIds,
             pendingFullRefresh,
-            pendingLiveDisplayRefresh,
-            pendingLiveDisplayReason);
+            pendingLiveDisplayRefresh);
     }
 
-    private static void QueueWardGuildProjectionRefreshForAll(bool liveDisplayRefresh, string liveDisplayReason)
+    private static void QueueWardGuildProjectionRefreshForAll(bool liveDisplayRefresh)
     {
         PendingWardGuildProjectionRefresh.PendingFullRefresh = true;
         PendingWardGuildProjectionRefresh.TargetIdentitiesByPlayerId.Clear();
         PendingWardGuildProjectionRefresh.TargetIdentitiesByCharacterKey.Clear();
-        UpdatePendingWardGuildProjectionRefreshWindow(liveDisplayRefresh, liveDisplayReason);
+        UpdatePendingWardGuildProjectionRefreshWindow(liveDisplayRefresh);
     }
 
     private static void QueueWardGuildProjectionRefreshForCharacter(
         WardGuildCharacterIdentity identity,
         bool liveDisplayRefresh,
-        string liveDisplayReason,
         int affectedGuildId,
         int previousGuildId)
     {
@@ -452,21 +427,14 @@ internal static partial class GuildsCompat
             PendingWardGuildProjectionRefresh.AffectedGuildIds.Add(previousGuildId);
         }
 
-        UpdatePendingWardGuildProjectionRefreshWindow(liveDisplayRefresh, liveDisplayReason);
+        UpdatePendingWardGuildProjectionRefreshWindow(liveDisplayRefresh);
     }
 
-    private static void UpdatePendingWardGuildProjectionRefreshWindow(bool liveDisplayRefresh, string liveDisplayReason)
+    private static void UpdatePendingWardGuildProjectionRefreshWindow(bool liveDisplayRefresh)
     {
         if (liveDisplayRefresh)
         {
             PendingWardGuildProjectionRefresh.PendingLiveDisplayRefresh = true;
-        }
-
-        if (string.IsNullOrWhiteSpace(PendingWardGuildProjectionRefresh.PendingLiveDisplayReason))
-        {
-            PendingWardGuildProjectionRefresh.PendingLiveDisplayReason = string.IsNullOrWhiteSpace(liveDisplayReason)
-                ? "guild projection refreshed"
-                : liveDisplayReason;
         }
 
         if (PendingWardGuildProjectionRefresh.FlushAtUtc == DateTime.MinValue)
@@ -494,8 +462,7 @@ internal static partial class GuildsCompat
         HashSet<string>? targetCharacterKeys,
         HashSet<int>? affectedGuildIds,
         bool fullRefresh,
-        bool liveDisplayRefresh,
-        string liveDisplayReason)
+        bool liveDisplayRefresh)
     {
         if (ZNet.instance == null || !ZNet.instance.IsServer())
         {
@@ -516,14 +483,13 @@ internal static partial class GuildsCompat
         }
 
         var candidateWardIds = new HashSet<ZDOID>();
-        var candidateCount = ManagedWardRegistry.CollectCandidateIds(
+        ManagedWardRegistry.CollectCandidateIds(
             candidateWardIds,
             targetPlayerIds,
             targetCharacterKeys,
             affectedGuildIds,
             fullRefresh);
         var changedCount = 0;
-        var visitedCount = 0;
         foreach (var candidateWardId in candidateWardIds)
         {
             var managedWardZdo = ZDOMan.instance?.GetZDO(candidateWardId);
@@ -534,7 +500,6 @@ internal static partial class GuildsCompat
             }
 
             var ownerPlayerId = managedWardZdo.GetLong(ZDOVars.s_creator, 0L);
-            visitedCount++;
             var wardAccountId = WardOwnership.NormalizeAccountIdValue(
                 WardOwnership.ResolveWardSteamAccountId(
                     managedWardZdo,
@@ -544,8 +509,7 @@ internal static partial class GuildsCompat
             if (!ManagedWardMetadataMutationService.RefreshProjectedMetadata(
                     managedWardZdo,
                     ownerPlayerId,
-                    wardAccountId,
-                    "guild projection refreshed").AnyChanged)
+                    wardAccountId).AnyChanged)
             {
                 continue;
             }
@@ -556,16 +520,12 @@ internal static partial class GuildsCompat
         if (changedCount > 0 && liveDisplayRefresh)
         {
             NotifyGuildProjectionRefreshApplied(
-                liveDisplayReason,
                 fullRefresh,
                 targetPlayerIds,
                 targetCharacterKeys,
                 affectedGuildIds);
         }
 
-        Plugin.LogWardDiagnosticVerbose(
-            "GuildsCompat.Refresh",
-            $"Scanned {visitedCount} managed ward(s) for guild projection refresh out of {candidateCount} registry candidate(s) and {ManagedWardRegistry.GetIndexedCount()} indexed ward(s){(fullRefresh ? " on full refresh" : string.Empty)}{(!fullRefresh && targetPlayerIds != null && targetPlayerIds.Count > 0 ? $" targeting {targetPlayerIds.Count} playerId(s)" : string.Empty)}{(!fullRefresh && targetCharacterKeys != null && targetCharacterKeys.Count > 0 ? $" and {targetCharacterKeys.Count} account/name identities" : string.Empty)}{(!fullRefresh && affectedGuildIds != null && affectedGuildIds.Count > 0 ? $" across {affectedGuildIds.Count} affected guild(s)" : string.Empty)}, changed={changedCount}.");
         return changedCount > 0;
     }
 

@@ -130,12 +130,7 @@ internal static class WardAdminDebugAccess
             return;
         }
 
-        if (ServerDebugAdminPlayerIds.Remove(playerId))
-        {
-            Plugin.LogWardDiagnosticVerbose(
-                "AdminDebug.Sync",
-                $"Removed stale admin debug control state for disconnected playerId={playerId}.");
-        }
+        ServerDebugAdminPlayerIds.Remove(playerId);
     }
 
     private static bool IsLocalAdminDebugController(Player? player)
@@ -170,7 +165,7 @@ internal static class WardAdminDebugAccess
             return;
         }
 
-        if (!WardOwnership.TryResolveAuthoritativePlayerIdFromSender(sender, "AdminDebug.Sync", out var playerId))
+        if (!WardOwnership.TryResolveAuthoritativePlayerIdFromSender(sender, out var playerId))
         {
             return;
         }
@@ -186,17 +181,11 @@ internal static class WardAdminDebugAccess
         if (!IsAdminAccountId(accountId))
         {
             ServerDebugAdminPlayerIds.Remove(playerId);
-            Plugin.LogWardDiagnosticFailure(
-                "AdminDebug.Sync",
-                $"Rejected admin debug enable because the requesting account is not a server admin. sender={sender}, playerId={playerId}, accountId='{accountId}'");
             SendAdminDebugStateResponse(sender, false);
             return;
         }
 
         ServerDebugAdminPlayerIds.Add(playerId);
-        Plugin.LogWardDiagnosticVerbose(
-            "AdminDebug.Sync",
-            $"Enabled admin debug control for playerId={playerId}, sender={sender}, accountId='{accountId}'.");
         SendAdminDebugStateResponse(sender, true);
     }
 
@@ -204,17 +193,11 @@ internal static class WardAdminDebugAccess
     {
         if (!WardOwnership.IsAuthoritativeServerSender(sender))
         {
-            Plugin.LogWardDiagnosticFailure(
-                "AdminDebug.Sync",
-                $"Rejected admin debug approval from a non-server sender. sender={sender}");
             return;
         }
 
         _serverApprovedLocalDebugState = enabled;
         _lastLocalDebugAdminSyncUtc = DateTime.UtcNow;
-        Plugin.LogWardDiagnosticVerbose(
-            "AdminDebug.Sync",
-            $"Received admin debug approval state from server. enabled={enabled}");
     }
 
     private static void SendAdminDebugStateResponse(long receiverUid, bool enabled)

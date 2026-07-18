@@ -19,17 +19,13 @@ internal readonly struct SyncedWardGuildIdentity
 
 internal readonly struct PendingPlayerGuildSync
 {
-    internal PendingPlayerGuildSync(long senderUid, int guildId, string guildName, DateTime firstSeenUtc)
+    internal PendingPlayerGuildSync(long senderUid, DateTime firstSeenUtc)
     {
         SenderUid = senderUid;
-        GuildId = guildId;
-        GuildName = guildName ?? string.Empty;
         FirstSeenUtc = firstSeenUtc;
     }
 
     internal long SenderUid { get; }
-    internal int GuildId { get; }
-    internal string GuildName { get; }
     internal DateTime FirstSeenUtc { get; }
 }
 
@@ -190,32 +186,19 @@ internal static partial class GuildsCompat
             return;
         }
 
-        int guildId;
-        string guildName;
         try
         {
-            guildId = pkg.ReadInt();
-            guildName = pkg.ReadString();
+            _ = pkg.ReadInt();
+            _ = pkg.ReadString();
         }
         catch
         {
-            Plugin.LogWardDiagnosticFailure(
-                "GuildsCompat.Sync",
-                $"Failed to deserialize player guild sync. sender={sender}");
             return;
         }
 
-        if (guildName.Length > 256)
+        if (!TryApplySyncedGuildIdentity(sender))
         {
-            Plugin.LogWardDiagnosticFailure(
-                "GuildsCompat.Sync",
-                $"Rejected player guild sync with an oversized guild name. sender={sender}, length={guildName.Length}");
-            return;
-        }
-
-        if (!TryApplySyncedGuildIdentity(sender, guildId, guildName))
-        {
-            PendingPlayerGuildSyncsBySender[sender] = new PendingPlayerGuildSync(sender, guildId, guildName, DateTime.UtcNow);
+            PendingPlayerGuildSyncsBySender[sender] = new PendingPlayerGuildSync(sender, DateTime.UtcNow);
         }
     }
 
@@ -235,13 +218,10 @@ internal static partial class GuildsCompat
             {
                 expiredSenders ??= new List<long>();
                 expiredSenders.Add(entry.Key);
-                Plugin.LogWardDiagnosticFailure(
-                    "GuildsCompat.Sync",
-                    $"Dropped player guild sync because server-authoritative identity lookup did not become available. sender={entry.Value.SenderUid}, reportedGuildId={entry.Value.GuildId}");
                 continue;
             }
 
-            if (!TryApplySyncedGuildIdentity(entry.Value.SenderUid, entry.Value.GuildId, entry.Value.GuildName))
+            if (!TryApplySyncedGuildIdentity(entry.Value.SenderUid))
             {
                 continue;
             }
@@ -269,9 +249,9 @@ internal static partial class GuildsCompat
         }
     }
 
-    private static bool TryApplySyncedGuildIdentity(long sender, int guildId, string guildName)
+    private static bool TryApplySyncedGuildIdentity(long sender)
     {
-        if (!WardOwnership.TryResolveAuthoritativePlayerIdFromSender(sender, "GuildsCompat.Sync", out var playerId))
+        if (!WardOwnership.TryResolveAuthoritativePlayerIdFromSender(sender, out var playerId))
         {
             return false;
         }
@@ -293,13 +273,6 @@ internal static partial class GuildsCompat
             return false;
         }
 
-        if (guild.Id != guildId)
-        {
-            Plugin.LogWardDiagnosticFailure(
-                "GuildsCompat.Sync",
-                $"Ignored client-reported guild identity that did not match the server Guilds API. sender={sender}, playerId={playerId}, reportedGuildId={guildId}, authoritativeGuildId={guild.Id}");
-        }
-
         if (UpsertSyncedGuildIdentity(playerId, accountId, playerName, guild, out var previousGuild))
         {
             WardOwnership.RefreshServerPlayerAccountIdForResolvedPlayer(playerId, accountId);
@@ -314,13 +287,11 @@ internal static partial class GuildsCompat
     }
 
     private static void NotifyGuildProjectionRefreshApplied(
-        string reason,
         bool fullRefresh,
         HashSet<long>? targetPlayerIds,
         HashSet<string>? targetCharacterKeys,
         HashSet<int>? affectedGuildIds)
     {
-        var refreshReason = string.IsNullOrWhiteSpace(reason) ? "guild projection refreshed" : reason;
         HashSet<long>? recipientPeerUids = null;
         if (!fullRefresh)
         {
@@ -343,7 +314,6 @@ internal static partial class GuildsCompat
         }
 
         ManagedWardMapStateService.NotifyViewerProjectionChanged(
-            refreshReason,
             fullRefresh,
             recipientPeerUids,
             refreshImmediatelyIfVisible: true);

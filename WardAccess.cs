@@ -395,11 +395,11 @@ internal static class WardAccess
             return new AccessResult(AccessDecision.NoWard);
         }
 
-        var includeDiagnosticData = Plugin.ShouldLogWardDiagnosticVerbose();
         var hasActor = ManagedWardAccessEvaluator.TryCreateActorForAccessCheck(playerId, out var actor);
         var foundWard = false;
         var anyDenied = false;
-        List<PrivateArea>? blockedAreas = null;
+        PrivateArea? closestBlockedArea = null;
+        var closestBlockedDistance = float.MaxValue;
 
         foreach (var area in areas)
         {
@@ -415,7 +415,7 @@ internal static class WardAccess
 
             foundWard = true;
 
-            if (hasActor && ManagedWardAccessEvaluator.HasPlayerAccess(area, actor, includeDiagnosticData))
+            if (hasActor && ManagedWardAccessEvaluator.HasPlayerAccess(area, actor))
             {
                 continue;
             }
@@ -423,11 +423,15 @@ internal static class WardAccess
             anyDenied = true;
             if (flash)
             {
-                blockedAreas ??= new List<PrivateArea>();
-                blockedAreas.Add(area);
+                var distance = Utils.DistanceXZ(area.transform.position, point);
+                if (distance < closestBlockedDistance)
+                {
+                    closestBlockedDistance = distance;
+                    closestBlockedArea = area;
+                }
             }
 
-            if (wardCheck)
+            if (wardCheck && !flash)
             {
                 break;
             }
@@ -444,13 +448,7 @@ internal static class WardAccess
             return new AccessResult(AccessDecision.Allowed);
         }
 
-        if (blockedAreas != null)
-        {
-            foreach (var area in blockedAreas)
-            {
-                area.FlashShield(false);
-            }
-        }
+        closestBlockedArea?.FlashShield(false);
 
         return new AccessResult(AccessDecision.Denied);
     }
@@ -467,13 +465,12 @@ internal static class WardAccess
             return 0;
         }
 
-        var includeDiagnosticData = Plugin.ShouldLogWardDiagnosticVerbose();
         var actor = ManagedWardAccessEvaluator.CreateActor(playerId);
         foreach (var area in areas)
         {
             if (area == null ||
                 !WardSettings.HasRestriction(WardSettings.GetConfiguration(area), restriction) ||
-                ManagedWardAccessEvaluator.HasPlayerAccess(area, actor, includeDiagnosticData))
+                ManagedWardAccessEvaluator.HasPlayerAccess(area, actor))
             {
                 continue;
             }
@@ -501,7 +498,6 @@ internal static class WardAccess
     internal static bool TryBlockInteraction(Component target, Player? player, ref bool result)
     {
         var blocked = ShouldBlock(target, player, 0f);
-        LogLocalInteractionAttemptVerbose("Interaction", target, player, blocked);
         if (!blocked)
         {
             return true;
@@ -515,7 +511,6 @@ internal static class WardAccess
     internal static bool TryBlockInteraction(WardRestrictionOptions restriction, Component target, Player? player, ref bool result)
     {
         var blocked = ShouldBlockRestriction(restriction, target, player, 0f);
-        LogLocalInteractionAttemptVerbose($"Interaction.{restriction}", target, player, blocked);
         if (!blocked)
         {
             return true;
@@ -529,7 +524,6 @@ internal static class WardAccess
     internal static bool TryBlockAction(Component target, Player? player, ref bool result)
     {
         var blocked = ShouldBlock(target, player, 0f);
-        LogLocalInteractionAttemptVerbose("Action", target, player, blocked);
         if (!blocked)
         {
             return true;
@@ -543,7 +537,6 @@ internal static class WardAccess
     internal static bool TryBlockVoid(Component target, Player? player)
     {
         var blocked = ShouldBlock(target, player, 0f);
-        LogLocalInteractionAttemptVerbose("Void", target, player, blocked);
         if (!blocked)
         {
             return true;
@@ -556,7 +549,6 @@ internal static class WardAccess
     internal static bool TryBlockVoid(WardRestrictionOptions restriction, Component target, Player? player)
     {
         var blocked = ShouldBlockRestriction(restriction, target, player, 0f);
-        LogLocalInteractionAttemptVerbose($"Void.{restriction}", target, player, blocked);
         if (!blocked)
         {
             return true;
@@ -818,19 +810,6 @@ internal static class WardAccess
         player.Message(MessageHud.MessageType.Center, NoAccessMessageKey, 0, null);
     }
 
-    private static void LogLocalInteractionAttemptVerbose(string context, Component? target, Player? player, bool blocked)
-    {
-        if (!Plugin.ShouldLogWardDiagnosticVerbose() || target == null || player == null)
-        {
-            return;
-        }
-
-        var playerId = player.GetPlayerID();
-        Plugin.LogWardDiagnosticVerbose(
-            $"Access.{context}",
-            $"Evaluated local interaction before server handling. blocked={blocked}, targetType={target.GetType().Name}, targetName='{target.name}', playerId={playerId}, playerName='{player.GetPlayerName()}', position={target.transform.position}");
-    }
-
     internal static void ShowBlockedItemMessage(Player? player)
     {
         if (player == null || player != Player.m_localPlayer)
@@ -959,6 +938,16 @@ internal static class WardAccess
         }
 
         return IsDirectWardOwner(ward, playerId) || WardAdminDebugAccess.IsPlayerAdminDebugController(playerId);
+    }
+
+    internal static bool CanControlManagedWard(ZDO? zdo, long playerId)
+    {
+        return zdo != null &&
+               zdo.IsValid() &&
+               playerId != 0L &&
+               WardOwnership.IsManagedWardZdo(zdo) &&
+               (zdo.GetLong(ZDOVars.s_creator, 0L) == playerId ||
+                WardAdminDebugAccess.IsPlayerAdminDebugController(playerId));
     }
 
     internal static bool IsDirectWardOwner(PrivateArea? area, Player? player)
@@ -1254,7 +1243,6 @@ internal static class WardAccess
         PrivateArea? ignoredWard,
         bool flash)
     {
-        var overlappingAreas = flash ? new List<PrivateArea>() : null;
         var allAreas = GetCandidateManagedWards(point, radius, requireEnabled: false);
         if (allAreas.Count == 0)
         {
@@ -1262,6 +1250,8 @@ internal static class WardAccess
         }
 
         var overlaps = false;
+        PrivateArea? closestOverlappingArea = null;
+        var closestOverlapDistance = float.MaxValue;
         var query = CreateWardOverlapQuery(point, radius, ownerCreatorPlayerId, guildId, ignoredWard);
         foreach (var area in allAreas)
         {
@@ -1278,26 +1268,27 @@ internal static class WardAccess
             }
 
             overlaps = true;
-            overlappingAreas?.Add(area);
-        }
+            if (!flash)
+            {
+                continue;
+            }
 
-        if (!overlaps || overlappingAreas == null)
-        {
-            return overlaps;
-        }
-
-        foreach (var area in overlappingAreas)
-        {
             var nview = WardPrivateAreaSafeAccess.GetNView(area);
             if (nview == null || !nview.IsValid())
             {
                 continue;
             }
 
-            area.FlashShield(false);
+            var distance = Utils.DistanceXZ(area.transform.position, point);
+            if (distance < closestOverlapDistance)
+            {
+                closestOverlapDistance = distance;
+                closestOverlappingArea = area;
+            }
         }
 
-        return true;
+        closestOverlappingArea?.FlashShield(false);
+        return overlaps;
     }
 
     private static WardOverlapQuery CreateWardOverlapQuery(

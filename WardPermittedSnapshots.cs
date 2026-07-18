@@ -34,7 +34,17 @@ internal static class WardPermittedSnapshots
             return;
         }
 
-        WriteSnapshot(zdo, BuildEntries(area!));
+        Refresh(zdo);
+    }
+
+    internal static void Refresh(ZDO? zdo)
+    {
+        if (zdo == null || !zdo.IsValid() || !zdo.IsOwner() || ZNet.instance == null || !ZNet.instance.IsServer())
+        {
+            return;
+        }
+
+        WriteSnapshot(zdo, BuildEntries(zdo));
     }
 
     internal static void Backfill(PrivateArea? area)
@@ -393,10 +403,8 @@ internal static class PrivateAreaAddPermittedSnapshotPatch
 
         WardPermittedSnapshots.Refresh(__instance);
         ManagedWardPresenceService.Invalidate();
-        ManagedWardMapStateService.NotifyLiveWardMutation(
-            __instance,
-            "ward permitted player added");
-        WardOwnership.ForceSyncManagedWardZdoToServer(ward, "TogglePermitted.Sync");
+        ManagedWardMapStateService.NotifyLiveWardMutation(__instance);
+        WardOwnership.ForceSyncManagedWardZdoToServer(ward);
     }
 }
 
@@ -413,9 +421,7 @@ internal static class PrivateAreaRemovePermittedSnapshotPatch
 
         WardPermittedSnapshots.Refresh(__instance);
         ManagedWardPresenceService.Invalidate();
-        ManagedWardMapStateService.NotifyLiveWardMutation(
-            __instance,
-            "ward permitted player removed");
-        WardOwnership.ForceSyncManagedWardZdoToServer(ward, "TogglePermitted.Sync");
+        ManagedWardMapStateService.NotifyLiveWardMutation(__instance);
+        WardOwnership.ForceSyncManagedWardZdoToServer(ward);
     }
 }

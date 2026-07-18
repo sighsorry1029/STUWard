@@ -5,16 +5,14 @@ namespace STUWard;
 
 internal readonly struct PendingManagedWardPlacementObserve
 {
-    internal PendingManagedWardPlacementObserve(ZDOID wardZdoId, long senderUid, long requesterId, DateTime firstSeenUtc)
+    internal PendingManagedWardPlacementObserve(ZDOID wardZdoId, long requesterId, DateTime firstSeenUtc)
     {
         WardZdoId = wardZdoId;
-        SenderUid = senderUid;
         RequesterId = requesterId;
         FirstSeenUtc = firstSeenUtc;
     }
 
     internal ZDOID WardZdoId { get; }
-    internal long SenderUid { get; }
     internal long RequesterId { get; }
     internal DateTime FirstSeenUtc { get; }
 }
@@ -23,18 +21,15 @@ internal readonly struct PendingManagedWardMapStateRefresh
 {
     internal PendingManagedWardMapStateRefresh(
         ZDOID wardZdoId,
-        long senderUid,
         uint expectedDataRevision,
         DateTime firstSeenUtc)
     {
         WardZdoId = wardZdoId;
-        SenderUid = senderUid;
         ExpectedDataRevision = expectedDataRevision;
         FirstSeenUtc = firstSeenUtc;
     }
 
     internal ZDOID WardZdoId { get; }
-    internal long SenderUid { get; }
     internal uint ExpectedDataRevision { get; }
     internal DateTime FirstSeenUtc { get; }
 }
@@ -47,12 +42,12 @@ internal static partial class WardOwnership
     private static readonly Dictionary<ZDOID, PendingManagedWardPlacementObserve> PendingManagedWardPlacementObserves = new();
     private static readonly Dictionary<ZDOID, PendingManagedWardMapStateRefresh> PendingManagedWardMapStateRefreshes = new();
 
-    internal static void ForceSyncManagedWardZdoToServer(PrivateArea? area, string context)
+    internal static void ForceSyncManagedWardZdoToServer(PrivateArea? area)
     {
-        ForceSyncManagedWardZdoToServer(ManagedWardRef.FromArea(area), context);
+        ForceSyncManagedWardZdoToServer(ManagedWardRef.FromArea(area));
     }
 
-    internal static void ForceSyncManagedWardZdoToServer(ManagedWardRef ward, string context)
+    internal static void ForceSyncManagedWardZdoToServer(ManagedWardRef ward)
     {
         var area = ward.Area;
         if (area == null || !ManagedWardIdentity.EnsureManagedComponent(ward) || ZNet.instance == null || ZNet.instance.IsServer())
@@ -81,12 +76,9 @@ internal static partial class WardOwnership
             routedRpc.InvokeRoutedRPC(serverPeerId, NotifyManagedWardMapStateChangedRpc, pkg);
         }
 
-        Plugin.LogWardDiagnosticVerbose(
-            context,
-            $"Force-sent managed ward ZDO to server after local mutation and notified server map-state refresh. serverPeerId={serverPeerId}, expectedDataRevision={zdo.DataRevision}, {WardDiagnosticInfo.DescribeWard(area)}");
     }
 
-    internal static bool TryClaimManagedWardMutationOwnership(PrivateArea? area, string context)
+    internal static bool TryClaimManagedWardMutationOwnership(PrivateArea? area)
     {
         var nview = WardPrivateAreaSafeAccess.GetNView(area);
         if (nview == null || !nview.IsValid())
@@ -94,37 +86,10 @@ internal static partial class WardOwnership
             return false;
         }
 
-        if (ZNet.instance == null || !ZNet.instance.IsServer() || nview.IsOwner())
-        {
-            return true;
-        }
-
-        nview.ClaimOwnership();
-        if (!nview.IsOwner())
-        {
-            var zdo = WardPrivateAreaSafeAccess.GetZdo(nview);
-            if (zdo != null && zdo.IsValid())
-            {
-                zdo.SetOwner(ZDOMan.GetSessionID());
-                ZDOMan.instance?.ForceSendZDO(zdo.m_uid);
-            }
-        }
-
-        if (!nview.IsOwner())
-        {
-            Plugin.LogWardDiagnosticFailure(
-                context,
-                $"Failed to claim managed ward ownership for mutation. {WardDiagnosticInfo.DescribeWard(area)}");
-            return false;
-        }
-
-        Plugin.LogWardDiagnosticVerbose(
-            context,
-            $"Claimed managed ward ownership for mutation. {WardDiagnosticInfo.DescribeWard(area)}");
-        return true;
+        return TryClaimManagedWardMutationOwnership(WardPrivateAreaSafeAccess.GetZdo(nview));
     }
 
-    private static bool TryClaimManagedWardMutationOwnership(ZDO? zdo, string context)
+    internal static bool TryClaimManagedWardMutationOwnership(ZDO? zdo)
     {
         if (zdo == null || !zdo.IsValid())
         {
@@ -136,16 +101,6 @@ internal static partial class WardOwnership
             return true;
         }
 
-        var instance = ZNetScene.instance?.FindInstance(zdo.m_uid);
-        var nview = instance != null ? instance.GetComponent<ZNetView>() : null;
-        if (nview != null && nview.IsValid())
-        {
-            var area = instance!.GetComponent<PrivateArea>();
-            return area != null
-                ? TryClaimManagedWardMutationOwnership(area, context)
-                : nview.IsOwner();
-        }
-
         if (zdo.GetOwner() != ZDOMan.GetSessionID())
         {
             zdo.SetOwner(ZDOMan.GetSessionID());
@@ -155,15 +110,9 @@ internal static partial class WardOwnership
         var claimed = zdo.GetOwner() == ZDOMan.GetSessionID();
         if (!claimed)
         {
-            Plugin.LogWardDiagnosticFailure(
-                context,
-                $"Failed to claim managed ward ZDO ownership for mutation. {DescribeManagedWardZdo(zdo)}");
             return false;
         }
 
-        Plugin.LogWardDiagnosticVerbose(
-            context,
-            $"Claimed managed ward ZDO ownership for mutation. {DescribeManagedWardZdo(zdo)}");
         return true;
     }
 
@@ -193,7 +142,7 @@ internal static partial class WardOwnership
 
         if (ZNet.instance != null && ZNet.instance.IsServer())
         {
-            ObserveManagedWard(ward);
+            ObserveAuthoritativeManagedWardPlacement(zdo);
             return;
         }
 
@@ -213,9 +162,6 @@ internal static partial class WardOwnership
         var pkg = new ZPackage();
         pkg.Write(localPlayer.GetPlayerID());
         pkg.Write(zdo.m_uid);
-        Plugin.LogWardDiagnosticVerbose(
-            "Placement.Notify",
-            $"Notifying server about locally placed managed ward. senderPlayerId={localPlayer.GetPlayerID()}, wardZdo={zdo.m_uid}");
         routedRpc.InvokeRoutedRPC(serverPeerId, NotifyManagedWardPlacedRpc, pkg);
     }
 
@@ -223,20 +169,19 @@ internal static partial class WardOwnership
     {
         return nview != null &&
                nview.IsValid() &&
-               nview.IsOwner() &&
                ZNet.instance != null &&
                ZNet.instance.IsServer();
     }
 
-    internal static bool TryInvokeManagedWardStateRpcOnServer(ZNetView? nview, string method, params object[] parameters)
+    internal static bool TryInvokeServerRoutedRpc(string method, params object[] parameters)
     {
-        if (nview == null || !nview.IsValid() || string.IsNullOrWhiteSpace(method) ||
-            !TryGetServerPeerId(out var serverPeerId))
+        var routedRpc = ZRoutedRpc.instance;
+        if (routedRpc == null || string.IsNullOrWhiteSpace(method) || !TryGetServerPeerId(out var serverPeerId))
         {
             return false;
         }
 
-        nview.InvokeRPC(serverPeerId, method, parameters);
+        routedRpc.InvokeRoutedRPC(serverPeerId, method, parameters);
         return true;
     }
 
@@ -261,6 +206,49 @@ internal static partial class WardOwnership
         return serverPeerId != 0L;
     }
 
+    internal static bool TryResolveAuthoritativeManagedWardRequest(
+        long sender,
+        ZDOID wardZdoId,
+        out ZDO zdo,
+        out long requesterId)
+    {
+        zdo = null!;
+        requesterId = 0L;
+        if (ZNet.instance == null || !ZNet.instance.IsServer() || wardZdoId.IsNone() ||
+            !TryResolveAuthoritativePlayerIdFromSender(sender, out requesterId))
+        {
+            return false;
+        }
+
+        var resolvedZdo = ZDOMan.instance?.GetZDO(wardZdoId);
+        if (resolvedZdo == null || !resolvedZdo.IsValid() || !IsManagedWardZdo(resolvedZdo))
+        {
+            return false;
+        }
+
+        zdo = resolvedZdo;
+        return true;
+    }
+
+    internal static void CompleteAuthoritativeManagedWardMutation(ZDO zdo)
+    {
+        ZDOMan.instance?.ForceSendZDO(zdo.m_uid);
+        ManagedWardMapStateService.NotifyZdoWardMutation(zdo);
+
+        var instance = ZNetScene.instance?.FindInstance(zdo.m_uid);
+        var area = instance != null
+            ? instance.GetComponent<PrivateArea>() ?? instance.GetComponentInChildren<PrivateArea>()
+            : null;
+        area?.UpdateStatus();
+    }
+
+    internal static void CompleteAuthoritativePermittedMutation(ZDO zdo)
+    {
+        WardPermittedSnapshots.Refresh(zdo);
+        ManagedWardPresenceService.Invalidate();
+        CompleteAuthoritativeManagedWardMutation(zdo);
+    }
+
     private static void HandleNotifyManagedWardPlaced(long sender, ZPackage pkg)
     {
         if (ZNet.instance == null || !ZNet.instance.IsServer() || pkg == null)
@@ -270,42 +258,33 @@ internal static partial class WardOwnership
 
         var claimedPlayerId = pkg.ReadLong();
         var wardZdoId = pkg.ReadZDOID();
-        if (!TryResolveClaimedPlayerIdFromSender(sender, claimedPlayerId, "Placement.Notify", out var requesterId))
+        if (!TryResolveClaimedPlayerIdFromSender(sender, claimedPlayerId, out var requesterId))
         {
             return;
         }
 
         if (wardZdoId.IsNone())
         {
-            Plugin.LogWardDiagnosticFailure(
-                "Placement.Notify",
-                $"Rejected managed ward placement notify because ward ZDO id was empty. sender={sender}, requesterId={requesterId}.");
             return;
         }
 
         var zdo = ZDOMan.instance?.GetZDO(wardZdoId);
         if (zdo == null || !zdo.IsValid())
         {
-            EnqueuePendingManagedWardPlacementObserve(sender, requesterId, wardZdoId);
+            EnqueuePendingManagedWardPlacementObserve(requesterId, wardZdoId);
             return;
         }
 
         var creatorPlayerId = zdo.GetLong(ZDOVars.s_creator, 0L);
         if (creatorPlayerId != 0L && creatorPlayerId != requesterId)
         {
-            Plugin.LogWardDiagnosticFailure(
-                "Placement.Notify",
-                $"Rejected managed ward placement notify because requester did not match ward creator. sender={sender}, requesterId={requesterId}, wardCreator={creatorPlayerId}, wardZdo={wardZdoId}");
             return;
         }
 
         ObserveAuthoritativeManagedWardPlacement(zdo);
-        Plugin.LogWardDiagnosticVerbose(
-            "Placement.Notify",
-            $"Observed managed ward from placement notify. sender={sender}, requesterId={requesterId}, {DescribeManagedWardZdo(zdo)}");
     }
 
-    private static void EnqueuePendingManagedWardPlacementObserve(long sender, long requesterId, ZDOID wardZdoId)
+    private static void EnqueuePendingManagedWardPlacementObserve(long requesterId, ZDOID wardZdoId)
     {
         if (wardZdoId.IsNone())
         {
@@ -314,12 +293,8 @@ internal static partial class WardOwnership
 
         PendingManagedWardPlacementObserves[wardZdoId] = new PendingManagedWardPlacementObserve(
             wardZdoId,
-            sender,
             requesterId,
             DateTime.UtcNow);
-        Plugin.LogWardDiagnosticVerbose(
-            "Placement.Notify",
-            $"Deferred managed ward placement observe because ward ZDO was not available yet. sender={sender}, requesterId={requesterId}, wardZdo={wardZdoId}");
     }
 
     private static void ProcessPendingManagedWardPlacementObserves()
@@ -350,9 +325,6 @@ internal static partial class WardOwnership
 
                 completedWardIds ??= new List<ZDOID>();
                 completedWardIds.Add(entry.Key);
-                Plugin.LogWardDiagnosticFailure(
-                    "Placement.Notify",
-                    $"Dropped deferred managed ward placement observe because the ward ZDO never became available. sender={pendingObserve.SenderUid}, requesterId={pendingObserve.RequesterId}, wardZdo={pendingObserve.WardZdoId}");
                 continue;
             }
 
@@ -361,18 +333,12 @@ internal static partial class WardOwnership
             {
                 completedWardIds ??= new List<ZDOID>();
                 completedWardIds.Add(entry.Key);
-                Plugin.LogWardDiagnosticFailure(
-                    "Placement.Notify",
-                    $"Dropped deferred managed ward placement observe because requester did not match ward creator. sender={pendingObserve.SenderUid}, requesterId={pendingObserve.RequesterId}, wardCreator={creatorPlayerId}, wardZdo={pendingObserve.WardZdoId}");
                 continue;
             }
 
             ObserveAuthoritativeManagedWardPlacement(zdo);
             completedWardIds ??= new List<ZDOID>();
             completedWardIds.Add(entry.Key);
-            Plugin.LogWardDiagnosticVerbose(
-                "Placement.Notify",
-                $"Observed managed ward from deferred placement notify. sender={pendingObserve.SenderUid}, requesterId={pendingObserve.RequesterId}, {DescribeManagedWardZdo(zdo)}");
         }
 
         if (completedWardIds == null)
@@ -402,21 +368,15 @@ internal static partial class WardOwnership
         }
         catch
         {
-            Plugin.LogWardDiagnosticFailure(
-                "WardPins.Sync",
-                $"Failed to deserialize managed ward map-state sync header. sender={sender}");
             return;
         }
 
         if (wardZdoId.IsNone())
         {
-            Plugin.LogWardDiagnosticFailure(
-                "WardPins.Sync",
-                $"Rejected managed ward map-state refresh with an empty ward ZDO id. sender={sender}");
             return;
         }
 
-        if (!TryResolveAuthoritativePlayerIdFromSender(sender, "WardPins.Sync", out var senderPlayerId))
+        if (!TryResolveAuthoritativePlayerIdFromSender(sender, out var senderPlayerId))
         {
             return;
         }
@@ -424,17 +384,11 @@ internal static partial class WardOwnership
         var zdo = ZDOMan.instance?.GetZDO(wardZdoId);
         if (zdo == null || !zdo.IsValid() || !IsManagedWardZdo(zdo))
         {
-            Plugin.LogWardDiagnosticFailure(
-                "WardPins.Sync",
-                $"Rejected managed ward map-state sync because the ward ZDO was unavailable or not managed. sender={sender}, playerId={senderPlayerId}, wardZdo={wardZdoId}");
             return;
         }
 
         if (zdo.GetOwner() != sender)
         {
-            Plugin.LogWardDiagnosticFailure(
-                "WardPins.Sync",
-                $"Rejected managed ward map-state sync from a peer that does not own the ward ZDO. sender={sender}, playerId={senderPlayerId}, zdoOwner={zdo.GetOwner()}, wardZdo={wardZdoId}");
             return;
         }
 
@@ -442,21 +396,13 @@ internal static partial class WardOwnership
         if (expectedDataRevision > serverDataRevision &&
             expectedDataRevision - serverDataRevision > MaxPendingMapStateRevisionLead)
         {
-            Plugin.LogWardDiagnosticFailure(
-                "WardPins.Sync",
-                $"Rejected managed ward map-state refresh too far ahead of the server ZDO revision. sender={sender}, playerId={senderPlayerId}, wardZdo={wardZdoId}, expectedRevision={expectedDataRevision}, serverRevision={serverDataRevision}");
             return;
         }
 
         if (expectedDataRevision <= serverDataRevision)
         {
             PendingManagedWardMapStateRefreshes.Remove(wardZdoId);
-            ManagedWardMapStateService.NotifyZdoWardMutation(
-                zdo,
-                "server applied authoritative managed ward ZDO state");
-            Plugin.LogWardDiagnosticVerbose(
-                "WardPins.Sync",
-                $"Applied authoritative managed ward ZDO state immediately. sender={sender}, playerId={senderPlayerId}, wardZdo={wardZdoId}, expectedRevision={expectedDataRevision}, serverRevision={serverDataRevision}");
+            ManagedWardMapStateService.NotifyZdoWardMutation(zdo);
             return;
         }
 
@@ -468,12 +414,8 @@ internal static partial class WardOwnership
 
         PendingManagedWardMapStateRefreshes[wardZdoId] = new PendingManagedWardMapStateRefresh(
             wardZdoId,
-            sender,
             expectedDataRevision,
             DateTime.UtcNow);
-        Plugin.LogWardDiagnosticVerbose(
-            "WardPins.Sync",
-            $"Deferred managed ward map-state refresh until the authoritative ZDO revision arrives. sender={sender}, playerId={senderPlayerId}, wardZdo={wardZdoId}, expectedRevision={expectedDataRevision}, serverRevision={serverDataRevision}");
     }
 
     private static void ProcessPendingManagedWardMapStateRefreshes()
@@ -505,9 +447,6 @@ internal static partial class WardOwnership
 
                 completedWardIds ??= new List<ZDOID>();
                 completedWardIds.Add(entry.Key);
-                Plugin.LogWardDiagnosticFailure(
-                    "WardPins.Sync",
-                    $"Dropped deferred managed ward map-state refresh because the ward ZDO became unavailable. sender={pendingRefresh.SenderUid}, wardZdo={pendingRefresh.WardZdoId}, expectedRevision={pendingRefresh.ExpectedDataRevision}");
                 continue;
             }
 
@@ -515,9 +454,6 @@ internal static partial class WardOwnership
             {
                 completedWardIds ??= new List<ZDOID>();
                 completedWardIds.Add(entry.Key);
-                Plugin.LogWardDiagnosticFailure(
-                    "WardPins.Sync",
-                    $"Dropped deferred managed ward map-state refresh because the ZDO is no longer managed. sender={pendingRefresh.SenderUid}, wardZdo={pendingRefresh.WardZdoId}");
                 continue;
             }
 
@@ -526,26 +462,9 @@ internal static partial class WardOwnership
                 continue;
             }
 
-            ManagedWardMapStateService.NotifyZdoWardMutation(
-                zdo,
-                timedOut
-                    ? "server reconciled timed-out managed ward map-state refresh"
-                    : "server applied deferred authoritative managed ward ZDO state");
+            ManagedWardMapStateService.NotifyZdoWardMutation(zdo);
             completedWardIds ??= new List<ZDOID>();
             completedWardIds.Add(entry.Key);
-
-            if (timedOut && zdo.DataRevision < pendingRefresh.ExpectedDataRevision)
-            {
-                Plugin.LogWardDiagnosticFailure(
-                    "WardPins.Sync",
-                    $"Reconciled deferred managed ward map-state refresh with the current server ZDO after the expected revision did not arrive. sender={pendingRefresh.SenderUid}, wardZdo={pendingRefresh.WardZdoId}, expectedRevision={pendingRefresh.ExpectedDataRevision}, serverRevision={zdo.DataRevision}");
-            }
-            else
-            {
-                Plugin.LogWardDiagnosticVerbose(
-                    "WardPins.Sync",
-                    $"Applied deferred authoritative managed ward ZDO state. sender={pendingRefresh.SenderUid}, wardZdo={pendingRefresh.WardZdoId}, expectedRevision={pendingRefresh.ExpectedDataRevision}, serverRevision={zdo.DataRevision}");
-            }
         }
 
         if (completedWardIds == null)

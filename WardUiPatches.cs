@@ -89,7 +89,6 @@ internal static class ManagedWardLifecycle
             WardOwnership.TryStampLocalManagedWardOwnerAccount(ward);
             WardAccess.RegisterManagedWard(ward);
             WardPermittedSnapshots.Backfill(ward);
-            WardSettings.RegisterRpcHandlers(ward);
             WardSettings.ApplyAreaState(ward);
             context.NetworkInitializationComplete = true;
         }
@@ -141,10 +140,6 @@ internal static class PrivateAreaAwakePatch
         }
 
         ManagedWardIdentity.TryResolve(ward, repairComponent: true, out matchedByComponent, out matchedByZdo);
-        Plugin.LogWardDiagnosticVerbose(
-            "Placement.Awake",
-            $"PrivateArea.Awake postfix hit. matchedByComponent={matchedByComponent}, matchedByZdo={matchedByZdo}, {WardDiagnosticInfo.DescribeWard(__instance)}");
-
         ManagedWardInitializationCoordinator.EnsureLocalInitialization(__instance);
     }
 
@@ -191,10 +186,6 @@ internal static class PrivateAreaUpdateStatusPatch
             return;
         }
 
-        var hadObservedState = ManagedWardRuntimeContexts.TryGet(__instance, out var contextBeforeUpdate) &&
-                               contextBeforeUpdate.HasObservedState;
-        var suppressToggleEffects = contextBeforeUpdate != null && contextBeforeUpdate.SetEnabledInvocationDepth > 0;
-
         if (!WardRuntimeStateTracker.TryConsumeChanges(__instance, out var enabledChanged, out var dataRevisionChanged))
         {
             return;
@@ -218,10 +209,6 @@ internal static class PrivateAreaUpdateStatusPatch
         {
             ManagedWardInteractionRpc.NotifyLocalEnabledStateObserved(__instance);
             WardAccess.RefreshManagedWardState(ward);
-            if (hadObservedState && !suppressToggleEffects)
-            {
-                ReplaySynchronizedToggleEffects(__instance);
-            }
         }
 
         if (dataRevisionChanged)
@@ -237,33 +224,7 @@ internal static class PrivateAreaUpdateStatusPatch
             return;
         }
 
-        ManagedWardMapStateService.NotifyLiveWardMutation(
-            __instance,
-            notifyEnabledChange && notifyDataRevisionChange
-                ? "ward update status changed enabled state and data revision"
-                : notifyEnabledChange
-                    ? "ward update status changed enabled state"
-                    : "ward update status changed data revision");
-    }
-
-    private static void ReplaySynchronizedToggleEffects(PrivateArea area)
-    {
-        if (Player.m_localPlayer == null)
-        {
-            return;
-        }
-
-        var effectList = area.IsEnabled() ? area.m_activateEffect : area.m_deactivateEffect;
-        if (effectList == null)
-        {
-            return;
-        }
-
-        var transform = area.transform;
-        _ = effectList.Create(transform.position, transform.rotation, null, 1f, -1);
-        Plugin.LogWardDiagnosticVerbose(
-            "ToggleEnabled.Effects",
-            $"Replayed synchronized managed ward toggle effects after UpdateStatus. enabled={area.IsEnabled()}, {WardDiagnosticInfo.DescribeWard(area)}");
+        ManagedWardMapStateService.NotifyLiveWardMutation(__instance);
     }
 }
 
@@ -282,9 +243,6 @@ internal static class PrivateAreaSetupPatch
             return;
         }
 
-        Plugin.LogWardDiagnosticVerbose(
-            "Placement.Setup",
-            $"PrivateArea.Setup postfix hit. matchedByComponent={matchedByComponent}, matchedByZdo={matchedByZdo}, {WardDiagnosticInfo.DescribeWard(__instance)}");
         ManagedWardInitializationCoordinator.EnsureNetworkInitialization(__instance, matchedByComponent, matchedByZdo);
     }
 }
@@ -315,9 +273,6 @@ internal static class ZNetSceneCreateObjectManagedWardPatch
             return;
         }
 
-        Plugin.LogWardDiagnosticVerbose(
-            "Placement.CreateObject",
-            $"ZNetScene.CreateObject postfix hit. matchedByComponent={matchedByComponent}, matchedByZdo={matchedByZdo}, isServer={ZNet.instance != null && ZNet.instance.IsServer()}, objectName='{__result.name}', {WardDiagnosticInfo.DescribeWard(area)}");
         ManagedWardInitializationCoordinator.EnsureLocalInitialization(area);
         ManagedWardInitializationCoordinator.EnsureNetworkInitialization(area, matchedByComponent, matchedByZdo);
     }
@@ -345,6 +300,9 @@ internal static class PrivateAreaShowAreaMarkerPatch
 
 internal static class ManagedWardInteractionRpc
 {
+    private const string RpcRequestToggleEnabled = "STUWard_RequestToggleEnabled";
+    private const string RpcRequestTogglePermitted = "STUWard_RequestTogglePermitted";
+
     private readonly struct PendingLocalEnabledToggleRequest
     {
         internal PendingLocalEnabledToggleRequest(bool expectedEnabled, float expiresAt)
@@ -376,6 +334,12 @@ internal static class ManagedWardInteractionRpc
     private static readonly Dictionary<ZDOID, PendingLocalPermittedToggleRequest> PendingLocalPermittedToggleRequests = new();
     private const float PendingLocalEnabledToggleTimeoutSeconds = 1.5f;
     private const float PendingLocalPermittedToggleTimeoutSeconds = 1.5f;
+
+    internal static void RegisterRoutedRpcs(ZRoutedRpc routedRpc)
+    {
+        routedRpc.Register<ZPackage>(RpcRequestToggleEnabled, HandleRoutedToggleEnabled);
+        routedRpc.Register<ZPackage>(RpcRequestTogglePermitted, HandleRoutedTogglePermitted);
+    }
 
     internal static bool IsManagedWardForHooks(PrivateArea? area)
     {
@@ -410,22 +374,11 @@ internal static class ManagedWardInteractionRpc
         var nview = GetNView(area);
         if (nview == null || !nview.IsValid())
         {
-            Plugin.LogWardDiagnosticFailure(
-                "Interaction",
-                $"Blocked managed ward interact because ward nview is invalid. {WardDiagnosticInfo.DescribeWard(area)}");
             return false;
         }
 
         if (Plugin.IsWardSettingsShortcutDown())
         {
-            if (WardAccess.CanConfigureWard(area, player) ||
-                WardAdminDebugAccess.CanLocallyAttemptAnyWardControl(area, player))
-            {
-                Plugin.LogWardDiagnosticVerbose(
-                    "Interaction.Local",
-                    $"Skipped managed ward interact because ward settings shortcut is active. {WardDiagnosticInfo.DescribeLocalPlayer(player)}, {WardDiagnosticInfo.DescribeInteractionState(area, player.GetPlayerID())}");
-            }
-
             result = false;
             return false;
         }
@@ -433,11 +386,6 @@ internal static class ManagedWardInteractionRpc
         var playerId = player.GetPlayerID();
         var canControl = WardAccess.CanControlManagedWard(area, playerId) ||
                          WardAdminDebugAccess.CanLocallyAttemptAnyWardControl(area, player);
-        Plugin.LogWardDiagnosticVerbose(
-            "Interaction.Local",
-            $"Local interact hold={hold}, action={(canControl ? "toggle_enabled" : area.IsEnabled() ? "blocked_enabled_foreign" : "toggle_permitted")}, " +
-            $"{WardDiagnosticInfo.DescribeLocalPlayer(player)}, {WardDiagnosticInfo.DescribeInteractionState(area, playerId)}");
-
         if (canControl)
         {
             result = RequestToggleEnabled(area, player);
@@ -495,24 +443,16 @@ internal static class ManagedWardInteractionRpc
 
         if (IsLocalEnabledToggleRequestInFlight(zdo.m_uid, area.IsEnabled()))
         {
-            Plugin.LogWardDiagnosticVerbose(
-                "ToggleEnabled.Send",
-                $"Suppressed duplicate ToggleEnabled request while a local request is still in flight. playerId={player.GetPlayerID()}, wardZdo={zdo.m_uid}, enabled={area.IsEnabled()}");
             return true;
         }
 
         var expectedEnabled = !area.IsEnabled();
-        if (!WardOwnership.TryInvokeManagedWardStateRpcOnServer(nview, "ToggleEnabled", player.GetPlayerID()))
+        var request = new ZPackage();
+        request.Write(zdo.m_uid);
+        if (!WardOwnership.TryInvokeServerRoutedRpc(RpcRequestToggleEnabled, request))
         {
-            Plugin.LogWardDiagnosticFailure(
-                "ToggleEnabled.Send",
-                $"Failed to route ToggleEnabled request to the server. playerId={player.GetPlayerID()}, {WardDiagnosticInfo.DescribeInteractionState(area, player.GetPlayerID())}");
             return false;
         }
-
-        Plugin.LogWardDiagnosticVerbose(
-            "ToggleEnabled.Send",
-            $"Sent ToggleEnabled request to the server. playerId={player.GetPlayerID()}, {WardDiagnosticInfo.DescribeInteractionState(area, player.GetPlayerID())}");
 
         PendingLocalEnabledToggleRequests[zdo.m_uid] = new PendingLocalEnabledToggleRequest(
             expectedEnabled,
@@ -537,33 +477,154 @@ internal static class ManagedWardInteractionRpc
         var isPermitted = WardPrivateAreaSafeAccess.IsPlayerPermitted(area, player.GetPlayerID());
         if (IsLocalPermittedToggleRequestInFlight(zdo.m_uid, isPermitted))
         {
-            Plugin.LogWardDiagnosticVerbose(
-                "TogglePermitted.Send",
-                $"Suppressed duplicate TogglePermitted request while a local request is still in flight. playerId={player.GetPlayerID()}, wardZdo={zdo.m_uid}, permitted={isPermitted}");
             return true;
         }
 
         var expectedPermitted = !isPermitted;
-        if (!WardOwnership.TryInvokeManagedWardStateRpcOnServer(
-                nview,
-                "TogglePermitted",
-                player.GetPlayerID(),
-                player.GetPlayerName()))
+        var request = new ZPackage();
+        request.Write(zdo.m_uid);
+        if (!WardOwnership.TryInvokeServerRoutedRpc(RpcRequestTogglePermitted, request))
         {
-            Plugin.LogWardDiagnosticFailure(
-                "TogglePermitted.Send",
-                $"Failed to route TogglePermitted request to the server. playerId={player.GetPlayerID()}, {WardDiagnosticInfo.DescribeInteractionState(area, player.GetPlayerID())}");
             return false;
         }
-
-        Plugin.LogWardDiagnosticVerbose(
-            "TogglePermitted.Send",
-            $"Sent TogglePermitted request to the server. playerId={player.GetPlayerID()}, {WardDiagnosticInfo.DescribeInteractionState(area, player.GetPlayerID())}");
 
         PendingLocalPermittedToggleRequests[zdo.m_uid] = new PendingLocalPermittedToggleRequest(
             expectedPermitted,
             Time.time + PendingLocalPermittedToggleTimeoutSeconds);
         return true;
+    }
+
+    private static void HandleRoutedToggleEnabled(long sender, ZPackage? request)
+    {
+        if (!TryResolveServerWardRequest(sender, request, out var zdo, out var requesterId))
+        {
+            return;
+        }
+
+        if (!WardAccess.CanControlManagedWard(zdo, requesterId))
+        {
+            return;
+        }
+
+        if (!WardOwnership.TryClaimManagedWardMutationOwnership(zdo))
+        {
+            return;
+        }
+
+        var enabled = !zdo.GetBool(ZDOVars.s_enabled, false);
+        zdo.Set(ZDOVars.s_enabled, enabled);
+        WardOwnership.CompleteAuthoritativeManagedWardMutation(zdo);
+        PlayAuthoritativeToggleEffects(zdo, enabled);
+    }
+
+    private static void PlayAuthoritativeToggleEffects(ZDO zdo, bool enabled)
+    {
+        if (ZNet.instance == null || !ZNet.instance.IsServer())
+        {
+            return;
+        }
+
+        // Guard-stone toggle effects have a ZNetView and must be instantiated only once.
+        var instance = ZNetScene.instance?.FindInstance(zdo.m_uid);
+        var area = instance != null
+            ? instance.GetComponent<PrivateArea>() ?? instance.GetComponentInChildren<PrivateArea>()
+            : null;
+        if (area == null)
+        {
+            return;
+        }
+
+        var effectList = enabled ? area.m_activateEffect : area.m_deactivateEffect;
+        if (effectList == null)
+        {
+            return;
+        }
+
+        var transform = area.transform;
+        _ = effectList.Create(transform.position, transform.rotation, null, 1f, -1);
+    }
+
+    private static void HandleRoutedTogglePermitted(long sender, ZPackage? request)
+    {
+        if (!TryReadRoutedWardRequest(request, out var wardZdoId))
+        {
+            return;
+        }
+
+        if (!TryResolveServerWardRequest(sender, wardZdoId, out var zdo, out var requesterId))
+        {
+            return;
+        }
+
+        if (WardAccess.CanControlManagedWard(zdo, requesterId) || zdo.GetBool(ZDOVars.s_enabled, false))
+        {
+            return;
+        }
+
+        if (!WardOwnership.TryClaimManagedWardMutationOwnership(zdo))
+        {
+            return;
+        }
+
+        var requesterName = WardOwnership.GetPlayerName(requesterId);
+        if (string.IsNullOrWhiteSpace(requesterName))
+        {
+            requesterName = requesterId.ToString();
+        }
+
+        if (!WardPrivateAreaSafeAccess.TogglePermittedPlayer(zdo, requesterId, requesterName))
+        {
+            return;
+        }
+
+        WardOwnership.CompleteAuthoritativePermittedMutation(zdo);
+    }
+
+    private static bool TryResolveServerWardRequest(
+        long sender,
+        ZPackage? request,
+        out ZDO zdo,
+        out long requesterId)
+    {
+        zdo = null!;
+        requesterId = 0L;
+        return TryReadRoutedWardRequest(request, out var wardZdoId) &&
+               TryResolveServerWardRequest(sender, wardZdoId, out zdo, out requesterId);
+    }
+
+    private static bool TryResolveServerWardRequest(
+        long sender,
+        ZDOID wardZdoId,
+        out ZDO zdo,
+        out long requesterId)
+    {
+        zdo = null!;
+        requesterId = 0L;
+        return WardOwnership.TryResolveAuthoritativeManagedWardRequest(
+            sender,
+            wardZdoId,
+            out zdo,
+            out requesterId);
+    }
+
+    private static bool TryReadRoutedWardRequest(ZPackage? request, out ZDOID wardZdoId)
+    {
+        wardZdoId = ZDOID.None;
+        if (request == null)
+        {
+            return false;
+        }
+
+        try
+        {
+            wardZdoId = request.ReadZDOID();
+            return !wardZdoId.IsNone();
+        }
+        catch
+        {
+            wardZdoId = ZDOID.None;
+            return false;
+        }
     }
 
     internal static bool TryHandleVanillaToggleEnabled(PrivateArea area, long sender, long claimedPlayerId)
@@ -574,12 +635,12 @@ internal static class ManagedWardInteractionRpc
             return false;
         }
 
-        if (!WardOwnership.TryResolveClaimedPlayerIdFromSender(sender, claimedPlayerId, "ToggleEnabled.Vanilla", out var requesterId))
+        if (!WardOwnership.TryResolveClaimedPlayerIdFromSender(sender, claimedPlayerId, out var requesterId))
         {
             return false;
         }
 
-        return TryApplyResolvedToggleEnabled(area, requesterId, "ToggleEnabled.Vanilla");
+        return TryApplyResolvedToggleEnabled(area, requesterId);
     }
 
     internal static bool TryHandleVanillaTogglePermitted(PrivateArea area, long sender, long claimedPlayerId, string name)
@@ -590,7 +651,7 @@ internal static class ManagedWardInteractionRpc
             return false;
         }
 
-        if (!WardOwnership.TryResolveClaimedPlayerIdFromSender(sender, claimedPlayerId, "TogglePermitted.Vanilla", out var requesterId))
+        if (!WardOwnership.TryResolveClaimedPlayerIdFromSender(sender, claimedPlayerId, out var requesterId))
         {
             return false;
         }
@@ -602,21 +663,15 @@ internal static class ManagedWardInteractionRpc
 
         if (WardAccess.CanControlManagedWard(area, requesterId))
         {
-            Plugin.LogWardDiagnosticFailure(
-                "TogglePermitted.Vanilla",
-                $"Rejected TogglePermitted because requester can control this ward and should use ToggleEnabled instead. {WardDiagnosticInfo.DescribeInteractionState(area, requesterId)}");
             return false;
         }
 
         if (area.IsEnabled())
         {
-            Plugin.LogWardDiagnosticFailure(
-                "TogglePermitted.Vanilla",
-                $"Rejected TogglePermitted because ward is enabled. {WardDiagnosticInfo.DescribeInteractionState(area, requesterId)}");
             return false;
         }
 
-        if (!WardOwnership.TryClaimManagedWardMutationOwnership(area, "TogglePermitted.Vanilla"))
+        if (!WardOwnership.TryClaimManagedWardMutationOwnership(area))
         {
             return false;
         }
@@ -630,9 +685,6 @@ internal static class ManagedWardInteractionRpc
                 ManagedWardRuntimeContexts.ArmNextDataRevisionFanOutSuppressionIfChanged(area, baselineDataRevision);
             }
 
-            Plugin.LogWardDiagnosticVerbose(
-                "TogglePermitted.Vanilla",
-                $"Removed permitted player. {WardDiagnosticInfo.DescribeInteractionState(area, requesterId)}");
             return true;
         }
 
@@ -644,28 +696,22 @@ internal static class ManagedWardInteractionRpc
 
         ManagedWardRuntimeContexts.ArmNextDataRevisionFanOutSuppression(area);
         area.AddPermitted(requesterId, requesterName);
-        Plugin.LogWardDiagnosticVerbose(
-            "TogglePermitted.Vanilla",
-            $"Added permitted player requesterName='{requesterName}'. {WardDiagnosticInfo.DescribeInteractionState(area, requesterId)}");
         return true;
     }
 
-    internal static bool TryApplyResolvedToggleEnabled(PrivateArea area, long requesterId, string context)
+    internal static bool TryApplyResolvedToggleEnabled(PrivateArea area, long requesterId)
     {
-        return ApplyToggleEnabled(area, requesterId, context);
+        return ApplyToggleEnabled(area, requesterId);
     }
 
-    private static bool ApplyToggleEnabled(PrivateArea area, long requesterId, string context)
+    private static bool ApplyToggleEnabled(PrivateArea area, long requesterId)
     {
         if (!WardAccess.CanControlManagedWard(area, requesterId))
         {
-            Plugin.LogWardDiagnosticFailure(
-                context,
-                $"Rejected ToggleEnabled because requester cannot control this ward. {WardDiagnosticInfo.DescribeInteractionState(area, requesterId)}");
             return false;
         }
 
-        if (!WardOwnership.TryClaimManagedWardMutationOwnership(area, context))
+        if (!WardOwnership.TryClaimManagedWardMutationOwnership(area))
         {
             return false;
         }
@@ -674,9 +720,6 @@ internal static class ManagedWardInteractionRpc
         ManagedWardRuntimeContexts.ArmNextEnabledFanOutSuppression(area, expectedEnabled);
         ManagedWardRuntimeContexts.ArmNextDataRevisionFanOutSuppression(area);
         area.SetEnabled(expectedEnabled);
-        Plugin.LogWardDiagnosticVerbose(
-            context,
-            $"Applied ToggleEnabled. {WardDiagnosticInfo.DescribeInteractionState(area, requesterId)}");
         return true;
     }
 
@@ -1091,54 +1134,6 @@ internal static class PrivateAreaRpcTogglePermittedManagedPatch
     }
 }
 
-internal static class WardDiagnosticInfo
-{
-    internal static string DescribeWard(PrivateArea? area)
-    {
-        if (area == null)
-        {
-            return "ward=null";
-        }
-
-        var piece = area.m_piece != null ? area.m_piece : area.GetComponent<Piece>();
-        var nview = WardPrivateAreaSafeAccess.GetNView(area);
-        var zdo = WardPrivateAreaSafeAccess.GetZdo(area);
-        var zdoId = zdo != null ? zdo.m_uid.ToString() : "none";
-        var zdoCreator = zdo?.GetLong(ZDOVars.s_creator, 0L) ?? 0L;
-        var pieceCreator = piece?.GetCreator() ?? 0L;
-        var steamAccountId = WardOwnership.GetWardSteamAccountId(area);
-        var guildId = GuildsCompat.GetWardGuildId(zdo);
-        var guildName = GuildsCompat.GetWardGuildName(zdo);
-        var nviewValid = nview != null && nview.IsValid();
-        var nviewOwner = nview != null && nview.IsOwner();
-        return $"wardZdo={zdoId}, nviewValid={nviewValid}, nviewOwner={nviewOwner}, enabled={area.IsEnabled()}, pieceCreator={pieceCreator}, zdoCreator={zdoCreator}, steamAccountId='{steamAccountId}', guildId={guildId}, guildName='{guildName}'";
-    }
-
-    internal static string DescribeInteractionState(PrivateArea? area, long requesterId = 0L)
-    {
-        if (area == null)
-        {
-            return "interaction=ward=null";
-        }
-
-        var canControl = requesterId != 0L && WardAccess.CanControlManagedWard(area, requesterId);
-        var isPermitted = requesterId != 0L && WardPrivateAreaSafeAccess.IsPlayerPermitted(area, requesterId);
-        return $"requesterId={requesterId}, canControl={canControl}, isPermitted={isPermitted}, {DescribeWard(area)}";
-    }
-
-    internal static string DescribeLocalPlayer(Player? player)
-    {
-        var profilePlayerId = Game.instance?.GetPlayerProfile()?.GetPlayerID() ?? 0L;
-        if (player == null)
-        {
-            return $"player=null, profilePlayerId={profilePlayerId}";
-        }
-
-        return
-            $"playerId={player.GetPlayerID()}, profilePlayerId={profilePlayerId}, ownerSession={player.GetOwner()}, accountId='{WardOwnership.GetPlayerAccountId(player)}'";
-    }
-}
-
 [HarmonyPatch(typeof(PrivateArea), nameof(PrivateArea.HideMarker))]
 internal static class PrivateAreaHideMarkerPatch
 {
@@ -1215,28 +1210,15 @@ internal static class DoorRpcUseDoorPatch
 [HarmonyPatch(typeof(PrivateArea), nameof(PrivateArea.SetEnabled))]
 internal static class PrivateAreaSetEnabledWardMinimapVisibilityPatch
 {
-    private static void Prefix(PrivateArea __instance)
-    {
-        var context = ManagedWardRuntimeContexts.GetOrCreate(__instance);
-        context.SetEnabledInvocationDepth++;
-    }
-
     private static void Postfix(PrivateArea __instance)
     {
-        if (ManagedWardRuntimeContexts.TryGet(__instance, out var context) && context.SetEnabledInvocationDepth > 0)
-        {
-            context.SetEnabledInvocationDepth--;
-        }
-
         if (!ManagedWardInteractionRpc.IsManagedWardForHooks(__instance))
         {
             return;
         }
 
         var ward = ManagedWardRef.FromArea(__instance);
-        ManagedWardMapStateService.NotifyLiveWardMutation(
-            __instance,
-            "ward set enabled state changed");
-        WardOwnership.ForceSyncManagedWardZdoToServer(ward, "ToggleEnabled.Sync");
+        ManagedWardMapStateService.NotifyLiveWardMutation(__instance);
+        WardOwnership.ForceSyncManagedWardZdoToServer(ward);
     }
 }

@@ -18,7 +18,7 @@ internal readonly struct ManagedWardScanEntry
 
 internal static partial class WardOwnership
 {
-    internal static bool TryPrepareManagedWardPrefabScan(out int scannedZdoCount)
+    internal static bool TryPrepareManagedWardScan(out int scannedZdoCount)
     {
         scannedZdoCount = 0;
         if (ZNet.instance == null || !ZNet.instance.IsServer())
@@ -36,7 +36,7 @@ internal static partial class WardOwnership
         return true;
     }
 
-    internal static ZDO? GetPreparedManagedWardPrefabScanEntry(int index)
+    internal static ZDO? GetPreparedManagedWardScanEntry(int index)
     {
         return index >= 0 && index < ManagedWardPrefabScanBuffer.Count
             ? ManagedWardPrefabScanBuffer[index]
@@ -46,14 +46,14 @@ internal static partial class WardOwnership
     internal static bool TryBuildManagedWardScanEntries(List<ManagedWardScanEntry> scanEntries, out int scannedZdoCount)
     {
         scanEntries.Clear();
-        if (!TryPrepareManagedWardPrefabScan(out scannedZdoCount))
+        if (!TryPrepareManagedWardScan(out scannedZdoCount))
         {
             return false;
         }
 
         for (var index = 0; index < scannedZdoCount; index++)
         {
-            if (!TryBuildManagedWardScanEntry(GetPreparedManagedWardPrefabScanEntry(index), out var scanEntry))
+            if (!TryBuildManagedWardScanEntry(GetPreparedManagedWardScanEntry(index), out var scanEntry))
             {
                 continue;
             }

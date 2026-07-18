@@ -46,11 +46,8 @@ internal static class WardMapRangeSprites
             _cachedSprite = CreateSprite();
             return _cachedSprite;
         }
-        catch (Exception exception)
+        catch (Exception)
         {
-            Plugin.LogWardDiagnosticFailure(
-                "WardPins.Range",
-                $"Failed to build dashed ward range sprite. dashCount={FixedDashCount}, strokePixels={FixedStrokePixels}, error={exception.Message}");
             return null;
         }
     }

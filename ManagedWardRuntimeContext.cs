@@ -66,7 +66,6 @@ internal sealed class ManagedWardRuntimeContext
 
     internal bool HasObservedState;
     internal ManagedWardObservedState ObservedState;
-    internal int SetEnabledInvocationDepth;
     internal bool HasPendingEnabledFanOutSuppression;
     internal bool PendingEnabledFanOutState;
     internal bool HasPendingDataRevisionFanOutSuppression;
@@ -75,6 +74,7 @@ internal sealed class ManagedWardRuntimeContext
     internal bool HasHoverText;
     internal ManagedWardHoverTextCacheEntry HoverText;
 
+    internal float WarningEffectCooldownUntil;
     internal float PresenceLastTrustedNearbyTime = float.NegativeInfinity;
 
     internal void ClearConfigurationCaches()
@@ -91,7 +91,6 @@ internal sealed class ManagedWardRuntimeContext
     internal void ClearObservedState()
     {
         HasObservedState = false;
-        SetEnabledInvocationDepth = 0;
         HasPendingEnabledFanOutSuppression = false;
         HasPendingDataRevisionFanOutSuppression = false;
     }

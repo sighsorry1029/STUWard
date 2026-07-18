@@ -44,20 +44,16 @@ internal readonly struct ManagedWardAccessActor
 
 internal readonly struct ManagedWardAccessSubject
 {
-    internal ManagedWardAccessSubject(long ownerPlayerId, WardGuildIdentity wardGuild, bool permitted, string wardSteamAccountId, string wardZdoLabel)
+    internal ManagedWardAccessSubject(long ownerPlayerId, WardGuildIdentity wardGuild, bool permitted)
     {
         OwnerPlayerId = ownerPlayerId;
         WardGuild = wardGuild;
         Permitted = permitted;
-        WardSteamAccountId = wardSteamAccountId ?? string.Empty;
-        WardZdoLabel = wardZdoLabel ?? "none";
     }
 
     internal long OwnerPlayerId { get; }
     internal WardGuildIdentity WardGuild { get; }
     internal bool Permitted { get; }
-    internal string WardSteamAccountId { get; }
-    internal string WardZdoLabel { get; }
 }
 
 internal static class ManagedWardAccessPolicy

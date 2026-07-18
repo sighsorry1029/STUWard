@@ -181,10 +181,6 @@ internal readonly struct WardConfigurationUpdateResult
     internal bool ShowOverlapMessage { get; }
 }
 
-internal sealed class WardSettingsRpcRegistrationState : MonoBehaviour
-{
-}
-
 internal static class WardSettings
 {
     internal const int ManagedAreaMarkerSegments = 36;
@@ -203,6 +199,7 @@ internal static class WardSettings
     internal const float DefaultAutoCloseDelay = 4f;
     internal const bool DefaultWarningSoundEnabled = true;
     internal const bool DefaultWarningFlashEnabled = true;
+    private const float WarningEffectCooldownSeconds = 0.5f;
 
     private const string RpcUpdateSettings = "STUWard_UpdateSettings";
     private const string RpcUpdateSettingsResponse = "STUWard_UpdateSettingsResponse";
@@ -281,6 +278,14 @@ internal static class WardSettings
     };
 
     private static long _nextConfigurationRequestId = 1L;
+
+    internal static void RegisterRoutedRpcs(ZRoutedRpc routedRpc)
+    {
+        routedRpc.Register<ZPackage>(RpcUpdateSettings, HandleRoutedUpdateConfiguration);
+        routedRpc.Register<ZPackage>(RpcUpdateSettingsResponse, HandleRoutedUpdateConfigurationResponse);
+        routedRpc.Register<ZPackage>(RpcRemovePermitted, HandleRoutedRemovePermitted);
+    }
+
     internal static IReadOnlyList<WardRestrictionDefinition> RestrictionDefinitions => RestrictionDefinitionValues;
 
     internal static float MaxRadius => Mathf.Clamp(
@@ -444,7 +449,7 @@ internal static class WardSettings
             ApplyAreaState(ward);
         }
 
-        ManagedWardMapStateService.InvalidateProjection("max ward radius config changed");
+        ManagedWardMapStateService.InvalidateProjection();
     }
 
     internal static WardConfiguration GetConfiguration(PrivateArea area)
@@ -469,14 +474,33 @@ internal static class WardSettings
             }
         }
 
-        const float defaultRadius = MinRadius;
+        var configuration = ReadConfiguration(zdo, maxRadius, forcedRestrictions);
+        if (zdo != null)
+        {
+            var context = ManagedWardRuntimeContexts.GetOrCreate(area);
+            context.CachedConfiguration = new CachedWardConfiguration(zdo.DataRevision, maxRadius, forcedRestrictions, configuration);
+            context.HasCachedConfiguration = true;
+        }
 
+        return configuration;
+    }
+
+    private static WardConfiguration GetConfiguration(ZDO? zdo)
+    {
+        return ReadConfiguration(zdo, MaxRadius, ForcedRestrictions);
+    }
+
+    private static WardConfiguration ReadConfiguration(
+        ZDO? zdo,
+        float maxRadius,
+        WardRestrictionOptions forcedRestrictions)
+    {
         var showAreaMarker = zdo?.GetBool(ShowAreaMarkerKey, true) ?? true;
         var areaMarkerSpeedMultiplier = Mathf.Clamp01(
             zdo?.GetFloat(AreaMarkerSpeedMultiplierKey, DefaultAreaMarkerSpeedMultiplier) ?? DefaultAreaMarkerSpeedMultiplier);
         var areaMarkerAlpha = Mathf.Clamp01(
             zdo?.GetFloat(AreaMarkerAlphaKey, DefaultAreaMarkerAlpha) ?? DefaultAreaMarkerAlpha);
-        var radius = Mathf.Clamp(zdo?.GetFloat(RadiusKey, defaultRadius) ?? defaultRadius, MinRadius, maxRadius);
+        var radius = Mathf.Clamp(zdo?.GetFloat(RadiusKey, MinRadius) ?? MinRadius, MinRadius, maxRadius);
         var autoCloseDelay = Mathf.Clamp(
             zdo?.GetFloat(AutoCloseDelayKey, DefaultAutoCloseDelay) ?? DefaultAutoCloseDelay,
             MinAutoCloseDelay,
@@ -487,7 +511,7 @@ internal static class WardSettings
             NormalizeRestrictions((WardRestrictionOptions)(zdo?.GetInt(RestrictionOptionsKey, (int)WardRestrictionOptions.All) ?? (int)WardRestrictionOptions.All)),
             forcedRestrictions);
 
-        var configuration = new WardConfiguration(
+        return new WardConfiguration(
             showAreaMarker,
             areaMarkerSpeedMultiplier,
             areaMarkerAlpha,
@@ -496,14 +520,6 @@ internal static class WardSettings
             warningSoundEnabled,
             warningFlashEnabled,
             restrictions);
-        if (zdo != null)
-        {
-            var context = ManagedWardRuntimeContexts.GetOrCreate(area);
-            context.CachedConfiguration = new CachedWardConfiguration(zdo.DataRevision, maxRadius, forcedRestrictions, configuration);
-            context.HasCachedConfiguration = true;
-        }
-
-        return configuration;
     }
 
     internal static void ApplyAreaState(PrivateArea area)
@@ -697,14 +713,22 @@ internal static class WardSettings
         }
 
         var configuration = GetConfiguration(area);
-        if (configuration.WarningFlashEnabled && configuration.WarningSoundEnabled)
-        {
-            return true;
-        }
-
         if (!configuration.WarningFlashEnabled && !configuration.WarningSoundEnabled)
         {
             return false;
+        }
+
+        var context = ManagedWardRuntimeContexts.GetOrCreate(area);
+        var now = Time.unscaledTime;
+        if (now < context.WarningEffectCooldownUntil)
+        {
+            return false;
+        }
+
+        context.WarningEffectCooldownUntil = now + WarningEffectCooldownSeconds;
+        if (configuration.WarningFlashEnabled && configuration.WarningSoundEnabled)
+        {
+            return true;
         }
 
         PlayManagedWarningEffect(area, configuration.WarningSoundEnabled, configuration.WarningFlashEnabled);
@@ -837,7 +861,18 @@ internal static class WardSettings
                     showOverlapMessage: false);
             }
 
-            var localResult = ProcessConfigurationUpdate(area, configuration, currentConfiguration);
+            var zdo = nview.GetZDO();
+            if (!WardOwnership.TryClaimManagedWardMutationOwnership(zdo))
+            {
+                return new WardConfigurationRequestSubmission(
+                    isPending: false,
+                    requestId: 0L,
+                    WardConfigurationRequestResultCode.InvalidState,
+                    currentConfiguration,
+                    showOverlapMessage: false);
+            }
+
+            var localResult = ProcessConfigurationUpdate(zdo, configuration, currentConfiguration);
             return new WardConfigurationRequestSubmission(
                 isPending: false,
                 requestId: 0L,
@@ -848,13 +883,11 @@ internal static class WardSettings
 
         var requestId = AllocateConfigurationRequestId();
         var requestPackage = new ZPackage();
+        requestPackage.Write(nview.GetZDO().m_uid);
         requestPackage.Write(requestId);
         WriteConfiguration(requestPackage, configuration);
-        if (!WardOwnership.TryInvokeManagedWardStateRpcOnServer(nview, RpcUpdateSettings, requestPackage))
+        if (!WardOwnership.TryInvokeServerRoutedRpc(RpcUpdateSettings, requestPackage))
         {
-            Plugin.LogWardDiagnosticFailure(
-                "UpdateSettings.Send",
-                $"Failed to route per-ward UpdateSettings RPC to the server. playerId={player.GetPlayerID()}, requestId={requestId}, {WardDiagnosticInfo.DescribeWard(area)}");
             return new WardConfigurationRequestSubmission(
                 isPending: false,
                 requestId: 0L,
@@ -863,9 +896,6 @@ internal static class WardSettings
                 showOverlapMessage: false);
         }
 
-        Plugin.LogWardDiagnosticVerbose(
-            "UpdateSettings.Send",
-            $"Sent per-ward UpdateSettings RPC to the server. playerId={player.GetPlayerID()}, requestId={requestId}, {WardDiagnosticInfo.DescribeWard(area)}");
         return new WardConfigurationRequestSubmission(
             isPending: true,
             requestId: requestId,
@@ -890,86 +920,41 @@ internal static class WardSettings
                 return;
             }
 
-            var hadBaselineRevision = ManagedWardRuntimeContexts.TryGetCurrentDataRevision(area, out var baselineDataRevision);
-            area.RemovePermitted(targetPlayerId);
-            if (hadBaselineRevision)
+            var zdo = nview.GetZDO();
+            if (WardOwnership.TryClaimManagedWardMutationOwnership(zdo) &&
+                WardPrivateAreaSafeAccess.RemovePermittedPlayer(zdo, targetPlayerId))
             {
-                ManagedWardRuntimeContexts.ArmNextDataRevisionFanOutSuppressionIfChanged(area, baselineDataRevision);
+                WardOwnership.CompleteAuthoritativePermittedMutation(zdo);
             }
 
             return;
         }
 
         var requestPackage = new ZPackage();
+        requestPackage.Write(nview.GetZDO().m_uid);
         requestPackage.Write(targetPlayerId);
-        if (!WardOwnership.TryInvokeManagedWardStateRpcOnServer(nview, RpcRemovePermitted, requestPackage))
+        if (!WardOwnership.TryInvokeServerRoutedRpc(RpcRemovePermitted, requestPackage))
         {
-            Plugin.LogWardDiagnosticFailure(
-                "RemovePermitted.Send",
-                $"Failed to route per-ward RemovePermitted RPC to the server. playerId={player.GetPlayerID()}, targetPlayerId={targetPlayerId}, {WardDiagnosticInfo.DescribeWard(area)}");
             return;
         }
 
-        Plugin.LogWardDiagnosticVerbose(
-            "RemovePermitted.Send",
-            $"Sent per-ward RemovePermitted RPC to the server. playerId={player.GetPlayerID()}, targetPlayerId={targetPlayerId}, {WardDiagnosticInfo.DescribeWard(area)}");
     }
 
-    internal static void RegisterRpcHandlers(PrivateArea area)
+    private static void HandleRoutedUpdateConfiguration(long sender, ZPackage? pkg)
     {
-        RegisterRpcHandlers(ManagedWardRef.FromArea(area));
-    }
-
-    internal static void RegisterRpcHandlers(ManagedWardRef ward)
-    {
-        var area = ward.Area;
-        if (area == null)
+        if (ZNet.instance == null || !ZNet.instance.IsServer() ||
+            !TryReadWardZdoId(pkg, out var wardZdoId))
         {
             return;
         }
 
-        var nview = ward.NView ?? GetNView(area);
-        if (nview == null || !nview.IsValid())
+        var zdo = ZDOMan.instance?.GetZDO(wardZdoId);
+        var currentConfiguration = GetConfiguration(zdo);
+        if (!TryReadConfigurationRequest(pkg, out var requestId, out var requestedConfiguration))
         {
-            return;
-        }
-
-        if (area.GetComponent<WardSettingsRpcRegistrationState>() != null)
-        {
-            return;
-        }
-
-        area.gameObject.AddComponent<WardSettingsRpcRegistrationState>();
-
-        nview.Register<ZPackage>(RpcUpdateSettings, (sender, pkg) =>
-        {
-            HandleUpdateConfiguration(area, sender, pkg);
-        });
-        nview.Register<ZPackage>(RpcUpdateSettingsResponse, (sender, pkg) =>
-        {
-            HandleUpdateConfigurationResponse(area, sender, pkg);
-        });
-        nview.Register<ZPackage>(RpcRemovePermitted, (sender, pkg) =>
-        {
-            HandleRemovePermitted(area, sender, pkg);
-        });
-    }
-
-    private static void HandleUpdateConfiguration(PrivateArea area, long sender, ZPackage pkg)
-    {
-        var nview = GetNView(area);
-        if (nview == null || !WardOwnership.CanHandleManagedWardStateRpc(nview))
-        {
-            return;
-        }
-
-        var currentConfiguration = GetConfiguration(area);
-
-        if (!TryReadConfigurationRequest(pkg, out var requestId, out var configuration))
-        {
-            SendUpdateConfigurationResponse(
-                nview,
+            SendRoutedUpdateConfigurationResponse(
                 sender,
+                wardZdoId,
                 0L,
                 new WardConfigurationUpdateResult(
                     WardConfigurationRequestResultCode.InvalidPayload,
@@ -978,12 +963,29 @@ internal static class WardSettings
             return;
         }
 
-        if (!WardOwnership.TryResolveAuthoritativePlayerIdFromSender(sender, "UpdateSettings.Request", out var requesterId) ||
-            !CanControlWard(area, requesterId))
+        if (zdo == null || !zdo.IsValid() || !WardOwnership.IsManagedWardZdo(zdo))
         {
-            SendUpdateConfigurationResponse(
-                nview,
+            SendRoutedUpdateConfigurationResponse(
                 sender,
+                wardZdoId,
+                requestId,
+                new WardConfigurationUpdateResult(
+                    WardConfigurationRequestResultCode.InvalidState,
+                    requestedConfiguration,
+                    showOverlapMessage: false));
+            return;
+        }
+
+        if (!WardOwnership.TryResolveAuthoritativeManagedWardRequest(
+                sender,
+                wardZdoId,
+                out zdo,
+                out var requesterId) ||
+            !CanControlWard(zdo, requesterId))
+        {
+            SendRoutedUpdateConfigurationResponse(
+                sender,
+                wardZdoId,
                 requestId,
                 new WardConfigurationUpdateResult(
                     WardConfigurationRequestResultCode.Denied,
@@ -992,11 +994,11 @@ internal static class WardSettings
             return;
         }
 
-        if (!WardOwnership.TryClaimManagedWardMutationOwnership(area, "UpdateSettings.Request"))
+        if (!WardOwnership.TryClaimManagedWardMutationOwnership(zdo))
         {
-            SendUpdateConfigurationResponse(
-                nview,
+            SendRoutedUpdateConfigurationResponse(
                 sender,
+                wardZdoId,
                 requestId,
                 new WardConfigurationUpdateResult(
                     WardConfigurationRequestResultCode.InvalidState,
@@ -1005,17 +1007,55 @@ internal static class WardSettings
             return;
         }
 
-        var result = ProcessConfigurationUpdate(area, configuration, currentConfiguration);
-        SendUpdateConfigurationResponse(nview, sender, requestId, result);
+        var result = ProcessConfigurationUpdate(zdo, requestedConfiguration, currentConfiguration);
+        SendRoutedUpdateConfigurationResponse(sender, wardZdoId, requestId, result);
+    }
+
+    private static void HandleRoutedUpdateConfigurationResponse(long sender, ZPackage? pkg)
+    {
+        if (!WardOwnership.IsAuthoritativeServerSender(sender) || !TryReadWardZdoId(pkg, out var wardZdoId))
+        {
+            return;
+        }
+
+        var instance = ZNetScene.instance?.FindInstance(wardZdoId);
+        var area = instance != null
+            ? instance.GetComponent<PrivateArea>() ?? instance.GetComponentInChildren<PrivateArea>()
+            : null;
+        if (area != null)
+        {
+            HandleUpdateConfigurationResponse(area, sender, pkg!);
+        }
+    }
+
+    private static void HandleRoutedRemovePermitted(long sender, ZPackage? pkg)
+    {
+        if (ZNet.instance == null || !ZNet.instance.IsServer() ||
+            !TryReadWardZdoId(pkg, out var wardZdoId) ||
+            !TryReadRemovePermittedRequest(pkg, out var targetPlayerId) ||
+            !WardOwnership.TryResolveAuthoritativeManagedWardRequest(
+                sender,
+                wardZdoId,
+                out var zdo,
+                out var requesterId))
+        {
+            return;
+        }
+
+        if (!CanControlWard(zdo, requesterId) ||
+            !WardOwnership.TryClaimManagedWardMutationOwnership(zdo) ||
+            !WardPrivateAreaSafeAccess.RemovePermittedPlayer(zdo, targetPlayerId))
+        {
+            return;
+        }
+
+        WardOwnership.CompleteAuthoritativePermittedMutation(zdo);
     }
 
     private static void HandleUpdateConfigurationResponse(PrivateArea area, long sender, ZPackage pkg)
     {
         if (!WardOwnership.IsAuthoritativeServerSender(sender))
         {
-            Plugin.LogWardDiagnosticFailure(
-                "UpdateSettings.Response",
-                $"Rejected ward configuration response from an unauthorized sender. sender={sender}, {WardDiagnosticInfo.DescribeWard(area)}");
             return;
         }
 
@@ -1026,34 +1066,6 @@ internal static class WardSettings
 
         ShowConfigurationRequestFeedback(resultCode, showOverlapMessage);
         WardGuiController.Instance?.HandleWardConfigurationResponse(area, requestId, resultCode, configuration);
-    }
-
-    private static void HandleRemovePermitted(PrivateArea area, long sender, ZPackage? pkg)
-    {
-        var nview = GetNView(area);
-        if (!TryReadRemovePermittedRequest(pkg, out var targetPlayerId))
-        {
-            return;
-        }
-
-        if (nview == null || !WardOwnership.CanHandleManagedWardStateRpc(nview) ||
-            !WardOwnership.TryResolveAuthoritativePlayerIdFromSender(sender, "RemovePermitted.Request", out var requesterId) ||
-            !CanControlWard(area, requesterId))
-        {
-            return;
-        }
-
-        if (!WardOwnership.TryClaimManagedWardMutationOwnership(area, "RemovePermitted.Request"))
-        {
-            return;
-        }
-
-        var hadBaselineRevision = ManagedWardRuntimeContexts.TryGetCurrentDataRevision(area, out var baselineDataRevision);
-        area.RemovePermitted(targetPlayerId);
-        if (hadBaselineRevision)
-        {
-            ManagedWardRuntimeContexts.ArmNextDataRevisionFanOutSuppressionIfChanged(area, baselineDataRevision);
-        }
     }
 
     private static bool TryCreateConfiguration(
@@ -1100,14 +1112,11 @@ internal static class WardSettings
         pkg.Write((int)configuration.Restrictions);
     }
 
-    private static void SaveConfiguration(PrivateArea area, WardConfiguration currentConfiguration, WardConfiguration configuration)
+    private static void SaveConfiguration(
+        ZDO zdo,
+        WardConfiguration currentConfiguration,
+        WardConfiguration configuration)
     {
-        var zdo = GetZdo(area);
-        if (zdo == null)
-        {
-            return;
-        }
-
         if (currentConfiguration.ShowAreaMarker != configuration.ShowAreaMarker)
         {
             zdo.Set(ShowAreaMarkerKey, configuration.ShowAreaMarker);
@@ -1147,19 +1156,14 @@ internal static class WardSettings
         {
             zdo.Set(RestrictionOptionsKey, (int)configuration.Restrictions);
         }
-
-        var context = ManagedWardRuntimeContexts.GetOrCreate(area);
-        context.CachedConfiguration = new CachedWardConfiguration(zdo.DataRevision, MaxRadius, ForcedRestrictions, configuration);
-        context.HasCachedConfiguration = true;
     }
 
     private static WardConfigurationUpdateResult ProcessConfigurationUpdate(
-        PrivateArea area,
+        ZDO zdo,
         WardConfiguration requestedConfiguration,
         WardConfiguration currentConfiguration)
     {
-        var configuration = ClampConfiguration(area, requestedConfiguration);
-        var radiusChanged = !Mathf.Approximately(currentConfiguration.Radius, configuration.Radius);
+        var configuration = ClampConfiguration(zdo, requestedConfiguration);
         var showOverlapMessage = configuration.Radius < requestedConfiguration.Radius;
         if (ConfigurationsMatch(currentConfiguration, configuration))
         {
@@ -1169,17 +1173,8 @@ internal static class WardSettings
                 showOverlapMessage);
         }
 
-        ManagedWardRuntimeContexts.ArmNextDataRevisionFanOutSuppression(area);
-        SaveConfiguration(area, currentConfiguration, configuration);
-        var ward = ManagedWardRef.FromArea(area);
-        ApplyAreaState(ward, configuration);
-        if (radiusChanged)
-        {
-            ManagedWardMapStateService.NotifyLiveWardMutation(
-                area,
-                "ward radius updated");
-            WardOwnership.ForceSyncManagedWardZdoToServer(ward, "UpdateSettings.Sync");
-        }
+        SaveConfiguration(zdo, currentConfiguration, configuration);
+        WardOwnership.CompleteAuthoritativeManagedWardMutation(zdo);
 
         return new WardConfigurationUpdateResult(
             WardConfigurationRequestResultCode.Applied,
@@ -1187,9 +1182,9 @@ internal static class WardSettings
             showOverlapMessage);
     }
 
-    private static WardConfiguration ClampConfiguration(PrivateArea area, WardConfiguration configuration)
+    private static WardConfiguration ClampConfiguration(ZDO zdo, WardConfiguration configuration)
     {
-        var maxRadius = WardAccess.GetMaxNonOverlappingRadius(area, MaxRadius);
+        var maxRadius = GetMaxNonOverlappingRadius(zdo);
         var clampedRadius = Mathf.Clamp(Mathf.Min(configuration.Radius, maxRadius), MinRadius, MaxRadius);
         return new WardConfiguration(
             configuration.ShowAreaMarker,
@@ -1200,6 +1195,42 @@ internal static class WardSettings
             configuration.WarningSoundEnabled,
             configuration.WarningFlashEnabled,
             ApplyForcedRestrictions(configuration.Restrictions));
+    }
+
+    private static float GetMaxNonOverlappingRadius(ZDO zdo)
+    {
+        var zdoMan = ZDOMan.instance;
+        if (zdoMan == null)
+        {
+            return MaxRadius;
+        }
+
+        var position = zdo.GetPosition();
+        var ownerPlayerId = zdo.GetLong(ZDOVars.s_creator, 0L);
+        var guildsAvailable = GuildsCompat.IsAvailable();
+        var guildId = guildsAvailable ? GuildsCompat.GetWardGuildId(zdo) : 0;
+        var overlapAreas = new List<WardOverlapArea>();
+        foreach (var candidate in zdoMan.m_objectsByID.Values)
+        {
+            if (candidate == null || candidate.m_uid == zdo.m_uid || !WardOwnership.IsManagedWardZdo(candidate))
+            {
+                continue;
+            }
+
+            var candidatePosition = candidate.GetPosition();
+            overlapAreas.Add(new WardOverlapArea(
+                candidate.m_uid.GetHashCode(),
+                candidatePosition.x,
+                candidatePosition.z,
+                GetStoredRadius(candidate),
+                candidate.GetLong(ZDOVars.s_creator, 0L),
+                guildId != 0 && guildsAvailable ? GuildsCompat.GetWardGuildId(candidate) : 0));
+        }
+
+        return WardOverlapPolicy.GetMaxNonOverlappingRadius(
+            MaxRadius,
+            new WardOverlapQuery(position.x, position.z, MaxRadius, ownerPlayerId, guildId),
+            overlapAreas);
     }
 
     private static void ApplyAreaMarkerVisuals(CircleProjector marker, WardConfiguration configuration)
@@ -1376,6 +1407,11 @@ internal static class WardSettings
         return WardAccess.CanControlManagedWard(area, playerId);
     }
 
+    private static bool CanControlWard(ZDO zdo, long playerId)
+    {
+        return WardAccess.CanControlManagedWard(zdo, playerId);
+    }
+
     private static long AllocateConfigurationRequestId()
     {
         if (_nextConfigurationRequestId == long.MaxValue)
@@ -1408,6 +1444,26 @@ internal static class WardSettings
         }
     }
 
+    private static bool TryReadWardZdoId(ZPackage? pkg, out ZDOID wardZdoId)
+    {
+        wardZdoId = ZDOID.None;
+        if (pkg == null)
+        {
+            return false;
+        }
+
+        try
+        {
+            wardZdoId = pkg.ReadZDOID();
+            return !wardZdoId.IsNone();
+        }
+        catch
+        {
+            wardZdoId = ZDOID.None;
+            return false;
+        }
+    }
+
     private static bool TryReadRemovePermittedRequest(ZPackage? pkg, out long targetPlayerId)
     {
         targetPlayerId = 0L;
@@ -1428,23 +1484,24 @@ internal static class WardSettings
         }
     }
 
-    private static void SendUpdateConfigurationResponse(
-        ZNetView? nview,
+    private static void SendRoutedUpdateConfigurationResponse(
         long receiverUid,
+        ZDOID wardZdoId,
         long requestId,
         WardConfigurationUpdateResult result)
     {
-        if (nview == null || receiverUid == 0L)
+        if (receiverUid == 0L || wardZdoId.IsNone())
         {
             return;
         }
 
         var pkg = new ZPackage();
+        pkg.Write(wardZdoId);
         pkg.Write(requestId);
         pkg.Write((int)result.ResultCode);
         pkg.Write(result.ShowOverlapMessage);
         WriteConfiguration(pkg, result.Configuration);
-        nview.InvokeRPC(receiverUid, RpcUpdateSettingsResponse, new object[] { pkg });
+        ZRoutedRpc.instance?.InvokeRoutedRPC(receiverUid, RpcUpdateSettingsResponse, pkg);
     }
 
     private static bool TryReadConfigurationResponse(

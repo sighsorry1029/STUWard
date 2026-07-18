@@ -73,14 +73,14 @@ internal static partial class WardMinimapPinsManager
             }
         }
 
-        if (!WardOwnership.TryResolveAuthoritativePlayerIdFromSender(sender, "WardPins.Request", out var playerId))
+        if (!WardOwnership.TryResolveAuthoritativePlayerIdFromSender(sender, out var playerId))
         {
             return;
         }
 
         var canSeeAllWards = WardAdminDebugAccess.IsPlayerAdminDebugController(playerId);
         var playerGuildId = GuildsCompat.GetPlayerGuildId(playerId);
-        var prepared = WardMinimapVisibilityIndex.TryPrepare(ZDOMan.instance, "ward minimap remote request");
+        var prepared = WardMinimapVisibilityIndex.TryPrepare(ZDOMan.instance);
         var responseKind = WardPinsResponseKind.Unavailable;
         var snapshot = WardMinimapViewerSnapshot.Empty;
         if (prepared)
@@ -140,9 +140,6 @@ internal static partial class WardMinimapPinsManager
         WriteSnapshotEntries(pkg, snapshot.Entries);
 
         routedRpc.InvokeRoutedRPC(receiverUid, ReceiveWardPinsRpc, pkg);
-        Plugin.LogWardDiagnosticVerbose(
-            "WardPins.Response",
-            $"Sent ward minimap snapshot response. requestId={requestId}, receiverUid={receiverUid}, responseKind={responseKind}, viewerRevisionToken={snapshot.ViewerRevisionToken}, playerId={playerId}, canSeeAllWards={canSeeAllWards}, indexedWardCount={snapshot.IndexedWardCount}, candidateWardCount={snapshot.CandidateWardCount}, visibleWardCount={snapshot.VisibleWardCount}, enabledWardCount={snapshot.EnabledWardCount}{DescribeFirstEntry(snapshot.FirstEntry)}");
     }
 
     private static void SendWardPinsPush(
@@ -179,47 +176,34 @@ internal static partial class WardMinimapPinsManager
         pkg.Write(removedWardIds.Count);
         WriteRemovedWardIds(pkg, removedWardIds);
         routedRpc.InvokeRoutedRPC(receiverUid, PushWardPinsRpc, pkg);
-        Plugin.LogWardDiagnosticVerbose(
-            "WardPins.Push",
-            $"Pushed ward minimap {(fullSnapshot ? "full snapshot" : "delta")}. receiverUid={receiverUid}, viewerRevisionToken={viewerRevisionToken}, playerId={playerId}, canSeeAllWards={canSeeAllWards}, indexedWardCount={indexedWardCount}, candidateWardCount={candidateWardCount}, visibleWardCount={visibleWardCount}, enabledWardCount={enabledWardCount}, upsertedWardCount={snapshotEntries.Count}, removedWardCount={removedWardIds.Count}{DescribeFirstEntry(firstEntry)}");
     }
 
     private static void HandleReceiveWardPins(long sender, ZPackage pkg)
     {
         if (!WardOwnership.IsAuthoritativeServerSender(sender) || pkg == null)
         {
-            Plugin.LogWardDiagnosticFailure(
-                "WardPins.Response",
-                $"Rejected ward minimap response from a non-server sender. sender={sender}");
             return;
         }
 
         int requestId;
         WardPinsResponseKind responseKind;
         int viewerRevisionToken;
-        long playerId;
-        bool canSeeAllWards;
-        int indexedWardCount;
-        int candidateWardCount;
-        int visibleWardCount;
-        int enabledWardCount;
         int snapshotCount;
         try
         {
             requestId = pkg.ReadInt();
             responseKind = ReadWardPinsResponseKind(pkg.ReadInt());
             viewerRevisionToken = pkg.ReadInt();
-            playerId = pkg.ReadLong();
-            canSeeAllWards = pkg.ReadBool();
-            indexedWardCount = pkg.ReadInt();
-            candidateWardCount = pkg.ReadInt();
-            visibleWardCount = pkg.ReadInt();
-            enabledWardCount = pkg.ReadInt();
+            _ = pkg.ReadLong();
+            _ = pkg.ReadBool();
+            _ = pkg.ReadInt();
+            _ = pkg.ReadInt();
+            _ = pkg.ReadInt();
+            _ = pkg.ReadInt();
             snapshotCount = pkg.ReadInt();
         }
         catch
         {
-            Plugin.LogWardDiagnosticFailure("WardPins.Response", "Failed to deserialize remote ward minimap snapshot header.");
             return;
         }
 
@@ -237,17 +221,11 @@ internal static partial class WardMinimapPinsManager
 
         if (_pendingSnapshotRequestId == 0 || requestId != _pendingSnapshotRequestId)
         {
-            Plugin.LogWardDiagnosticVerbose(
-                "WardPins.Response",
-                $"Ignored remote ward minimap snapshot response because it does not match the current pending request. requestId={requestId}, pendingRequestId={_pendingSnapshotRequestId}");
             return;
         }
 
         if (responseKind == WardPinsResponseKind.Unavailable)
         {
-            Plugin.LogWardDiagnosticVerbose(
-                "WardPins.Response",
-                $"Deferred applying remote ward minimap snapshot because the server could not prepare it yet. requestId={requestId}, playerId={playerId}, canSeeAllWards={canSeeAllWards}");
             return;
         }
 
@@ -257,10 +235,7 @@ internal static partial class WardMinimapPinsManager
             {
                 _pendingSnapshotRequestId = 0;
                 _lastViewerRevisionToken = 0;
-                QueueRemoteSnapshotBootstrapRequest("server reported unchanged before full snapshot was acknowledged");
-                Plugin.LogWardDiagnosticVerbose(
-                    "WardPins.Response",
-                    $"Rejected unchanged remote ward minimap response because the client has not acknowledged a full snapshot yet. requestId={requestId}, snapshotState={_snapshotState}, playerId={playerId}, canSeeAllWards={canSeeAllWards}, serverViewerRevisionToken={viewerRevisionToken}");
+                QueueRemoteSnapshotBootstrapRequest();
                 UpdateLocalState(Player.m_localPlayer, force: false);
                 return;
             }
@@ -269,18 +244,13 @@ internal static partial class WardMinimapPinsManager
             ClearPendingRemoteSnapshotBootstrapRequest();
             _pendingSnapshotRequestId = 0;
             _lastViewerRevisionToken = viewerRevisionToken;
-            LogScanSummary(
-                $"playerId={playerId}, canSeeAllWards={canSeeAllWards}, indexedWardCount={indexedWardCount}, candidateWardCount={candidateWardCount}, visibleWardCount={visibleWardCount}, enabledWardCount={enabledWardCount}, source=server-unchanged");
             UpdateLocalState(Player.m_localPlayer, force: false);
             return;
         }
 
-        if (!TryReadSnapshotEntries(pkg, snapshotCount, out var snapshotEntries, out var firstEntry))
+        if (!TryReadSnapshotEntries(pkg, snapshotCount, out var snapshotEntries))
         {
-            Plugin.LogWardDiagnosticFailure(
-                "WardPins.Response",
-                $"Failed to deserialize remote ward minimap snapshot body. requestId={requestId}, declaredSnapshotCount={snapshotCount}");
-            QueueRemoteSnapshotBootstrapRequest("failed to deserialize remote ward minimap snapshot body");
+            QueueRemoteSnapshotBootstrapRequest();
             return;
         }
 
@@ -289,8 +259,6 @@ internal static partial class WardMinimapPinsManager
         ClearPendingRemoteSnapshotBootstrapRequest();
         _pendingSnapshotRequestId = 0;
         _lastViewerRevisionToken = viewerRevisionToken;
-        LogScanSummary(
-            $"playerId={playerId}, canSeeAllWards={canSeeAllWards}, indexedWardCount={indexedWardCount}, candidateWardCount={candidateWardCount}, visibleWardCount={visibleWardCount}, enabledWardCount={enabledWardCount}, source=server{DescribeFirstEntry(firstEntry)}");
         UpdateLocalState(Player.m_localPlayer, force: false);
     }
 
@@ -309,38 +277,28 @@ internal static partial class WardMinimapPinsManager
     {
         if (!WardOwnership.IsAuthoritativeServerSender(sender) || pkg == null)
         {
-            Plugin.LogWardDiagnosticFailure(
-                "WardPins.Push",
-                $"Rejected ward minimap push from a non-server sender. sender={sender}");
             return;
         }
 
         bool fullSnapshot;
         int viewerRevisionToken;
-        long playerId;
-        bool canSeeAllWards;
-        int indexedWardCount;
-        int candidateWardCount;
-        int visibleWardCount;
-        int enabledWardCount;
         int snapshotCount;
         int removedWardCount;
         try
         {
             fullSnapshot = pkg.ReadBool();
             viewerRevisionToken = pkg.ReadInt();
-            playerId = pkg.ReadLong();
-            canSeeAllWards = pkg.ReadBool();
-            indexedWardCount = pkg.ReadInt();
-            candidateWardCount = pkg.ReadInt();
-            visibleWardCount = pkg.ReadInt();
-            enabledWardCount = pkg.ReadInt();
+            _ = pkg.ReadLong();
+            _ = pkg.ReadBool();
+            _ = pkg.ReadInt();
+            _ = pkg.ReadInt();
+            _ = pkg.ReadInt();
+            _ = pkg.ReadInt();
             snapshotCount = pkg.ReadInt();
         }
         catch
         {
-            Plugin.LogWardDiagnosticFailure("WardPins.Push", "Failed to deserialize pushed ward minimap snapshot header.");
-            QueueRemoteSnapshotBootstrapRequest("failed to deserialize pushed ward minimap snapshot header");
+            QueueRemoteSnapshotBootstrapRequest();
             return;
         }
 
@@ -351,12 +309,9 @@ internal static partial class WardMinimapPinsManager
             return;
         }
 
-        if (!TryReadSnapshotEntries(pkg, snapshotCount, out var snapshotEntries, out var firstEntry))
+        if (!TryReadSnapshotEntries(pkg, snapshotCount, out var snapshotEntries))
         {
-            Plugin.LogWardDiagnosticFailure(
-                "WardPins.Push",
-                $"Failed to deserialize pushed ward minimap snapshot body. viewerRevisionToken={viewerRevisionToken}, declaredSnapshotCount={snapshotCount}");
-            QueueRemoteSnapshotBootstrapRequest("failed to deserialize pushed ward minimap snapshot body");
+            QueueRemoteSnapshotBootstrapRequest();
             return;
         }
 
@@ -366,28 +321,19 @@ internal static partial class WardMinimapPinsManager
         }
         catch
         {
-            Plugin.LogWardDiagnosticFailure(
-                "WardPins.Push",
-                $"Failed to deserialize pushed ward minimap removed-id count. viewerRevisionToken={viewerRevisionToken}");
-            QueueRemoteSnapshotBootstrapRequest("failed to deserialize pushed ward minimap removed-id count");
+            QueueRemoteSnapshotBootstrapRequest();
             return;
         }
 
         if (!TryReadRemovedWardIds(pkg, removedWardCount, out var removedWardIds))
         {
-            Plugin.LogWardDiagnosticFailure(
-                "WardPins.Push",
-                $"Failed to deserialize pushed ward minimap removed-id body. viewerRevisionToken={viewerRevisionToken}, declaredRemovedCount={removedWardCount}");
-            QueueRemoteSnapshotBootstrapRequest("failed to deserialize pushed ward minimap removed-id body");
+            QueueRemoteSnapshotBootstrapRequest();
             return;
         }
 
         if (!fullSnapshot && _snapshotState != ClientSnapshotState.Ready)
         {
-            Plugin.LogWardDiagnosticVerbose(
-                "WardPins.Push",
-                $"Ignored pushed ward minimap delta because the client has not acknowledged a full snapshot yet. snapshotState={_snapshotState}, viewerRevisionToken={viewerRevisionToken}, upsertedWardCount={snapshotEntries.Length}, removedWardCount={removedWardIds.Length}");
-            QueueRemoteSnapshotBootstrapRequest("ignored pushed delta before full snapshot was acknowledged");
+            QueueRemoteSnapshotBootstrapRequest();
             return;
         }
 
@@ -404,8 +350,6 @@ internal static partial class WardMinimapPinsManager
         ClearPendingRemoteSnapshotBootstrapRequest();
         _pendingSnapshotRequestId = 0;
         _lastViewerRevisionToken = viewerRevisionToken;
-        LogScanSummary(
-            $"playerId={playerId}, canSeeAllWards={canSeeAllWards}, indexedWardCount={indexedWardCount}, candidateWardCount={candidateWardCount}, visibleWardCount={visibleWardCount}, enabledWardCount={enabledWardCount}, source={(fullSnapshot ? "server-push-full" : "server-push-delta")}, upsertedWardCount={snapshotEntries.Length}, removedWardCount={removedWardIds.Length}{DescribeFirstEntry(firstEntry)}");
         UpdateLocalState(Player.m_localPlayer, force: false);
     }
 
@@ -432,20 +376,17 @@ internal static partial class WardMinimapPinsManager
     private static bool TryReadSnapshotEntries(
         ZPackage pkg,
         int snapshotCount,
-        out WardMinimapSnapshotEntry[] snapshotEntries,
-        out WardMinimapSnapshotEntry? firstEntry)
+        out WardMinimapSnapshotEntry[] snapshotEntries)
     {
         if (snapshotCount < 0 || snapshotCount > MaxSnapshotEntryCount)
         {
             snapshotEntries = System.Array.Empty<WardMinimapSnapshotEntry>();
-            firstEntry = null;
             return false;
         }
 
         snapshotEntries = snapshotCount <= 0
             ? System.Array.Empty<WardMinimapSnapshotEntry>()
             : new WardMinimapSnapshotEntry[snapshotCount];
-        firstEntry = null;
         try
         {
             for (var index = 0; index < snapshotEntries.Length; index++)
@@ -455,7 +396,6 @@ internal static partial class WardMinimapPinsManager
                     pkg.ReadVector3(),
                     pkg.ReadSingle(),
                     pkg.ReadBool());
-                firstEntry ??= snapshotEntries[index];
             }
 
             return true;
@@ -463,7 +403,6 @@ internal static partial class WardMinimapPinsManager
         catch
         {
             snapshotEntries = System.Array.Empty<WardMinimapSnapshotEntry>();
-            firstEntry = null;
             return false;
         }
     }

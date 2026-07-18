@@ -115,30 +115,12 @@ internal static class DirectInteractionPatches
     {
         __state = default;
         var player = WardAccess.GetPlayer(__0);
-        var continueOriginal = TryHandleDirectInteraction(__instance, player, ref __result, ref __state);
-        if (Plugin.ShouldLogWardDiagnosticVerbose() && __instance != null && player != null)
-        {
-            Plugin.LogWardDiagnosticVerbose(
-                "Access.DirectInteract",
-                $"Intercepted direct interact. targetType={__instance.GetType().Name}, targetName='{__instance.name}', playerId={player.GetPlayerID()}, continueOriginal={continueOriginal}, result={__result}, position={__instance.transform.position}");
-        }
-
-        return continueOriginal;
+        return TryHandleDirectInteraction(__instance, player, ref __result, ref __state);
     }
 
-    private static void Postfix(Component __instance, Humanoid __0, ref bool __result, WardCheckScopeState __state)
+    private static void Postfix(WardCheckScopeState __state)
     {
         __state.Dispose();
-
-        var player = WardAccess.GetPlayer(__0);
-        if (!Plugin.ShouldLogWardDiagnosticVerbose() || __instance == null || player == null)
-        {
-            return;
-        }
-
-        Plugin.LogWardDiagnosticVerbose(
-            "Access.DirectInteract.Result",
-            $"Completed direct interact. targetType={__instance.GetType().Name}, targetName='{__instance.name}', playerId={player.GetPlayerID()}, result={__result}, position={__instance.transform.position}");
     }
 
     private static bool TryHandleDirectInteraction(Component target, Player? player, ref bool result, ref WardCheckScopeState scopeState)
@@ -206,25 +188,12 @@ internal static class PrivateAreaHaveLocalAccessManagedPatch
         if (WardAdminDebugAccess.CanLocallyControlAnyWard(__instance, player))
         {
             __result = true;
-            if (Plugin.ShouldLogWardDiagnosticVerbose())
-            {
-                Plugin.LogWardDiagnosticVerbose(
-                    "Access.HaveLocalAccess",
-                    $"Granted HaveLocalAccess through admin debug control. playerId={player.GetPlayerID()}, wardZdo={(WardPrivateAreaSafeAccess.GetZdo(__instance)?.m_uid.ToString() ?? "none")}");
-            }
-
             return;
         }
 
         if (WardAccess.IsPlayerInWardGuild(player, __instance))
         {
             __result = true;
-            if (Plugin.ShouldLogWardDiagnosticVerbose())
-            {
-                Plugin.LogWardDiagnosticVerbose(
-                    "Access.HaveLocalAccess",
-                    $"Granted HaveLocalAccess through guild match. playerId={player.GetPlayerID()}, wardGuildId={GuildsCompat.GetWardGuildId(__instance)}, wardGuildName='{GuildsCompat.GetWardGuildName(__instance)}', wardZdo={(WardPrivateAreaSafeAccess.GetZdo(__instance)?.m_uid.ToString() ?? "none")}");
-            }
         }
     }
 }
@@ -287,13 +256,6 @@ internal static class PrivateAreaCheckAccessManagedPatch
             return true;
         }
 
-        if (Plugin.ShouldLogWardDiagnosticVerbose())
-        {
-            Plugin.LogWardDiagnosticVerbose(
-                "Access.PrivateArea",
-                $"Evaluated PrivateArea.CheckAccess. playerId={player.GetPlayerID()}, decision={access.Decision}, restriction={(hasRestrictionScope ? scopedRestriction.ToString() : "None")}, flash={flash}, wardCheck={wardCheck}, radius={radius}, effectiveRadius={effectiveRadius}, point={point}");
-        }
-
         __result = !access.IsDenied;
         return false;
     }
@@ -328,13 +290,6 @@ internal static class ContainerCheckAccessManagedPatch
             return true;
         }
 
-        if (Plugin.ShouldLogWardDiagnosticVerbose())
-        {
-            Plugin.LogWardDiagnosticVerbose(
-                "Access.Container",
-                $"Evaluated Container.CheckAccess. playerId={playerID}, decision={access.Decision}, position={__instance.transform.position}");
-        }
-
         __result = !access.IsDenied;
         return false;
     }
@@ -358,13 +313,6 @@ internal static class UseItemInteractionPatches
         if (continueOriginal && restriction != WardRestrictionOptions.None)
         {
             __state.EnterRestriction(restriction);
-        }
-
-        if (Plugin.ShouldLogWardDiagnosticVerbose() && __instance != null && player != null)
-        {
-            Plugin.LogWardDiagnosticVerbose(
-                "Access.UseItem",
-                $"Intercepted use-item interaction. targetType={__instance.GetType().Name}, targetName='{__instance.name}', playerId={player.GetPlayerID()}, continueOriginal={continueOriginal}, result={__result}, position={__instance.transform.position}");
         }
 
         return continueOriginal;
@@ -397,13 +345,6 @@ internal static class StationUsePatches
         if (continueOriginal && restriction != WardRestrictionOptions.None)
         {
             __state.EnterRestriction(restriction);
-        }
-
-        if (Plugin.ShouldLogWardDiagnosticVerbose() && __instance != null && player != null)
-        {
-            Plugin.LogWardDiagnosticVerbose(
-                "Access.StationUse",
-                $"Intercepted station interaction. targetType={__instance.GetType().Name}, targetName='{__instance.name}', playerId={player.GetPlayerID()}, continueOriginal={continueOriginal}, result={__result}, position={__instance.transform.position}");
         }
 
         return continueOriginal;
@@ -668,7 +609,7 @@ internal static class TargetPortalCompat
 
     private static bool TargetPortalOnPortalModeChangePrefix(long __0, ZDOID __1)
     {
-        if (!WardOwnership.TryResolveAuthoritativePlayerIdFromSender(__0, "TargetPortal.OnPortalModeChange", out var playerId))
+        if (!WardOwnership.TryResolveAuthoritativePlayerIdFromSender(__0, out var playerId))
         {
             return false;
         }
@@ -1698,7 +1639,7 @@ internal static class WardPatchHelpers
             return ProtectedRpcDecision.Allow;
         }
 
-        if (!TryResolveAuthoritativeSenderPlayerId(sender, "Protected.Remove", out var playerId))
+        if (!TryResolveAuthoritativeSenderPlayerId(sender, out var playerId))
         {
             return ProtectedRpcDecision.Unresolved;
         }
@@ -1728,7 +1669,7 @@ internal static class WardPatchHelpers
             return ProtectedRpcDecision.Allow;
         }
 
-        if (!TryResolveAuthoritativeSenderPlayerId(sender, "Protected.PlacedConsumableRemove", out var playerId))
+        if (!TryResolveAuthoritativeSenderPlayerId(sender, out var playerId))
         {
             return ProtectedRpcDecision.Unresolved;
         }
@@ -1740,7 +1681,7 @@ internal static class WardPatchHelpers
 
     internal static ProtectedRpcDecision EvaluateDamageBySender(Vector3 point, long sender)
     {
-        if (!TryResolveAuthoritativeSenderPlayerId(sender, "Protected.Damage", out var playerId))
+        if (!TryResolveAuthoritativeSenderPlayerId(sender, out var playerId))
         {
             return ProtectedRpcDecision.Unresolved;
         }
@@ -1762,7 +1703,7 @@ internal static class WardPatchHelpers
 
     internal static BuildingDamageBlockReason GetBuildingDamageBlockReason(Vector3 point, Piece? piece, long sender)
     {
-        if (!TryResolveAuthoritativeSenderPlayerId(sender, "Protected.BuildingDamage", out var playerId))
+        if (!TryResolveAuthoritativeSenderPlayerId(sender, out var playerId))
         {
             return BuildingDamageBlockReason.UnresolvedSender;
         }
@@ -1785,7 +1726,7 @@ internal static class WardPatchHelpers
 
     internal static ProtectedRpcDecision EvaluateInteractionBySender(Vector3 point, long sender)
     {
-        if (!TryResolveAuthoritativeSenderPlayerId(sender, "Protected.Interaction", out var playerId))
+        if (!TryResolveAuthoritativeSenderPlayerId(sender, out var playerId))
         {
             return ProtectedRpcDecision.Unresolved;
         }
@@ -1797,7 +1738,7 @@ internal static class WardPatchHelpers
 
     internal static ProtectedRpcDecision EvaluateInteractionBySender(Vector3 point, long sender, WardRestrictionOptions restriction)
     {
-        if (!TryResolveAuthoritativeSenderPlayerId(sender, "Protected.Interaction", out var playerId))
+        if (!TryResolveAuthoritativeSenderPlayerId(sender, out var playerId))
         {
             return ProtectedRpcDecision.Unresolved;
         }
@@ -1885,9 +1826,9 @@ internal static class WardPatchHelpers
         return localPlayer.GetPlayerID() == GetPlayerIdFromSender(sender) ? localPlayer : null;
     }
 
-    private static bool TryResolveAuthoritativeSenderPlayerId(long sender, string context, out long playerId)
+    private static bool TryResolveAuthoritativeSenderPlayerId(long sender, out long playerId)
     {
-        return WardOwnership.TryResolveAuthoritativePlayerIdFromSender(sender, context, out playerId);
+        return WardOwnership.TryResolveAuthoritativePlayerIdFromSender(sender, out playerId);
     }
 
     private static long GetPlayerIdFromCharacter(Character? attacker)

@@ -17,10 +17,9 @@ internal static partial class WardMinimapPinsManager
     }
 
     private static bool _pendingServerViewerRefreshForAll;
-    private static string? _lastServerViewerRefreshReason;
     private static DateTime _serverViewerRefreshFlushAtUtc = DateTime.MinValue;
 
-    internal static void QueueServerViewerRefreshRecipients(HashSet<long>? recipientPeerUids, string reason)
+    internal static void QueueServerViewerRefreshRecipients(HashSet<long>? recipientPeerUids)
     {
         if (ZNet.instance == null || !ZNet.instance.IsServer())
         {
@@ -43,9 +42,6 @@ internal static partial class WardMinimapPinsManager
             }
         }
 
-        _lastServerViewerRefreshReason = string.IsNullOrWhiteSpace(reason)
-            ? _lastServerViewerRefreshReason
-            : reason;
         if (_serverViewerRefreshFlushAtUtc == DateTime.MinValue)
         {
             _serverViewerRefreshFlushAtUtc = DateTime.UtcNow + ServerViewerRefreshDebounce;
@@ -109,15 +105,11 @@ internal static partial class WardMinimapPinsManager
             }
         }
 
-        var refreshReason = string.IsNullOrWhiteSpace(_lastServerViewerRefreshReason)
-            ? "ward minimap server refresh"
-            : _lastServerViewerRefreshReason!;
         _pendingServerViewerRefreshForAll = false;
         PendingServerViewerRefreshPeerUids.Clear();
-        _lastServerViewerRefreshReason = null;
         _serverViewerRefreshFlushAtUtc = DateTime.MinValue;
 
-        if (targetPeerUids.Count == 0 || !WardMinimapVisibilityIndex.TryPrepare(ZDOMan.instance, refreshReason))
+        if (targetPeerUids.Count == 0 || !WardMinimapVisibilityIndex.TryPrepare(ZDOMan.instance))
         {
             return;
         }
@@ -240,9 +232,6 @@ internal static partial class WardMinimapPinsManager
         playerId = WardOwnership.GetPlayerIdFromSender(receiverUid);
         if (playerId == 0L)
         {
-            Plugin.LogWardDiagnosticFailure(
-                "WardPins.Push",
-                $"Skipped ward minimap push because the receiver player id could not be resolved. receiverUid={receiverUid}");
             return false;
         }
 

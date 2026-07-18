@@ -103,9 +103,6 @@ internal static partial class GuildsCompat
             return true;
         }
 
-        Plugin.LogWardDiagnosticVerbose(
-            "GuildsCompat.Lookup",
-            $"Failed local guild lookup. playerId={playerId}, playerName='{playerName}', accountId='{accountId}', apiAvailable={IsAvailable()}, hasPlayerLookup={(GetPlayerGuildByPlayerMethod != null)}, hasReferenceLookup={(GetPlayerGuildByReferenceMethod != null && PlayerReferenceFromStringMethod != null)}");
         CacheGuildLookup(playerId, hasGuild: false, default);
         return false;
     }
@@ -146,28 +143,18 @@ internal static partial class GuildsCompat
 
         if (!IsAvailable() || GetPlayerGuildByReferenceMethod == null || PlayerReferenceFromStringMethod == null)
         {
-            Plugin.LogWardDiagnosticVerbose(
-                "GuildsCompat.Lookup",
-                $"Failed remote guild lookup because Guilds API reference lookup is unavailable. playerId={playerId}, playerName='{WardOwnership.GetPlayerName(playerId)}', accountId='{WardOwnership.GetPlayerAccountId(playerId)}', apiAvailable={IsAvailable()}, hasReferenceLookup={(GetPlayerGuildByReferenceMethod != null && PlayerReferenceFromStringMethod != null)}");
             return false;
         }
 
         var platformId = GetPlayerPlatformId(playerId);
         if (string.IsNullOrWhiteSpace(platformId))
         {
-            var fallbackAccountId = WardOwnership.GetPlayerAccountId(playerId);
-            Plugin.LogWardDiagnosticVerbose(
-                "GuildsCompat.Lookup",
-                $"Failed remote guild lookup because live player platform id is unavailable. playerId={playerId}, playerName='{WardOwnership.GetPlayerName(playerId)}', fallbackAccountId='{fallbackAccountId}'");
             CacheGuildLookup(playerId, hasGuild: false, default);
             return false;
         }
 
         if (string.IsNullOrWhiteSpace(playerName))
         {
-            Plugin.LogWardDiagnosticVerbose(
-                "GuildsCompat.Lookup",
-                $"Failed remote guild lookup because player name is unavailable. playerId={playerId}, accountId='{platformId}'");
             CacheGuildLookup(playerId, hasGuild: false, default);
             return false;
         }
@@ -179,9 +166,6 @@ internal static partial class GuildsCompat
             return true;
         }
 
-        Plugin.LogWardDiagnosticVerbose(
-            "GuildsCompat.Lookup",
-            $"Failed remote guild lookup after account/name lookup. playerId={playerId}, playerName='{playerName}', accountId='{platformId}'");
         CacheGuildLookup(playerId, hasGuild: false, default);
         return false;
     }

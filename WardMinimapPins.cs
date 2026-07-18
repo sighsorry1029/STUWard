@@ -10,11 +10,9 @@ internal static partial class WardMinimapPinsManager
         ResetClientRuntimeState();
         _rpcsRegistered = false;
         _pendingServerViewerRefreshForAll = false;
-        _lastServerViewerRefreshReason = null;
         ServerViewerSyncStatesByPeerUid.Clear();
         PendingServerViewerRefreshPeerUids.Clear();
         _serverViewerRefreshFlushAtUtc = System.DateTime.MinValue;
-        Plugin.LogWardDiagnosticVerbose("WardPins.State", "Reset ward minimap pin manager state after ZNet awake.");
     }
 
     internal static void EnsureRuntimeBindings()
@@ -38,10 +36,10 @@ internal static partial class WardMinimapPinsManager
         return _pendingServerViewerRefreshForAll || PendingServerViewerRefreshPeerUids.Count > 0;
     }
 
-    internal static void NotifyWardDataMayHaveChanged(string reason, bool refreshImmediatelyIfVisible = false)
+    internal static void NotifyWardDataMayHaveChanged(bool refreshImmediatelyIfVisible = false)
     {
-        NotifyLocalWardDataMayHaveChanged(reason, refreshImmediatelyIfVisible);
-        QueueServerViewerRefreshRecipients(null, reason);
+        NotifyLocalWardDataMayHaveChanged(refreshImmediatelyIfVisible);
+        QueueServerViewerRefreshRecipients(null);
     }
 }
 

@@ -1,19 +1,12 @@
-using System;
-
 namespace STUWard;
 
 internal static class ManagedWardAccessEvaluator
 {
-    internal static bool HasPlayerAccess(PrivateArea area, ManagedWardAccessActor actor, bool includeDiagnosticData, bool logDiagnostic = true)
+    internal static bool HasPlayerAccess(PrivateArea area, ManagedWardAccessActor actor)
     {
-        var subject = BuildManagedWardAccessSubjectFromArea(area, actor, includeDiagnosticData);
-        var evaluation = ManagedWardAccessPolicy.Evaluate(actor, subject);
-        if (logDiagnostic)
-        {
-            LogResolutionVerbose(actor, subject, evaluation);
-        }
-
-        return evaluation.Allowed;
+        return ManagedWardAccessPolicy.Evaluate(
+            actor,
+            BuildManagedWardAccessSubjectFromArea(area, actor)).Allowed;
     }
 
     internal static bool TryCreateActorForAccessCheck(long playerId, out ManagedWardAccessActor actor)
@@ -61,13 +54,9 @@ internal static class ManagedWardAccessEvaluator
         }
 
         var actor = CreateActor(playerId, playerGuild);
-        var subject = BuildManagedWardAccessSubjectFromZdo(
-            zdo,
+        return ManagedWardAccessPolicy.Evaluate(
             actor,
-            includeDiagnosticData: Plugin.ShouldLogWardDiagnosticVerbose());
-        var evaluation = ManagedWardAccessPolicy.Evaluate(actor, subject);
-        LogResolutionVerbose(actor, subject, evaluation);
-        return evaluation.Allowed;
+            BuildManagedWardAccessSubjectFromZdo(zdo, actor)).Allowed;
     }
 
     internal static bool HasPlayerAccessToManagedWardIndexEntry(
@@ -81,13 +70,9 @@ internal static class ManagedWardAccessEvaluator
         }
 
         var actor = CreateActor(playerId, playerGuild);
-        var subject = BuildManagedWardAccessSubjectFromIndexEntry(
-            entry,
+        return ManagedWardAccessPolicy.Evaluate(
             actor,
-            includeDiagnosticData: Plugin.ShouldLogWardDiagnosticVerbose());
-        var evaluation = ManagedWardAccessPolicy.Evaluate(actor, subject);
-        LogResolutionVerbose(actor, subject, evaluation);
-        return evaluation.Allowed;
+            BuildManagedWardAccessSubjectFromIndexEntry(entry, actor)).Allowed;
     }
 
     internal static bool HasMatchingGuild(WardGuildIdentity playerGuild, WardGuildIdentity wardGuild)
@@ -95,84 +80,46 @@ internal static class ManagedWardAccessEvaluator
         return ManagedWardAccessPolicy.HasMatchingGuild(playerGuild, wardGuild);
     }
 
-    private static void LogResolutionVerbose(
-        ManagedWardAccessActor actor,
-        ManagedWardAccessSubject subject,
-        ManagedWardAccessEvaluation evaluation)
-    {
-        if (!Plugin.ShouldLogWardDiagnosticVerbose())
-        {
-            return;
-        }
-
-        var playerName = WardOwnership.GetPlayerName(actor.PlayerId);
-        var accountId = WardOwnership.GetPlayerAccountId(actor.PlayerId);
-        Plugin.LogWardDiagnosticVerbose(
-            "Access.Resolve",
-            $"Resolved managed ward access. allowed={evaluation.Allowed}, reason={evaluation.Reason}, playerId={actor.PlayerId}, playerName='{playerName}', accountId='{accountId}', playerGuildId={actor.PlayerGuild.Id}, playerGuildName='{actor.PlayerGuild.Name ?? string.Empty}', permitted={evaluation.Permitted}, sameGuild={evaluation.SameGuild}, wardGuildId={subject.WardGuild.Id}, wardGuildName='{subject.WardGuild.Name ?? string.Empty}', wardOwnerPlayerId={subject.OwnerPlayerId}, wardSteamAccountId='{subject.WardSteamAccountId}', wardZdo={subject.WardZdoLabel}");
-    }
-
     private static ManagedWardAccessSubject BuildManagedWardAccessSubjectFromArea(
         PrivateArea area,
-        ManagedWardAccessActor actor,
-        bool includeDiagnosticData)
+        ManagedWardAccessActor actor)
     {
         var zdo = WardPrivateAreaSafeAccess.GetZdo(area);
         return BuildManagedWardAccessSubjectCore(
-            zdo,
             WardAccess.GetCanonicalCreatorPlayerId(area),
             GuildsCompat.GetWardGuildId(area),
-            WardPrivateAreaSafeAccess.IsPlayerPermitted(area, actor.PlayerId),
-            includeDiagnosticData);
+            WardPrivateAreaSafeAccess.IsPlayerPermitted(area, actor.PlayerId));
     }
 
     private static ManagedWardAccessSubject BuildManagedWardAccessSubjectFromZdo(
         ZDO zdo,
-        ManagedWardAccessActor actor,
-        bool includeDiagnosticData)
+        ManagedWardAccessActor actor)
     {
         return BuildManagedWardAccessSubjectCore(
-            zdo,
             zdo.GetLong(ZDOVars.s_creator, 0L),
             GuildsCompat.GetWardGuildId(zdo),
-            WardPrivateAreaSafeAccess.IsPlayerPermitted(zdo, actor.PlayerId),
-            includeDiagnosticData);
+            WardPrivateAreaSafeAccess.IsPlayerPermitted(zdo, actor.PlayerId));
     }
 
     private static ManagedWardAccessSubject BuildManagedWardAccessSubjectFromIndexEntry(
         WardMinimapVisibilityIndexedEntry entry,
-        ManagedWardAccessActor actor,
-        bool includeDiagnosticData)
+        ManagedWardAccessActor actor)
     {
         return new ManagedWardAccessSubject(
             entry.OwnerPlayerId,
             new WardGuildIdentity(entry.WardGuildId, string.Empty),
-            IsPlayerPermitted(entry, actor.PlayerId),
-            string.Empty,
-            includeDiagnosticData ? entry.ZdoId.ToString() : string.Empty);
+            IsPlayerPermitted(entry, actor.PlayerId));
     }
 
     private static ManagedWardAccessSubject BuildManagedWardAccessSubjectCore(
-        ZDO? zdo,
         long ownerPlayerId,
         int wardGuildId,
-        bool permitted,
-        bool includeDiagnosticData)
+        bool permitted)
     {
         return new ManagedWardAccessSubject(
             ownerPlayerId,
-            new WardGuildIdentity(
-                wardGuildId,
-                includeDiagnosticData && wardGuildId != 0
-                    ? GuildsCompat.GetWardGuildName(zdo)
-                    : string.Empty),
-            permitted,
-            includeDiagnosticData
-                ? WardOwnership.GetWardSteamAccountId(zdo)
-                : string.Empty,
-            includeDiagnosticData
-                ? zdo?.m_uid.ToString() ?? "none"
-                : string.Empty);
+            new WardGuildIdentity(wardGuildId, string.Empty),
+            permitted);
     }
 
     private static bool IsPlayerPermitted(WardMinimapVisibilityIndexedEntry entry, long playerId)

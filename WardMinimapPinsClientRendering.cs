@@ -10,7 +10,6 @@ internal static partial class WardMinimapPinsManager
     {
         if (minimap == null)
         {
-            LogApplySummary("minimap=null");
             return;
         }
 
@@ -20,38 +19,8 @@ internal static partial class WardMinimapPinsManager
         var wardIcon = StuWardPrefab.GetPieceIcon();
         var rangeIcon = showActiveRanges ? GetRepresentativeRangeSprite() : null;
         EnsureCustomPinTypes(minimap, wardIcon, rangeIcon);
-        if (showIconPins && wardIcon == null)
-        {
-            if (!_loggedMissingWardIcon)
-            {
-                _loggedMissingWardIcon = true;
-                Plugin.LogWardDiagnosticFailure(
-                    "WardPins.Icon",
-                    "Could not resolve piece_stuward icon sprite for minimap pins.");
-            }
-        }
-        else
-        {
-            _loggedMissingWardIcon = false;
-        }
-
-        var iconPinTypeVisible = GetPinTypeVisibility(minimap, WardIconPinType);
-        LogHiddenPinTypeIfNeeded(
-            "Ward icon",
-            WardIconPinType,
-            showIconPins && LocalSnapshot.Count > 0,
-            iconPinTypeVisible,
-            ref _loggedHiddenWardIconPinType);
-        var rangePinTypeVisible = GetPinTypeVisibility(minimap, WardRangePinType);
-        LogHiddenPinTypeIfNeeded(
-            "Ward active range",
-            WardRangePinType,
-            showActiveRanges && LocalSnapshot.Count > 0,
-            rangePinTypeVisible,
-            ref _loggedHiddenWardRangePinType);
 
         var seenWardIds = new HashSet<ZDOID>();
-        var enabledWardCount = 0;
         foreach (var entry in LocalSnapshot.Values)
         {
             seenWardIds.Add(entry.ZdoId);
@@ -66,7 +35,6 @@ internal static partial class WardMinimapPinsManager
 
             if (showActiveRanges && entry.IsEnabled)
             {
-                enabledWardCount++;
                 UpsertActiveRangePin(minimap, entry);
             }
             else
@@ -77,11 +45,6 @@ internal static partial class WardMinimapPinsManager
 
         RemoveMissingPins(minimap, IconPins, seenWardIds);
         RemoveMissingPins(minimap, ActiveRangePins, seenWardIds);
-        if (Plugin.ShouldLogWardDiagnosticVerbose())
-        {
-            LogApplySummary(
-                $"snapshotCount={LocalSnapshot.Count}, enabledWardCount={enabledWardCount}, iconPins={IconPins.Count}, rangePins={ActiveRangePins.Count}, showIconPins={showIconPins}, showActiveRanges={showActiveRanges}, iconResolved={wardIcon != null}, iconPinTypeVisible={FormatNullableBool(iconPinTypeVisible)}, rangePinTypeVisible={FormatNullableBool(rangePinTypeVisible)}");
-        }
     }
 
     private static void UpsertIconPin(Minimap minimap, WardMinimapSnapshotEntry entry, Sprite? wardIcon)
@@ -235,9 +198,6 @@ internal static partial class WardMinimapPinsManager
 
     private static void ClearLocalPins(bool clearSnapshot)
     {
-        var removedIconPins = IconPins.Count;
-        var removedRangePins = ActiveRangePins.Count;
-        var clearedSnapshotCount = clearSnapshot ? LocalSnapshot.Count : 0;
         if (_boundMinimap != null)
         {
             foreach (var pin in IconPins.Values)
@@ -253,13 +213,6 @@ internal static partial class WardMinimapPinsManager
 
         IconPins.Clear();
         ActiveRangePins.Clear();
-        if (removedIconPins > 0 || removedRangePins > 0 || clearedSnapshotCount > 0)
-        {
-            Plugin.LogWardDiagnosticVerbose(
-                "WardPins.State",
-                $"Cleared local ward pins. clearSnapshot={clearSnapshot}, removedIconPins={removedIconPins}, removedRangePins={removedRangePins}, clearedSnapshotCount={clearedSnapshotCount}");
-        }
-
         if (!clearSnapshot)
         {
             return;
@@ -268,7 +221,7 @@ internal static partial class WardMinimapPinsManager
         _lastViewerRevisionToken = 0;
         _pendingSnapshotRequestId = 0;
         LocalSnapshot.Clear();
-        QueueRemoteSnapshotBootstrapRequest("local snapshot cleared");
+        QueueRemoteSnapshotBootstrapRequest();
     }
 
     private static void ReplaceLocalSnapshot(IReadOnlyList<WardMinimapSnapshotEntry> snapshotEntries)
@@ -296,103 +249,29 @@ internal static partial class WardMinimapPinsManager
         UpsertLocalSnapshotEntries(snapshotEntries);
     }
 
-    private static void QueueForceRefresh(string reason)
+    private static void QueueForceRefresh()
     {
         if (_pendingForceRefresh)
         {
-            _lastPendingRefreshReason ??= reason;
             return;
         }
 
         _pendingForceRefresh = true;
-        _lastPendingRefreshReason = reason;
-        if (Plugin.ShouldLogWardDiagnosticVerbose())
-        {
-            Plugin.LogWardDiagnosticVerbose("WardPins.State", $"Queued ward minimap rescan for next large map open. reason='{reason}'");
-        }
     }
 
-    private static void QueueRemoteSnapshotBootstrapRequest(string reason)
+    private static void QueueRemoteSnapshotBootstrapRequest()
     {
         _snapshotState = ClientSnapshotState.AwaitingFullSnapshot;
-        if (!string.IsNullOrWhiteSpace(reason))
-        {
-            _lastRemoteSnapshotBootstrapReason = reason;
-        }
     }
 
     private static void ClearPendingRemoteSnapshotBootstrapRequest()
     {
         _snapshotState = ClientSnapshotState.Ready;
-        _lastRemoteSnapshotBootstrapReason = null;
     }
 
     private static void ClearPendingForceRefresh()
     {
         _pendingForceRefresh = false;
-        _lastPendingRefreshReason = null;
-    }
-
-    private static void LogDisplayDecision(Player player, Minimap? minimap, bool canSeeAllWards, bool shouldDisplay, string reason)
-    {
-        if (!Plugin.ShouldLogWardDiagnosticVerbose())
-        {
-            return;
-        }
-
-        var decision =
-            $"shouldDisplay={shouldDisplay}, reason={reason}, playerId={player.GetPlayerID()}, canSeeAllWards={canSeeAllWards}, noMap={Game.m_noMap}, pinScale={Plugin.WardMinimapPinScale?.Value}, rangesConfig={Plugin.WardMinimapActiveRanges?.Value}, hasMinimap={minimap != null}, hasZNet={ZNet.instance != null}, hasZdoMan={ZDOMan.instance != null}";
-        if (decision == _lastDisplayDecision)
-        {
-            return;
-        }
-
-        _lastDisplayDecision = decision;
-        Plugin.LogWardDiagnosticVerbose("WardPins.Display", decision);
-    }
-
-    private static void LogApplySummary(string summary)
-    {
-        if (!Plugin.ShouldLogWardDiagnosticVerbose())
-        {
-            return;
-        }
-
-        if (summary == _lastApplySummary)
-        {
-            return;
-        }
-
-        _lastApplySummary = summary;
-        Plugin.LogWardDiagnosticVerbose("WardPins.Apply", summary);
-    }
-
-    private static void LogScanSummary(string summary)
-    {
-        if (!Plugin.ShouldLogWardDiagnosticVerbose())
-        {
-            return;
-        }
-
-        if (summary == _lastScanSummary)
-        {
-            return;
-        }
-
-        _lastScanSummary = summary;
-        Plugin.LogWardDiagnosticVerbose("WardPins.Scan", summary);
-    }
-
-    private static bool? GetPinTypeVisibility(Minimap minimap, Minimap.PinType pinType)
-    {
-        var pinTypeIndex = (int)pinType;
-        var visibleIconTypes = minimap.m_visibleIconTypes;
-        if (visibleIconTypes == null || pinTypeIndex < 0 || pinTypeIndex >= visibleIconTypes.Length)
-        {
-            return null;
-        }
-
-        return visibleIconTypes[pinTypeIndex];
     }
 
     private static void EnsureCustomPinTypes(Minimap minimap, Sprite? wardIcon, Sprite? rangeIcon)
@@ -411,9 +290,6 @@ internal static partial class WardMinimapPinsManager
             WardIconPinType = AddCustomPinType(minimap, wardIcon);
             WardRangePinType = AddCustomPinType(minimap, rangeIcon ?? wardIcon);
             _customPinTypesMinimap = minimap;
-            Plugin.LogWardDiagnosticVerbose(
-                "WardPins.Icon",
-                $"Registered STUWard minimap pin types. iconPinType={WardIconPinType}, rangePinType={WardRangePinType}, visibleIconTypeCount={minimap.m_visibleIconTypes.Length}");
             return;
         }
 
@@ -508,30 +384,6 @@ internal static partial class WardMinimapPinsManager
         return false;
     }
 
-    private static void LogHiddenPinTypeIfNeeded(
-        string label,
-        Minimap.PinType pinType,
-        bool shouldBeVisible,
-        bool? visible,
-        ref bool loggedHidden)
-    {
-        if (!shouldBeVisible || visible != false)
-        {
-            loggedHidden = false;
-            return;
-        }
-
-        if (loggedHidden)
-        {
-            return;
-        }
-
-        loggedHidden = true;
-        Plugin.LogWardDiagnosticFailure(
-            "WardPins.Icon",
-            $"{label} pin type {pinType} is currently hidden by minimap icon filters.");
-    }
-
     private static Sprite? GetRepresentativeRangeSprite()
     {
         foreach (var entry in LocalSnapshot.Values)
@@ -543,23 +395,6 @@ internal static partial class WardMinimapPinsManager
         }
 
         return null;
-    }
-
-    private static string DescribeFirstEntry(WardMinimapSnapshotEntry? firstEntry)
-    {
-        if (!firstEntry.HasValue)
-        {
-            return string.Empty;
-        }
-
-        var entry = firstEntry.Value;
-        return
-            $", firstWard=zdoId={entry.ZdoId}, position={entry.Position}, radius={entry.Radius:F1}, enabled={entry.IsEnabled}";
-    }
-
-    private static string FormatNullableBool(bool? value)
-    {
-        return value.HasValue ? value.Value.ToString() : "n/a";
     }
 
     private static float GetIconWorldSize(Minimap minimap)

@@ -146,6 +146,46 @@ internal static class WardPrivateAreaSafeAccess
         return false;
     }
 
+    internal static bool TogglePermittedPlayer(ZDO? zdo, long playerId, string playerName)
+    {
+        if (zdo == null || !zdo.IsValid() || playerId == 0L)
+        {
+            return false;
+        }
+
+        var permittedPlayers = GetPermittedPlayers(zdo);
+        var removed = permittedPlayers.RemoveAll(entry => entry.Key == playerId) > 0;
+        if (!removed)
+        {
+            if (permittedPlayers.Count >= MaxPermittedPlayers)
+            {
+                return false;
+            }
+
+            permittedPlayers.Add(new KeyValuePair<long, string>(playerId, playerName ?? string.Empty));
+        }
+
+        SetPermittedPlayers(zdo, permittedPlayers);
+        return true;
+    }
+
+    internal static bool RemovePermittedPlayer(ZDO? zdo, long playerId)
+    {
+        if (zdo == null || !zdo.IsValid() || playerId == 0L)
+        {
+            return false;
+        }
+
+        var permittedPlayers = GetPermittedPlayers(zdo);
+        if (permittedPlayers.RemoveAll(entry => entry.Key == playerId) == 0)
+        {
+            return false;
+        }
+
+        SetPermittedPlayers(zdo, permittedPlayers);
+        return true;
+    }
+
     internal static void ForgetPermittedPlayerIds(ZDOID zdoId)
     {
         if (zdoId.IsNone())
@@ -203,6 +243,19 @@ internal static class WardPrivateAreaSafeAccess
         return trimmedPlayerIds;
     }
 
+    private static void SetPermittedPlayers(ZDO zdo, IReadOnlyList<KeyValuePair<long, string>> permittedPlayers)
+    {
+        zdo.Set(ZDOVars.s_permitted, permittedPlayers.Count);
+        for (var index = 0; index < permittedPlayers.Count; index++)
+        {
+            var permittedPlayer = permittedPlayers[index];
+            zdo.Set(GetPermittedPlayerIdKey(index), permittedPlayer.Key);
+            zdo.Set(GetPermittedPlayerNameKey(index), permittedPlayer.Value ?? string.Empty);
+        }
+
+        ForgetPermittedPlayerIds(zdo.m_uid);
+    }
+
     private static int GetSafePermittedCount(ZDO zdo)
     {
         var permittedCount = zdo.GetInt(ZDOVars.s_permitted, 0);
@@ -211,9 +264,6 @@ internal static class WardPrivateAreaSafeAccess
             return permittedCount;
         }
 
-        Plugin.LogWardDiagnosticFailure(
-            "Permitted.Read",
-            $"Ignored invalid managed ward permitted-player count. wardZdo={zdo.m_uid}, permittedCount={permittedCount}, max={MaxPermittedPlayers}");
         return 0;
     }
 

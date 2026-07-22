@@ -1,8 +1,12 @@
 # Changelog
 
+## 1.2.7
+
+- Fixed ward activation and deactivation VFX/SFX on dedicated servers by assigning the single networked effect spawn to the requesting client after server authorization.
+
 ## 1.2.6
 
-- Restored ward activation and deactivation VFX/SFX on dedicated servers without reintroducing per-player duplication.
+- Added a server-side prefab fallback for ward toggle effects when no live ward instance was loaded.
 
 ## 1.2.5
 

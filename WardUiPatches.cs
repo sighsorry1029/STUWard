@@ -302,6 +302,7 @@ internal static class ManagedWardInteractionRpc
 {
     private const string RpcRequestToggleEnabled = "STUWard_RequestToggleEnabled";
     private const string RpcRequestTogglePermitted = "STUWard_RequestTogglePermitted";
+    private const string RpcPlayToggleEffect = "STUWard_PlayToggleEffect";
 
     private readonly struct PendingLocalEnabledToggleRequest
     {
@@ -339,6 +340,7 @@ internal static class ManagedWardInteractionRpc
     {
         routedRpc.Register<ZPackage>(RpcRequestToggleEnabled, HandleRoutedToggleEnabled);
         routedRpc.Register<ZPackage>(RpcRequestTogglePermitted, HandleRoutedTogglePermitted);
+        routedRpc.Register<ZPackage>(RpcPlayToggleEffect, HandleRoutedPlayToggleEffect);
     }
 
     internal static bool IsManagedWardForHooks(PrivateArea? area)
@@ -514,44 +516,35 @@ internal static class ManagedWardInteractionRpc
         var enabled = !zdo.GetBool(ZDOVars.s_enabled, false);
         zdo.Set(ZDOVars.s_enabled, enabled);
         WardOwnership.CompleteAuthoritativeManagedWardMutation(zdo);
-        PlayAuthoritativeToggleEffects(zdo, enabled);
+        SendToggleEffect(sender, zdo.m_uid, enabled);
     }
 
-    private static void PlayAuthoritativeToggleEffects(ZDO zdo, bool enabled)
+    private static void SendToggleEffect(long receiverUid, ZDOID wardZdoId, bool enabled)
     {
-        if (ZNet.instance == null || !ZNet.instance.IsServer())
+        if (receiverUid == 0L || wardZdoId.IsNone())
         {
             return;
         }
 
-        // Toggle effects have a ZNetView and must be instantiated only once by the server.
-        var scene = ZNetScene.instance;
-        if (scene == null)
+        var response = new ZPackage();
+        response.Write(wardZdoId);
+        response.Write(enabled);
+        ZRoutedRpc.instance?.InvokeRoutedRPC(receiverUid, RpcPlayToggleEffect, response);
+    }
+
+    private static void HandleRoutedPlayToggleEffect(long sender, ZPackage? response)
+    {
+        if (!WardOwnership.IsAuthoritativeServerSender(sender) ||
+            !TryReadToggleEffect(response, out var wardZdoId, out var enabled))
         {
             return;
         }
 
-        var instance = scene.FindInstance(zdo.m_uid);
+        var instance = ZNetScene.instance?.FindInstance(wardZdoId);
         var area = instance != null
             ? instance.GetComponent<PrivateArea>() ?? instance.GetComponentInChildren<PrivateArea>()
             : null;
-        var position = zdo.GetPosition();
-        var rotation = zdo.GetRotation();
-        if (area == null)
-        {
-            // Dedicated servers commonly keep remote wards as ZDOs without loaded scene instances.
-            var prefab = scene.GetPrefab(zdo.GetPrefab());
-            area = prefab != null
-                ? prefab.GetComponent<PrivateArea>() ?? prefab.GetComponentInChildren<PrivateArea>()
-                : null;
-        }
-        else
-        {
-            position = area.transform.position;
-            rotation = area.transform.rotation;
-        }
-
-        if (area == null)
+        if (area == null || !WardAccess.IsManagedWard(area, false))
         {
             return;
         }
@@ -562,7 +555,8 @@ internal static class ManagedWardInteractionRpc
             return;
         }
 
-        _ = effectList.Create(position, rotation, null, 1f, -1);
+        var transform = area.transform;
+        _ = effectList.Create(transform.position, transform.rotation, null, 1f, -1);
     }
 
     private static void HandleRoutedTogglePermitted(long sender, ZPackage? request)
@@ -644,6 +638,29 @@ internal static class ManagedWardInteractionRpc
         catch
         {
             wardZdoId = ZDOID.None;
+            return false;
+        }
+    }
+
+    private static bool TryReadToggleEffect(ZPackage? response, out ZDOID wardZdoId, out bool enabled)
+    {
+        wardZdoId = ZDOID.None;
+        enabled = false;
+        if (response == null)
+        {
+            return false;
+        }
+
+        try
+        {
+            wardZdoId = response.ReadZDOID();
+            enabled = response.ReadBool();
+            return !wardZdoId.IsNone();
+        }
+        catch
+        {
+            wardZdoId = ZDOID.None;
+            enabled = false;
             return false;
         }
     }

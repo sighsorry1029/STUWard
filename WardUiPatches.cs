@@ -524,11 +524,33 @@ internal static class ManagedWardInteractionRpc
             return;
         }
 
-        // Guard-stone toggle effects have a ZNetView and must be instantiated only once.
-        var instance = ZNetScene.instance?.FindInstance(zdo.m_uid);
+        // Toggle effects have a ZNetView and must be instantiated only once by the server.
+        var scene = ZNetScene.instance;
+        if (scene == null)
+        {
+            return;
+        }
+
+        var instance = scene.FindInstance(zdo.m_uid);
         var area = instance != null
             ? instance.GetComponent<PrivateArea>() ?? instance.GetComponentInChildren<PrivateArea>()
             : null;
+        var position = zdo.GetPosition();
+        var rotation = zdo.GetRotation();
+        if (area == null)
+        {
+            // Dedicated servers commonly keep remote wards as ZDOs without loaded scene instances.
+            var prefab = scene.GetPrefab(zdo.GetPrefab());
+            area = prefab != null
+                ? prefab.GetComponent<PrivateArea>() ?? prefab.GetComponentInChildren<PrivateArea>()
+                : null;
+        }
+        else
+        {
+            position = area.transform.position;
+            rotation = area.transform.rotation;
+        }
+
         if (area == null)
         {
             return;
@@ -540,8 +562,7 @@ internal static class ManagedWardInteractionRpc
             return;
         }
 
-        var transform = area.transform;
-        _ = effectList.Create(transform.position, transform.rotation, null, 1f, -1);
+        _ = effectList.Create(position, rotation, null, 1f, -1);
     }
 
     private static void HandleRoutedTogglePermitted(long sender, ZPackage? request)

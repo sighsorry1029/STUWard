@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.6
+
+- Restored ward activation and deactivation VFX/SFX on dedicated servers without reintroducing per-player duplication.
+
 ## 1.2.5
 
 - Fixed networked ward activation and deactivation effects multiplying by the number of nearby players.

@@ -29,13 +29,8 @@ internal static class WardMapRangeSprites
         }
     }
 
-    internal static Sprite? GetRangeSprite(float radius)
+    internal static Sprite? GetRangeSprite()
     {
-        if (float.IsNaN(radius) || float.IsInfinity(radius) || radius <= 0f)
-        {
-            return null;
-        }
-
         if (_cachedSprite != null)
         {
             return _cachedSprite;

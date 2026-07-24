@@ -23,8 +23,6 @@ internal sealed class ManagedWardIndex
 
     internal int Count => _areaIds.Count;
 
-    internal IReadOnlyList<PrivateArea> Areas => _areas;
-
     internal bool Add(PrivateArea area)
     {
         var instanceId = area.GetInstanceID();
@@ -164,6 +162,7 @@ internal sealed class ManagedWardIndex
 
     private void RemoveAreaFromSpatialIndex(int instanceId)
     {
+        _queryStamps.Remove(instanceId);
         if (!_spatialCellsByInstanceId.TryGetValue(instanceId, out var occupiedCells))
         {
             return;

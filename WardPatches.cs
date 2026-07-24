@@ -85,6 +85,7 @@ internal struct WardCheckScopeState
 {
     private WardAccess.RestrictionScope _restrictionScope;
     private WardAccess.ManagedWardAllowScope _allowScope;
+    private bool _disposed;
 
     internal void EnterRestriction(WardRestrictionOptions restriction)
     {
@@ -98,6 +99,12 @@ internal struct WardCheckScopeState
 
     internal void Dispose()
     {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
         _restrictionScope.Dispose();
         _allowScope.Dispose();
     }
@@ -118,9 +125,10 @@ internal static class DirectInteractionPatches
         return TryHandleDirectInteraction(__instance, player, ref __result, ref __state);
     }
 
-    private static void Postfix(WardCheckScopeState __state)
+    private static Exception? Finalizer(ref WardCheckScopeState __state, Exception? __exception)
     {
         __state.Dispose();
+        return __exception;
     }
 
     private static bool TryHandleDirectInteraction(Component target, Player? player, ref bool result, ref WardCheckScopeState scopeState)
@@ -247,12 +255,6 @@ internal static class PrivateAreaCheckAccessManagedPatch
                 wardCheck);
         if (access.Decision == WardAccess.AccessDecision.NoWard)
         {
-            if (hasRestrictionScope && WardAccess.IsInsideAnyManagedWard(point, effectiveRadius, candidates))
-            {
-                __result = true;
-                return false;
-            }
-
             return true;
         }
 
@@ -281,12 +283,6 @@ internal static class ContainerCheckAccessManagedPatch
             flash: false);
         if (access.Decision == WardAccess.AccessDecision.NoWard)
         {
-            if (WardAccess.IsInsideAnyManagedWard(__instance.transform.position, 0f, candidates))
-            {
-                __result = true;
-                return false;
-            }
-
             return true;
         }
 
@@ -318,9 +314,10 @@ internal static class UseItemInteractionPatches
         return continueOriginal;
     }
 
-    private static void Postfix(WardCheckScopeState __state)
+    private static Exception? Finalizer(ref WardCheckScopeState __state, Exception? __exception)
     {
         __state.Dispose();
+        return __exception;
     }
 }
 
@@ -350,9 +347,10 @@ internal static class StationUsePatches
         return continueOriginal;
     }
 
-    private static void Postfix(WardCheckScopeState __state)
+    private static Exception? Finalizer(ref WardCheckScopeState __state, Exception? __exception)
     {
         __state.Dispose();
+        return __exception;
     }
 }
 
@@ -387,9 +385,10 @@ internal static class TeleportWorldTeleportPatch
         return continueOriginal;
     }
 
-    private static void Postfix(WardCheckScopeState __state)
+    private static Exception? Finalizer(ref WardCheckScopeState __state, Exception? __exception)
     {
         __state.Dispose();
+        return __exception;
     }
 }
 
@@ -426,9 +425,10 @@ internal static class TeleportWorldTriggerPatch
         return false;
     }
 
-    private static void Postfix(WardCheckScopeState __state)
+    private static Exception? Finalizer(ref WardCheckScopeState __state, Exception? __exception)
     {
         __state.Dispose();
+        return __exception;
     }
 }
 
@@ -648,9 +648,10 @@ internal static class ItemDropPickupPatch
         return false;
     }
 
-    private static void Postfix(WardCheckScopeState __state)
+    private static Exception? Finalizer(ref WardCheckScopeState __state, Exception? __exception)
     {
         __state.Dispose();
+        return __exception;
     }
 }
 
@@ -677,9 +678,10 @@ internal static class HumanoidPickupPatch
         return false;
     }
 
-    private static void Postfix(WardCheckScopeState __state)
+    private static Exception? Finalizer(ref WardCheckScopeState __state, Exception? __exception)
     {
         __state.Dispose();
+        return __exception;
     }
 }
 
@@ -1086,7 +1088,7 @@ internal static class HumanoidUpdateEquipmentPatch
 
     private static void Prefix(Humanoid __instance)
     {
-        if (__instance != Player.m_localPlayer || !WardAccess.HasEnabledManagedWards() || !Plugin.HasBlockedItems())
+        if (__instance != Player.m_localPlayer || !WardAccess.HasEnabledManagedWards() || !WardItemPrefabPolicy.HasBlockedItems())
         {
             return;
         }
@@ -1408,30 +1410,90 @@ internal static class PlayerAutoPickupPatch
 {
     private const int MaxBufferedAutoPickupColliders = 4096;
     private static Collider[] _autoPickupColliders = new Collider[64];
+    private static readonly List<PrivateArea> AutoPickupWardCandidates = new();
     private static readonly List<PrivateArea> DeniedAutoPickupWardCandidates = new();
 
-    private static bool Prefix(Player __instance, float dt)
+    private static void Prefix(Player __instance, out List<ItemDrop>? __state)
     {
-        if (__instance.IsTeleporting() || !Player.m_enableAutoPickup)
+        __state = null;
+        if (__instance == null ||
+            __instance.IsTeleporting() ||
+            !Player.m_enableAutoPickup ||
+            !WardAccess.HasEnabledManagedWards() ||
+            !WardItemPrefabPolicy.CanAnyPickupBeBlocked())
         {
-            return false;
+            return;
         }
 
-        var checkWardAccess = WardAccess.HasEnabledManagedWards() && WardItemPrefabPolicy.CanAnyPickupBeBlocked();
         var pickupPoint = __instance.transform.position + Vector3.up;
-        var playerId = __instance.GetPlayerID();
-        var inventory = __instance.GetInventory();
         var autoPickupRange = __instance.m_autoPickupRange;
-        var autoPickupRangeSqr = autoPickupRange * autoPickupRange;
-        var wardAccessEvaluated = false;
+        AutoPickupWardCandidates.Clear();
         DeniedAutoPickupWardCandidates.Clear();
-        var hasDeniedWardCandidates = false;
+        WardAccess.FillCandidateManagedWards(
+            pickupPoint,
+            autoPickupRange,
+            requireEnabled: true,
+            AutoPickupWardCandidates);
+        if (WardAccess.CollectDeniedManagedWardCandidates(
+                __instance.GetPlayerID(),
+                AutoPickupWardCandidates,
+                WardRestrictionOptions.Pickup,
+                DeniedAutoPickupWardCandidates) == 0)
+        {
+            return;
+        }
+
+        List<ItemDrop>? disabledItems = null;
+        try
+        {
+            var colliders = GetAutoPickupColliders(__instance, pickupPoint, autoPickupRange, out var colliderCount);
+            for (var index = 0; index < colliderCount; index++)
+            {
+                var itemDrop = ResolveItemDrop(colliders[index]);
+                if (itemDrop == null ||
+                    !itemDrop.m_autoPickup ||
+                    !WardItemPrefabPolicy.ShouldBlockPickup(itemDrop) ||
+                    !WardAccess.IsInsideAnyManagedWard(
+                        itemDrop.transform.position,
+                        0f,
+                        DeniedAutoPickupWardCandidates))
+                {
+                    continue;
+                }
+
+                disabledItems ??= new List<ItemDrop>();
+                disabledItems.Add(itemDrop);
+                itemDrop.m_autoPickup = false;
+            }
+
+            __state = disabledItems;
+        }
+        catch
+        {
+            RestoreAutoPickupItems(disabledItems);
+            __state = null;
+            throw;
+        }
+    }
+
+    private static Exception? Finalizer(Exception? __exception, List<ItemDrop>? __state)
+    {
+        RestoreAutoPickupItems(__state);
+        return __exception;
+    }
+
+    private static Collider[] GetAutoPickupColliders(
+        Player player,
+        Vector3 pickupPoint,
+        float autoPickupRange,
+        out int colliderCount)
+    {
         var colliders = _autoPickupColliders;
-        var colliderCount = Physics.OverlapSphereNonAlloc(
+        colliderCount = Physics.OverlapSphereNonAlloc(
             pickupPoint,
             autoPickupRange,
             colliders,
-            __instance.m_autoPickupMask);
+            player.m_autoPickupMask);
         while (colliderCount == colliders.Length && colliders.Length < MaxBufferedAutoPickupColliders)
         {
             Array.Resize(
@@ -1442,110 +1504,54 @@ internal static class PlayerAutoPickupPatch
                 pickupPoint,
                 autoPickupRange,
                 colliders,
-                __instance.m_autoPickupMask);
+                player.m_autoPickupMask);
         }
 
-        if (colliderCount == colliders.Length)
+        if (colliderCount != colliders.Length)
         {
-            colliders = Physics.OverlapSphere(pickupPoint, autoPickupRange, __instance.m_autoPickupMask);
-            colliderCount = colliders.Length;
+            return colliders;
         }
 
-        for (var index = 0; index < colliderCount; index++)
+        colliders = Physics.OverlapSphere(pickupPoint, autoPickupRange, player.m_autoPickupMask);
+        colliderCount = colliders.Length;
+        return colliders;
+    }
+
+    private static ItemDrop? ResolveItemDrop(Collider? collider)
+    {
+        var body = collider?.attachedRigidbody;
+        if (body == null)
         {
-            var collider = colliders[index];
-            if (collider == null || collider.attachedRigidbody == null)
-            {
-                continue;
-            }
-
-            var itemDrop = collider.attachedRigidbody.GetComponent<ItemDrop>();
-            FloatingTerrainDummy? floatingTerrainDummy = null;
-
-            if (itemDrop == null)
-            {
-                floatingTerrainDummy = collider.attachedRigidbody.GetComponent<FloatingTerrainDummy>();
-                if (floatingTerrainDummy != null)
-                {
-                    var parent = floatingTerrainDummy.m_parent;
-                    if (parent != null)
-                    {
-                        itemDrop = parent.GetComponent<ItemDrop>();
-                    }
-                }
-            }
-
-            if (itemDrop == null || !itemDrop.m_autoPickup || itemDrop.IsPiece() || __instance.HaveUniqueKey(itemDrop.m_itemData.m_shared.m_name))
-            {
-                continue;
-            }
-
-            var distanceSqr = (itemDrop.transform.position - pickupPoint).sqrMagnitude;
-            if (distanceSqr > autoPickupRangeSqr)
-            {
-                continue;
-            }
-
-            var itemView = itemDrop.GetComponent<ZNetView>();
-            if (itemView == null || !itemView.IsValid())
-            {
-                continue;
-            }
-
-            var shouldCheckWardAccess = checkWardAccess && WardItemPrefabPolicy.ShouldBlockPickup(itemDrop);
-            if (shouldCheckWardAccess && !wardAccessEvaluated)
-            {
-                hasDeniedWardCandidates =
-                    WardAccess.CollectDeniedManagedWardCandidates(
-                        playerId,
-                        WardAccess.GetCandidateManagedWards(pickupPoint, autoPickupRange, requireEnabled: true),
-                        WardRestrictionOptions.Pickup,
-                        DeniedAutoPickupWardCandidates) > 0;
-                wardAccessEvaluated = true;
-            }
-
-            var wardBlocksPickup =
-                shouldCheckWardAccess &&
-                hasDeniedWardCandidates &&
-                WardAccess.IsInsideAnyManagedWard(itemDrop.transform.position, 0f, DeniedAutoPickupWardCandidates);
-
-            if (wardBlocksPickup)
-            {
-                continue;
-            }
-
-            if (!itemDrop.CanPickup())
-            {
-                itemDrop.RequestOwn();
-                continue;
-            }
-
-            if (itemDrop.InTar())
-            {
-                continue;
-            }
-
-            itemDrop.Load();
-            if (!inventory.CanAddItem(itemDrop.m_itemData) || itemDrop.m_itemData.GetWeight() + inventory.GetTotalWeight() > __instance.GetMaxCarryWeight())
-            {
-                continue;
-            }
-
-            if (distanceSqr < 0.09f)
-            {
-                __instance.Pickup(itemDrop.gameObject);
-                continue;
-            }
-
-            var movement = (pickupPoint - itemDrop.transform.position).normalized * (15f * dt);
-            itemDrop.transform.position += movement;
-            if (floatingTerrainDummy != null)
-            {
-                floatingTerrainDummy.transform.position += movement;
-            }
+            return null;
         }
 
-        return false;
+        var itemDrop = body.GetComponent<ItemDrop>();
+        if (itemDrop != null)
+        {
+            return itemDrop;
+        }
+
+        var floatingTerrainDummy = body.GetComponent<FloatingTerrainDummy>();
+        return floatingTerrainDummy?.m_parent != null
+            ? floatingTerrainDummy.m_parent.GetComponent<ItemDrop>()
+            : null;
+    }
+
+    private static void RestoreAutoPickupItems(List<ItemDrop>? disabledItems)
+    {
+        if (disabledItems == null)
+        {
+            return;
+        }
+
+        for (var index = 0; index < disabledItems.Count; index++)
+        {
+            var itemDrop = disabledItems[index];
+            if (itemDrop != null)
+            {
+                itemDrop.m_autoPickup = true;
+            }
+        }
     }
 }
 

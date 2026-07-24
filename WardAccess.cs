@@ -171,19 +171,9 @@ internal static class WardAccess
         return _restrictionScopeDepth > 0 && restriction != WardRestrictionOptions.None;
     }
 
-    internal static void RegisterManagedWard(PrivateArea? area)
-    {
-        RegisterManagedWard(ManagedWardRef.FromArea(area));
-    }
-
     internal static void RegisterManagedWard(ManagedWardRef ward)
     {
         RefreshManagedWardState(ward);
-    }
-
-    internal static void RefreshManagedWardState(PrivateArea? area)
-    {
-        RefreshManagedWardState(ManagedWardRef.FromArea(area));
     }
 
     internal static void RefreshManagedWardState(ManagedWardRef ward)
@@ -277,11 +267,6 @@ internal static class WardAccess
     {
         EnsureManagedWardCacheInitialized();
         return EnabledWardIndex.Count > 0;
-    }
-
-    internal static void RefreshManagedWardSpatialIndexEntry(PrivateArea? area)
-    {
-        RefreshManagedWardSpatialIndexEntry(ManagedWardRef.FromArea(area));
     }
 
     internal static void RefreshManagedWardSpatialIndexEntry(ManagedWardRef ward)
@@ -408,12 +393,12 @@ internal static class WardAccess
                 continue;
             }
 
+            foundWard = true;
+
             if (restriction.HasValue && !WardSettings.HasRestriction(WardSettings.GetConfiguration(area), restriction.Value))
             {
                 continue;
             }
-
-            foundWard = true;
 
             if (hasActor && ManagedWardAccessEvaluator.HasPlayerAccess(area, actor))
             {
@@ -534,18 +519,6 @@ internal static class WardAccess
         return false;
     }
 
-    internal static bool TryBlockVoid(Component target, Player? player)
-    {
-        var blocked = ShouldBlock(target, player, 0f);
-        if (!blocked)
-        {
-            return true;
-        }
-
-        ShowNoAccessMessage(player);
-        return false;
-    }
-
     internal static bool TryBlockVoid(WardRestrictionOptions restriction, Component target, Player? player)
     {
         var blocked = ShouldBlockRestriction(restriction, target, player, 0f);
@@ -555,18 +528,6 @@ internal static class WardAccess
         }
 
         ShowNoAccessMessage(player);
-        return false;
-    }
-
-    internal static bool TryBlockPlacement(Player? player, Vector3 point, float radius, ref bool result)
-    {
-        if (!ShouldBlock(point, radius, player))
-        {
-            return true;
-        }
-
-        ShowNoAccessMessage(player);
-        result = false;
         return false;
     }
 
@@ -950,16 +911,6 @@ internal static class WardAccess
                 WardAdminDebugAccess.IsPlayerAdminDebugController(playerId));
     }
 
-    internal static bool IsDirectWardOwner(PrivateArea? area, Player? player)
-    {
-        return area != null && player != null && IsDirectWardOwner(area, player.GetPlayerID());
-    }
-
-    internal static bool IsDirectWardOwner(PrivateArea? area, long playerId)
-    {
-        return IsDirectWardOwner(ManagedWardRef.FromArea(area), playerId);
-    }
-
     internal static bool IsDirectWardOwner(ManagedWardRef ward, long playerId)
     {
         if (ward.Area == null || playerId == 0L || !IsManagedWard(ward, false))
@@ -975,30 +926,6 @@ internal static class WardAccess
         return IsPlayerGuildMatchingWardGuild(
             GuildsCompat.GetPlayerGuildIdentity(player),
             GuildsCompat.GetWardGuildIdentity(area));
-    }
-
-    internal static bool IsPlayerIdInWardGuild(long playerId, PrivateArea? area)
-    {
-        if (playerId == 0L)
-        {
-            return false;
-        }
-
-        return IsPlayerGuildMatchingWardGuild(
-            GuildsCompat.GetPlayerGuildIdentity(playerId),
-            GuildsCompat.GetWardGuildIdentity(area));
-    }
-
-    internal static bool IsPlayerIdInWardGuild(long playerId, ZDO? zdo)
-    {
-        if (playerId == 0L)
-        {
-            return false;
-        }
-
-        return IsPlayerGuildMatchingWardGuild(
-            GuildsCompat.GetPlayerGuildIdentity(playerId),
-            GuildsCompat.GetWardGuildIdentity(zdo));
     }
 
     internal static bool IsPlayerGuildMatchingWardGuild(WardGuildIdentity playerGuild, WardGuildIdentity wardGuild)
@@ -1042,11 +969,6 @@ internal static class WardAccess
 
         ShowWardOverlapMessage(player);
         return false;
-    }
-
-    internal static float GetMaxNonOverlappingRadius(PrivateArea? area)
-    {
-        return GetMaxNonOverlappingRadius(area, WardSettings.MaxRadius);
     }
 
     internal static float GetMaxNonOverlappingRadius(PrivateArea? area, float fallbackRadius)
@@ -1095,7 +1017,18 @@ internal static class WardAccess
         bool requireEnabled = true,
         Predicate<PrivateArea>? predicate = null)
     {
-        var allAreas = GetCandidateManagedWards(point, radius, requireEnabled);
+        IReadOnlyList<PrivateArea> allAreas;
+        if (predicate == null)
+        {
+            allAreas = GetCandidateManagedWards(point, radius, requireEnabled);
+        }
+        else
+        {
+            var ownedAreas = new List<PrivateArea>();
+            FillCandidateManagedWards(point, radius, requireEnabled, ownedAreas);
+            allAreas = ownedAreas;
+        }
+
         if (allAreas.Count == 0)
         {
             return null;
@@ -1261,8 +1194,7 @@ internal static class WardAccess
             }
 
             var overlapArea = CreateWardOverlapArea(area, guildId);
-            if (WardOverlapPolicy.SharesTrustedWardGroup(overlapArea, query) ||
-                !WardOverlapPolicy.Overlaps(query, overlapArea))
+            if (!WardOverlapPolicy.IsForeignOverlap(query, overlapArea))
             {
                 continue;
             }

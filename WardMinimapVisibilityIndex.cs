@@ -13,7 +13,7 @@ internal readonly struct WardMinimapVisibilityIndexedEntry
         UnityEngine.Vector3 position,
         float radius,
         bool isEnabled,
-        long[] permittedPlayerIds)
+        IReadOnlyList<long> permittedPlayerIds)
     {
         ZdoId = zdoId;
         OwnerPlayerId = ownerPlayerId;
@@ -30,13 +30,13 @@ internal readonly struct WardMinimapVisibilityIndexedEntry
     internal UnityEngine.Vector3 Position { get; }
     internal float Radius { get; }
     internal bool IsEnabled { get; }
-    internal long[] PermittedPlayerIds { get; }
+    internal IReadOnlyList<long> PermittedPlayerIds { get; }
 }
 
 internal static class WardMinimapVisibilityIndex
 {
     private static readonly Dictionary<ZDOID, WardMinimapVisibilityIndexedEntry> IndexedWards = new();
-    private static readonly Dictionary<ViewerCacheKey, ViewerCacheState> ViewerCaches = new();
+    private static readonly Dictionary<long, ViewerCacheState> ViewerCaches = new();
     private static readonly List<ZDO> PrepareBuffer = new();
     private static readonly Dictionary<ZDOID, uint> IndexedWardDataRevisions = new();
 
@@ -44,45 +44,10 @@ internal static class WardMinimapVisibilityIndex
     private static int _indexRevision;
     private static int _nextViewerRevisionToken;
 
-    private readonly struct ViewerCacheKey : IEquatable<ViewerCacheKey>
-    {
-        internal ViewerCacheKey(long playerId, int guildId, bool canSeeAllWards)
-        {
-            PlayerId = playerId;
-            GuildId = guildId;
-            CanSeeAllWards = canSeeAllWards;
-        }
-
-        internal long PlayerId { get; }
-        internal int GuildId { get; }
-        internal bool CanSeeAllWards { get; }
-
-        public bool Equals(ViewerCacheKey other)
-        {
-            return PlayerId == other.PlayerId &&
-                   GuildId == other.GuildId &&
-                   CanSeeAllWards == other.CanSeeAllWards;
-        }
-
-        public override bool Equals(object? obj)
-        {
-            return obj is ViewerCacheKey other && Equals(other);
-        }
-
-        public override int GetHashCode()
-        {
-            unchecked
-            {
-                var hashCode = PlayerId.GetHashCode();
-                hashCode = (hashCode * 397) ^ GuildId;
-                hashCode = (hashCode * 397) ^ CanSeeAllWards.GetHashCode();
-                return hashCode;
-            }
-        }
-    }
-
     private sealed class ViewerCacheState
     {
+        internal int GuildId;
+        internal bool CanSeeAllWards;
         internal int IndexedRevision;
         internal int ViewerRevisionToken;
         internal ZDOID[] VisibleWardIds = Array.Empty<ZDOID>();
@@ -97,11 +62,6 @@ internal static class WardMinimapVisibilityIndex
         _prepared = false;
         _indexRevision = 0;
         _nextViewerRevisionToken = 0;
-    }
-
-    internal static void OnZNetAwake()
-    {
-        ResetRuntimeState();
     }
 
     internal static bool TryPrepare(ZDOMan? zdoMan)
@@ -123,14 +83,17 @@ internal static class WardMinimapVisibilityIndex
         }
 
         IndexedWards.Clear();
+        IndexedWardDataRevisions.Clear();
         for (var index = 0; index < PrepareBuffer.Count; index++)
         {
-            if (!TryBuildEntry(PrepareBuffer[index], out var entry))
+            var zdo = PrepareBuffer[index];
+            if (!TryBuildEntry(zdo, out var entry))
             {
                 continue;
             }
 
             IndexedWards[entry.ZdoId] = entry;
+            IndexedWardDataRevisions[entry.ZdoId] = zdo.DataRevision;
         }
 
         _prepared = true;
@@ -138,24 +101,19 @@ internal static class WardMinimapVisibilityIndex
         return true;
     }
 
-    internal static void ObserveManagedWard(ZDO? zdo)
-    {
-        UpdateEntry(zdo);
-    }
-
-    internal static void NotifyWardStateChanged(PrivateArea? area)
+    internal static bool NotifyWardStateChanged(PrivateArea? area)
     {
         if (area == null)
         {
-            return;
+            return false;
         }
 
-        UpdateEntry(area);
+        return UpdateEntry(area);
     }
 
-    internal static void NotifyWardStateChanged(ZDO? zdo)
+    internal static bool NotifyWardStateChanged(ZDO? zdo)
     {
-        UpdateEntry(zdo);
+        return UpdateEntry(zdo);
     }
 
     internal static bool ForgetWard(ZDOID zdoId)
@@ -218,44 +176,48 @@ internal static class WardMinimapVisibilityIndex
             return;
         }
 
-        List<ViewerCacheKey>? staleKeys = null;
+        List<long>? stalePlayerIds = null;
         foreach (var viewerCache in ViewerCaches)
         {
-            if (activePlayerIds.Contains(viewerCache.Key.PlayerId))
+            if (activePlayerIds.Contains(viewerCache.Key))
             {
                 continue;
             }
 
-            staleKeys ??= new List<ViewerCacheKey>();
-            staleKeys.Add(viewerCache.Key);
+            stalePlayerIds ??= new List<long>();
+            stalePlayerIds.Add(viewerCache.Key);
         }
 
-        if (staleKeys == null)
+        if (stalePlayerIds == null)
         {
             return;
         }
 
-        for (var index = 0; index < staleKeys.Count; index++)
+        for (var index = 0; index < stalePlayerIds.Count; index++)
         {
-            ViewerCaches.Remove(staleKeys[index]);
+            ViewerCaches.Remove(stalePlayerIds[index]);
         }
     }
 
     private static ViewerCacheState GetOrBuildViewerCache(long playerId, int guildId, bool canSeeAllWards)
     {
-        var cacheKey = new ViewerCacheKey(playerId, guildId, canSeeAllWards);
-        if (!ViewerCaches.TryGetValue(cacheKey, out var cacheState))
+        if (!ViewerCaches.TryGetValue(playerId, out var cacheState))
         {
             cacheState = new ViewerCacheState();
-            ViewerCaches[cacheKey] = cacheState;
+            ViewerCaches[playerId] = cacheState;
         }
 
-        if (cacheState.IndexedRevision == _indexRevision)
+        if (cacheState.ViewerRevisionToken != 0 &&
+            cacheState.GuildId == guildId &&
+            cacheState.CanSeeAllWards == canSeeAllWards &&
+            cacheState.IndexedRevision == _indexRevision)
         {
             return cacheState;
         }
 
         cacheState.VisibleWardIds = BuildVisibleWardIds(playerId, guildId, canSeeAllWards);
+        cacheState.GuildId = guildId;
+        cacheState.CanSeeAllWards = canSeeAllWards;
         cacheState.IndexedRevision = _indexRevision;
         cacheState.ViewerRevisionToken = NextViewerRevisionToken();
         return cacheState;
@@ -284,55 +246,51 @@ internal static class WardMinimapVisibilityIndex
         return visibleWardIds.Count == 0 ? Array.Empty<ZDOID>() : visibleWardIds.ToArray();
     }
 
-    private static void UpdateEntry(ZDO? zdo)
+    private static bool UpdateEntry(ZDO? zdo)
     {
         if (!TryBuildEntry(zdo, out var entry))
         {
-            if (zdo != null)
-            {
-                ForgetWard(zdo.m_uid);
-            }
-
-            return;
+            return zdo != null && ForgetWard(zdo.m_uid);
         }
 
-        ApplyEntry(entry, zdo!.DataRevision);
+        return ApplyEntry(entry, zdo!.DataRevision);
     }
 
-    private static void UpdateEntry(PrivateArea? area)
+    private static bool UpdateEntry(PrivateArea? area)
     {
         if (!TryBuildEntry(area, out var entry))
         {
             var existingZdo = WardPrivateAreaSafeAccess.GetZdo(area);
-            if (existingZdo != null)
-            {
-                ForgetWard(existingZdo.m_uid);
-            }
-
-            return;
+            return existingZdo != null && ForgetWard(existingZdo.m_uid);
         }
 
         var zdo = WardPrivateAreaSafeAccess.GetZdo(area);
-        ApplyEntry(entry, zdo != null ? zdo.DataRevision : 0u);
+        return ApplyEntry(entry, zdo != null ? zdo.DataRevision : 0u);
     }
 
-    private static void ApplyEntry(WardMinimapVisibilityIndexedEntry entry, uint dataRevision)
+    private static bool ApplyEntry(WardMinimapVisibilityIndexedEntry entry, uint dataRevision)
     {
-        if (IndexedWardDataRevisions.TryGetValue(entry.ZdoId, out var currentRevision) && currentRevision > dataRevision)
+        var hasCurrentRevision = IndexedWardDataRevisions.TryGetValue(entry.ZdoId, out var currentRevision);
+        if (hasCurrentRevision && currentRevision > dataRevision)
         {
-            return;
+            return false;
         }
 
         if (IndexedWards.TryGetValue(entry.ZdoId, out var existingEntry) &&
-            EntriesEqual(existingEntry, entry) &&
-            currentRevision == dataRevision)
+            EntriesEqual(existingEntry, entry))
         {
-            return;
+            if (!hasCurrentRevision || currentRevision != dataRevision)
+            {
+                IndexedWardDataRevisions[entry.ZdoId] = dataRevision;
+            }
+
+            return false;
         }
 
         IndexedWards[entry.ZdoId] = entry;
         IndexedWardDataRevisions[entry.ZdoId] = dataRevision;
         BumpIndexRevision();
+        return true;
     }
 
     private static bool TryBuildEntry(ZDO? zdo, out WardMinimapVisibilityIndexedEntry entry)
@@ -382,12 +340,12 @@ internal static class WardMinimapVisibilityIndex
             left.Position != right.Position ||
             !Mathf.Approximately(left.Radius, right.Radius) ||
             left.IsEnabled != right.IsEnabled ||
-            left.PermittedPlayerIds.Length != right.PermittedPlayerIds.Length)
+            left.PermittedPlayerIds.Count != right.PermittedPlayerIds.Count)
         {
             return false;
         }
 
-        for (var index = 0; index < left.PermittedPlayerIds.Length; index++)
+        for (var index = 0; index < left.PermittedPlayerIds.Count; index++)
         {
             if (left.PermittedPlayerIds[index] != right.PermittedPlayerIds[index])
             {

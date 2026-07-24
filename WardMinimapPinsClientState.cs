@@ -54,7 +54,6 @@ internal static partial class WardMinimapPinsManager
 
     internal static void HandleLocalConfigChanged()
     {
-        WardMapRangeSprites.Reset();
         UpdateLocalState(Player.m_localPlayer, force: false, allowClosedMapRefresh: true);
     }
 

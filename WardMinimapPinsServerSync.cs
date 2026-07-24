@@ -6,12 +6,14 @@ namespace STUWard;
 internal static partial class WardMinimapPinsManager
 {
     private static readonly TimeSpan ServerViewerRefreshDebounce = TimeSpan.FromMilliseconds(150);
+    private static readonly TimeSpan MinimumServerSnapshotRequestInterval = TimeSpan.FromMilliseconds(250);
     private static readonly Dictionary<long, ServerViewerSyncState> ServerViewerSyncStatesByPeerUid = new();
     private static readonly HashSet<long> PendingServerViewerRefreshPeerUids = new();
 
     private sealed class ServerViewerSyncState
     {
         internal readonly Dictionary<ZDOID, uint> VisibleWardDataRevisions = new();
+        internal DateTime LastSnapshotRequestUtc = DateTime.MinValue;
         internal int ViewerRevisionToken;
         internal bool HasSentFullSnapshot;
     }
@@ -105,14 +107,23 @@ internal static partial class WardMinimapPinsManager
             }
         }
 
+        if (targetPeerUids.Count == 0)
+        {
+            _pendingServerViewerRefreshForAll = false;
+            PendingServerViewerRefreshPeerUids.Clear();
+            _serverViewerRefreshFlushAtUtc = DateTime.MinValue;
+            return;
+        }
+
+        if (!WardMinimapVisibilityIndex.TryPrepare(ZDOMan.instance))
+        {
+            _serverViewerRefreshFlushAtUtc = DateTime.UtcNow + ServerViewerRefreshDebounce;
+            return;
+        }
+
         _pendingServerViewerRefreshForAll = false;
         PendingServerViewerRefreshPeerUids.Clear();
         _serverViewerRefreshFlushAtUtc = DateTime.MinValue;
-
-        if (targetPeerUids.Count == 0 || !WardMinimapVisibilityIndex.TryPrepare(ZDOMan.instance))
-        {
-            return;
-        }
 
         for (var index = 0; index < targetPeerUids.Count; index++)
         {
@@ -182,8 +193,7 @@ internal static partial class WardMinimapPinsManager
                 out var visibleWardCount,
                 out var enabledWardCount,
                 out var snapshotEntries,
-                out var removedWardIds,
-                out var firstEntry))
+                out var removedWardIds))
         {
             return;
         }
@@ -199,8 +209,7 @@ internal static partial class WardMinimapPinsManager
             visibleWardCount,
             enabledWardCount,
             snapshotEntries,
-            removedWardIds,
-            firstEntry);
+            removedWardIds);
     }
 
     private static bool TryBuildServerViewerSyncUpdate(
@@ -214,8 +223,7 @@ internal static partial class WardMinimapPinsManager
         out int visibleWardCount,
         out int enabledWardCount,
         out IReadOnlyList<WardMinimapSnapshotEntry> snapshotEntries,
-        out IReadOnlyList<ZDOID> removedWardIds,
-        out WardMinimapSnapshotEntry? firstEntry)
+        out IReadOnlyList<ZDOID> removedWardIds)
     {
         fullSnapshot = false;
         viewerRevisionToken = 0;
@@ -227,7 +235,6 @@ internal static partial class WardMinimapPinsManager
         enabledWardCount = 0;
         snapshotEntries = Array.Empty<WardMinimapSnapshotEntry>();
         removedWardIds = Array.Empty<ZDOID>();
-        firstEntry = null;
 
         playerId = WardOwnership.GetPlayerIdFromSender(receiverUid);
         if (playerId == 0L)
@@ -249,7 +256,6 @@ internal static partial class WardMinimapPinsManager
         candidateWardCount = snapshot.CandidateWardCount;
         visibleWardCount = snapshot.VisibleWardCount;
         enabledWardCount = snapshot.EnabledWardCount;
-        firstEntry = snapshot.FirstEntry;
 
         var syncState = GetOrCreateServerViewerSyncState(receiverUid);
         if (syncState.HasSentFullSnapshot && syncState.ViewerRevisionToken == viewerRevisionToken)
@@ -323,6 +329,21 @@ internal static partial class WardMinimapPinsManager
         }
 
         return syncState;
+    }
+
+    private static bool TryBeginServerSnapshotRequest(long receiverUid)
+    {
+        var nowUtc = DateTime.UtcNow;
+        var syncState = GetOrCreateServerViewerSyncState(receiverUid);
+        if (syncState.LastSnapshotRequestUtc != DateTime.MinValue &&
+            nowUtc >= syncState.LastSnapshotRequestUtc &&
+            nowUtc - syncState.LastSnapshotRequestUtc < MinimumServerSnapshotRequestInterval)
+        {
+            return false;
+        }
+
+        syncState.LastSnapshotRequestUtc = nowUtc;
+        return true;
     }
 
     private static void UpdateServerViewerSyncState(

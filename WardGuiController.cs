@@ -1,4 +1,3 @@
-using System.Collections;
 using System.Collections.Generic;
 using Jotunn.Managers;
 using LocalizationManager;
@@ -15,7 +14,6 @@ internal sealed class WardGuiController : MonoBehaviour
 
     internal static WardGuiController? Instance { get; private set; }
 
-    private readonly Dictionary<int, Coroutine> _doorCloseCoroutines = new();
     private readonly Dictionary<long, PermittedRowView> _permittedRows = new();
     private readonly Dictionary<WardRestrictionOptions, RestrictionRowView> _restrictionRows = new();
     private readonly List<long> _permittedRowsToRemove = new();
@@ -79,7 +77,6 @@ internal sealed class WardGuiController : MonoBehaviour
     {
         GUIManager.OnCustomGUIAvailable -= BuildGui;
         GUIManager.BlockInput(false);
-        _doorCloseCoroutines.Clear();
 
         if (Instance == this)
         {
@@ -190,77 +187,6 @@ internal sealed class WardGuiController : MonoBehaviour
         _lastPermittedRevision = int.MinValue;
         ClearPendingConfigurationRequest();
         SetVisible(false);
-    }
-
-    internal void ScheduleDoorAutoClose(Door door)
-    {
-        if (door == null || door.m_canNotBeClosed)
-        {
-            return;
-        }
-
-        if (!WardSettings.TryGetAutoCloseDoorDelay(door.transform.position, out var delay))
-        {
-            CancelDoorAutoClose(door);
-            return;
-        }
-
-        var key = door.GetInstanceID();
-        if (_doorCloseCoroutines.TryGetValue(key, out var existing))
-        {
-            StopCoroutine(existing);
-        }
-
-        _doorCloseCoroutines[key] = StartCoroutine(CloseDoorAfterDelay(door, delay));
-    }
-
-    internal void CancelDoorAutoClose(Door door)
-    {
-        if (door == null)
-        {
-            return;
-        }
-
-        var key = door.GetInstanceID();
-        if (!_doorCloseCoroutines.TryGetValue(key, out var coroutine))
-        {
-            return;
-        }
-
-        StopCoroutine(coroutine);
-        _doorCloseCoroutines.Remove(key);
-    }
-
-    private IEnumerator CloseDoorAfterDelay(Door door, float delay)
-    {
-        var key = door.GetInstanceID();
-        yield return new WaitForSeconds(delay);
-
-        _doorCloseCoroutines.Remove(key);
-
-        if (door == null || door.m_canNotBeClosed)
-        {
-            yield break;
-        }
-
-        var nview = door.m_nview != null ? door.m_nview : door.GetComponent<ZNetView>();
-        if (nview == null || !nview.IsValid())
-        {
-            yield break;
-        }
-
-        if (!WardSettings.TryGetAutoCloseDoorDelay(door.transform.position, out _))
-        {
-            yield break;
-        }
-
-        var state = nview.GetZDO()?.GetInt(ZDOVars.s_state, 0) ?? 0;
-        if (state == 0)
-        {
-            yield break;
-        }
-
-        nview.InvokeRPC("UseDoor", new object[] { true });
     }
 
     private void BuildGui()

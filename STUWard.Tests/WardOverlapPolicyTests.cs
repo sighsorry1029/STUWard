@@ -6,34 +6,28 @@ using Xunit;
 public sealed class WardOverlapPolicyTests
 {
     [Fact]
-    public void WouldOverlapForeignWard_blocks_overlapping_foreign_area()
+    public void IsForeignOverlap_blocks_overlapping_foreign_area()
     {
         var query = new WardOverlapQuery(x: 0f, z: 0f, radius: 8f, ownerPlayerId: 10L, guildId: 1);
-        var areas = new[]
-        {
-            new WardOverlapArea(id: 1, x: 10f, z: 0f, radius: 8f, ownerPlayerId: 20L, guildId: 2)
-        };
+        var area = new WardOverlapArea(id: 1, x: 10f, z: 0f, radius: 8f, ownerPlayerId: 20L, guildId: 2);
 
-        Assert.True(WardOverlapPolicy.WouldOverlapForeignWard(query, areas));
+        Assert.True(WardOverlapPolicy.IsForeignOverlap(query, area));
     }
 
     [Fact]
-    public void WouldOverlapForeignWard_allows_edge_touching_area()
+    public void IsForeignOverlap_allows_edge_touching_area()
     {
         var query = new WardOverlapQuery(x: 0f, z: 0f, radius: 8f, ownerPlayerId: 10L, guildId: 1);
-        var areas = new[]
-        {
-            new WardOverlapArea(id: 1, x: 16f, z: 0f, radius: 8f, ownerPlayerId: 20L, guildId: 2)
-        };
+        var area = new WardOverlapArea(id: 1, x: 16f, z: 0f, radius: 8f, ownerPlayerId: 20L, guildId: 2);
 
-        Assert.False(WardOverlapPolicy.WouldOverlapForeignWard(query, areas));
+        Assert.False(WardOverlapPolicy.IsForeignOverlap(query, area));
     }
 
     [Theory]
     [InlineData(10L, 20L, 7, 8, true)]
     [InlineData(10L, 10L, 7, 8, false)]
     [InlineData(10L, 20L, 7, 7, false)]
-    public void WouldOverlapForeignWard_ignores_trusted_owner_or_guild(
+    public void IsForeignOverlap_ignores_trusted_owner_or_guild(
         long queryOwner,
         long areaOwner,
         int queryGuild,
@@ -41,24 +35,18 @@ public sealed class WardOverlapPolicyTests
         bool expectedBlock)
     {
         var query = new WardOverlapQuery(x: 0f, z: 0f, radius: 8f, ownerPlayerId: queryOwner, guildId: queryGuild);
-        var areas = new[]
-        {
-            new WardOverlapArea(id: 1, x: 10f, z: 0f, radius: 8f, ownerPlayerId: areaOwner, guildId: areaGuild)
-        };
+        var area = new WardOverlapArea(id: 1, x: 10f, z: 0f, radius: 8f, ownerPlayerId: areaOwner, guildId: areaGuild);
 
-        Assert.Equal(expectedBlock, WardOverlapPolicy.WouldOverlapForeignWard(query, areas));
+        Assert.Equal(expectedBlock, WardOverlapPolicy.IsForeignOverlap(query, area));
     }
 
     [Fact]
-    public void WouldOverlapForeignWard_ignores_requested_area()
+    public void IsForeignOverlap_ignores_requested_area()
     {
         var query = new WardOverlapQuery(x: 0f, z: 0f, radius: 8f, ownerPlayerId: 10L, guildId: 1, ignoredAreaId: 1);
-        var areas = new[]
-        {
-            new WardOverlapArea(id: 1, x: 1f, z: 0f, radius: 8f, ownerPlayerId: 20L, guildId: 2)
-        };
+        var area = new WardOverlapArea(id: 1, x: 1f, z: 0f, radius: 8f, ownerPlayerId: 20L, guildId: 2);
 
-        Assert.False(WardOverlapPolicy.WouldOverlapForeignWard(query, areas));
+        Assert.False(WardOverlapPolicy.IsForeignOverlap(query, area));
     }
 
     [Fact]

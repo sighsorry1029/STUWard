@@ -484,14 +484,13 @@
         <Compile Include="ManagedWardRegistry.cs"/>
         <Compile Include="WardOwnershipReplication.cs"/>
         <Compile Include="WardOwnershipIdentity.cs"/>
-        <Compile Include="WardOwnershipScan.cs"/>
         <Compile Include="ManagedWardReportService.cs"/>
         <Compile Include="ManagedWardReportBuilder.cs"/>
         <Compile Include="ManagedWardMapStateService.cs"/>
         <Compile Include="ManagedWardRuntimeLifecycle.cs"/>
         <Compile Include="ManagedWardProjectionService.cs"/>
-        <Compile Include="ManagedWardMetadataMutationService.cs"/>
         <Compile Include="Domain\ManagedWardAccessPolicy.cs"/>
+        <Compile Include="Domain\GuildIdentityPolicy.cs"/>
         <Compile Include="Domain\BuildingDamagePolicy.cs"/>
         <Compile Include="Domain\WardLimitPolicy.cs"/>
         <Compile Include="Domain\WardOverlapPolicy.cs"/>

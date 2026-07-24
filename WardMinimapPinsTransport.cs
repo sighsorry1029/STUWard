@@ -51,29 +51,32 @@ internal static partial class WardMinimapPinsManager
             requestId = 0;
         }
 
-        if (requestId > 0 && pkg != null)
+        if (requestId <= 0 || pkg == null)
         {
-            try
-            {
-                knownViewerRevisionToken = pkg.ReadInt();
-            }
-            catch
-            {
-                knownViewerRevisionToken = 0;
-            }
-
-            requestFullSnapshot = knownViewerRevisionToken == 0;
-            try
-            {
-                requestFullSnapshot = pkg.ReadBool();
-            }
-            catch
-            {
-                // Older clients only send the revision token. Treat token 0 as a full snapshot request.
-            }
+            return;
         }
 
-        if (!WardOwnership.TryResolveAuthoritativePlayerIdFromSender(sender, out var playerId))
+        try
+        {
+            knownViewerRevisionToken = pkg.ReadInt();
+        }
+        catch
+        {
+            knownViewerRevisionToken = 0;
+        }
+
+        requestFullSnapshot = knownViewerRevisionToken == 0;
+        try
+        {
+            requestFullSnapshot = pkg.ReadBool();
+        }
+        catch
+        {
+            // Older clients only send the revision token. Treat token 0 as a full snapshot request.
+        }
+
+        if (!WardOwnership.TryResolveAuthoritativePlayerIdFromSender(sender, out var playerId) ||
+            !TryBeginServerSnapshotRequest(sender))
         {
             return;
         }
@@ -153,8 +156,7 @@ internal static partial class WardMinimapPinsManager
         int visibleWardCount,
         int enabledWardCount,
         IReadOnlyList<WardMinimapSnapshotEntry> snapshotEntries,
-        IReadOnlyList<ZDOID> removedWardIds,
-        WardMinimapSnapshotEntry? firstEntry)
+        IReadOnlyList<ZDOID> removedWardIds)
     {
         var routedRpc = ZRoutedRpc.instance;
         if (routedRpc == null || receiverUid == 0L)

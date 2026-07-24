@@ -20,12 +20,6 @@ internal static partial class WardMinimapPinsManager
         RegisterRpcs();
     }
 
-    internal static void OnZNetAwake()
-    {
-        ResetRuntimeState();
-        EnsureRuntimeBindings();
-    }
-
     internal static void Update()
     {
         ProcessPendingServerViewerRefreshes();
@@ -40,6 +34,25 @@ internal static partial class WardMinimapPinsManager
     {
         NotifyLocalWardDataMayHaveChanged(refreshImmediatelyIfVisible);
         QueueServerViewerRefreshRecipients(null);
+    }
+
+    internal static void HandleMapDataLoaded(Minimap? minimap)
+    {
+        if (minimap == null || minimap != Minimap.instance)
+        {
+            return;
+        }
+
+        UpdateLocalState(Player.m_localPlayer, allowClosedMapRefresh: true);
+    }
+}
+
+[HarmonyPatch(typeof(Minimap), "SetMapData")]
+internal static class MinimapSetMapDataWardPinsPatch
+{
+    private static void Postfix(Minimap __instance)
+    {
+        WardMinimapPinsManager.HandleMapDataLoaded(__instance);
     }
 }
 

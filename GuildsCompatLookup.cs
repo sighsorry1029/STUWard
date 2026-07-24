@@ -1,5 +1,4 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
 
 namespace STUWard;
@@ -7,55 +6,6 @@ namespace STUWard;
 internal static partial class GuildsCompat
 {
     private static readonly Dictionary<long, CachedWardGuildIdentity> PlayerGuildCache = new();
-    private static readonly Dictionary<long, CachedPlayerPlatformIdentity> PlayerPlatformIdCache = new();
-
-    internal static string GetPlayerPlatformId(long playerId)
-    {
-        if (playerId == 0L)
-        {
-            return string.Empty;
-        }
-
-        if (TryGetCachedPlatformId(playerId, out var cachedPlatformId))
-        {
-            return cachedPlatformId;
-        }
-
-        var cachedAccountId = WardOwnership.GetPlayerAccountId(playerId);
-        if (!string.IsNullOrWhiteSpace(cachedAccountId))
-        {
-            CachePlatformId(playerId, cachedAccountId);
-            return cachedAccountId;
-        }
-
-        var playerInfo = FindPlayerInfo(playerId);
-        if (playerInfo == null || PlayerInfoUserInfoField == null || UserInfoIdField == null)
-        {
-            CachePlatformId(playerId, string.Empty);
-            return string.Empty;
-        }
-
-        try
-        {
-            var boxedPlayerInfo = (object)playerInfo.Value;
-            var userInfo = PlayerInfoUserInfoField.GetValue(boxedPlayerInfo);
-            if (userInfo == null)
-            {
-                CachePlatformId(playerId, string.Empty);
-                return string.Empty;
-            }
-
-            var platformId = UserInfoIdField.GetValue(userInfo);
-            var platformIdString = platformId?.ToString() ?? string.Empty;
-            CachePlatformId(playerId, platformIdString);
-            return platformIdString;
-        }
-        catch
-        {
-            CachePlatformId(playerId, string.Empty);
-            return string.Empty;
-        }
-    }
 
     private static bool TryGetGuild(Player? player, out WardGuildIdentity guild)
     {
@@ -146,8 +96,7 @@ internal static partial class GuildsCompat
             return false;
         }
 
-        var platformId = GetPlayerPlatformId(playerId);
-        if (string.IsNullOrWhiteSpace(platformId))
+        if (string.IsNullOrWhiteSpace(accountId))
         {
             CacheGuildLookup(playerId, hasGuild: false, default);
             return false;
@@ -160,7 +109,7 @@ internal static partial class GuildsCompat
         }
 
         if (!string.IsNullOrWhiteSpace(playerName) &&
-            TryGetGuildByAccountAndName(platformId, playerName, out guild))
+            TryGetGuildByAccountAndName(accountId, playerName, out guild))
         {
             CacheGuildLookup(playerId, hasGuild: true, guild);
             return true;
@@ -182,25 +131,11 @@ internal static partial class GuildsCompat
             return guild.Id != 0;
         }
 
-        if (string.IsNullOrWhiteSpace(normalizedAccountId) ||
-            string.IsNullOrWhiteSpace(normalizedPlayerName) ||
-            GetPlayerGuildByReferenceMethod == null ||
-            PlayerReferenceFromStringMethod == null ||
-            !IsAvailable())
-        {
-            return false;
-        }
-
-        try
-        {
-            var playerReference = PlayerReferenceFromStringMethod.Invoke(null, new object[] { $"{normalizedAccountId}:{normalizedPlayerName}" });
-            var guildObject = GetPlayerGuildByReferenceMethod.Invoke(null, new[] { playerReference! });
-            return TryParseGuild(guildObject, out guild);
-        }
-        catch
-        {
-            return false;
-        }
+        return TryResolveGuildByAccountAndNameFromApi(
+                   normalizedAccountId,
+                   normalizedPlayerName,
+                   out guild) &&
+               guild.Id != 0;
     }
 
     internal static bool TryResolveAuthoritativeGuildIdentity(
@@ -216,35 +151,93 @@ internal static partial class GuildsCompat
         }
 
         var player = Player.GetPlayer(playerId);
-        if (player != null && GetPlayerGuildByPlayerMethod != null)
+        if (player != null && TryResolveGuildByPlayerFromApi(player, out guild))
         {
-            try
-            {
-                var guildObject = GetPlayerGuildByPlayerMethod.Invoke(null, new object[] { player });
-                TryParseGuild(guildObject, out guild);
-                return true;
-            }
-            catch
-            {
-            }
+            return true;
         }
 
         var normalizedAccountId = WardOwnership.NormalizeAccountIdValue(accountId);
         var normalizedPlayerName = playerName?.Trim() ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(normalizedAccountId) ||
-            string.IsNullOrWhiteSpace(normalizedPlayerName) ||
-            GetPlayerGuildByReferenceMethod == null ||
-            PlayerReferenceFromStringMethod == null)
+        return TryResolveGuildByAccountAndNameFromApi(
+            normalizedAccountId,
+            normalizedPlayerName,
+            out guild);
+    }
+
+    private static bool TryResolveGuildByPlayerFromApi(Player player, out WardGuildIdentity guild)
+    {
+        guild = default;
+        if (GetPlayerGuildByPlayerMethod == null)
         {
             return false;
         }
 
         try
         {
-            var playerReference = PlayerReferenceFromStringMethod.Invoke(
+            var guildObject = GetPlayerGuildByPlayerMethod.Invoke(null, new object[] { player });
+            _ = TryParseGuild(guildObject, out guild);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool TryResolveGuildByAccountAndNameFromApi(
+        string accountId,
+        string playerName,
+        out WardGuildIdentity guild)
+    {
+        guild = default;
+        var normalizedAccountId = WardOwnership.NormalizeAccountIdValue(accountId);
+        var normalizedPlayerName = playerName?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(normalizedAccountId) ||
+            string.IsNullOrWhiteSpace(normalizedPlayerName) ||
+            GetPlayerGuildByReferenceMethod == null ||
+            PlayerReferenceFromStringMethod == null ||
+            !IsAvailable())
+        {
+            return false;
+        }
+
+        var accountCandidates = GuildIdentityPolicy.GetAccountLookupCandidates(normalizedAccountId);
+        var primaryLookupResolved = TryResolveGuildByReferenceId(
+            accountCandidates.PrimaryAccountId,
+            normalizedPlayerName,
+            out var primaryGuild);
+        if (primaryGuild.Id != 0 || !accountCandidates.HasFallback)
+        {
+            guild = primaryGuild;
+            return primaryLookupResolved;
+        }
+
+        var fallbackLookupResolved = TryResolveGuildByReferenceId(
+            accountCandidates.FallbackAccountId,
+            normalizedPlayerName,
+            out var fallbackGuild);
+        if (fallbackLookupResolved)
+        {
+            guild = fallbackGuild;
+            return true;
+        }
+
+        guild = primaryGuild;
+        return primaryLookupResolved;
+    }
+
+    private static bool TryResolveGuildByReferenceId(
+        string accountId,
+        string playerName,
+        out WardGuildIdentity guild)
+    {
+        guild = default;
+        try
+        {
+            var playerReference = PlayerReferenceFromStringMethod!.Invoke(
                 null,
-                new object[] { $"{normalizedAccountId}:{normalizedPlayerName}" });
-            var guildObject = GetPlayerGuildByReferenceMethod.Invoke(null, new[] { playerReference! });
+                new object[] { $"{accountId}:{playerName}" });
+            var guildObject = GetPlayerGuildByReferenceMethod!.Invoke(null, new[] { playerReference! });
             TryParseGuild(guildObject, out guild);
             return true;
         }
@@ -324,64 +317,6 @@ internal static partial class GuildsCompat
             guild.Id,
             guild.Name ?? string.Empty,
             DateTime.UtcNow + GuildLookupCacheDuration);
-    }
-
-    private static bool TryGetCachedPlatformId(long playerId, out string platformId)
-    {
-        platformId = string.Empty;
-        if (!PlayerPlatformIdCache.TryGetValue(playerId, out var cached))
-        {
-            return false;
-        }
-
-        if (cached.ExpiresAtUtc <= DateTime.UtcNow)
-        {
-            PlayerPlatformIdCache.Remove(playerId);
-            return false;
-        }
-
-        if (!cached.HasPlatformId)
-        {
-            return true;
-        }
-
-        platformId = cached.PlatformId;
-        return true;
-    }
-
-    private static void CachePlatformId(long playerId, string platformId)
-    {
-        if (playerId == 0L)
-        {
-            return;
-        }
-
-        var hasPlatformId = !string.IsNullOrWhiteSpace(platformId);
-        PlayerPlatformIdCache[playerId] = new CachedPlayerPlatformIdentity(
-            hasPlatformId,
-            hasPlatformId ? platformId : string.Empty,
-            DateTime.UtcNow + GuildLookupCacheDuration);
-    }
-
-    private static ZNet.PlayerInfo? FindPlayerInfo(long playerId)
-    {
-        var players = ZNet.instance?.m_players;
-        if (players == null)
-        {
-            return null;
-        }
-
-        for (var index = 0; index < players.Count; index++)
-        {
-            var playerInfo = players[index];
-            var playerZdo = ZDOMan.instance?.GetZDO(playerInfo.m_characterID);
-            if ((playerZdo?.GetLong(ZDOVars.s_playerID, 0L) ?? 0L) == playerId)
-            {
-                return playerInfo;
-            }
-        }
-
-        return null;
     }
 
     private static bool TryParseGuild(object? guildObject, out WardGuildIdentity guild)

@@ -71,11 +71,6 @@ internal static class ManagedWardRegistry
         RemoveManagedWardRegistryIndexes(entry);
     }
 
-    internal static int GetIndexedCount()
-    {
-        return ManagedWardRegistryEntriesByZdoId.Count;
-    }
-
     internal static int CollectCandidateIds(
         HashSet<ZDOID> candidateWardIds,
         HashSet<long>? targetPlayerIds,
@@ -136,10 +131,7 @@ internal static class ManagedWardRegistry
     {
         var ownerPlayerId = zdo.GetLong(ZDOVars.s_creator, 0L);
         var accountId = WardOwnership.NormalizeAccountIdValue(
-            WardOwnership.ResolveWardSteamAccountId(
-                zdo,
-                ownerPlayerId,
-                WardOwnership.GetWardSteamAccountId(zdo)));
+            WardOwnership.ResolveWardSteamAccountId(zdo, ownerPlayerId));
         var ownerName = (WardPrivateAreaSafeAccess.GetCreatorName(zdo) ?? string.Empty).Trim();
         var characterKey = GuildsCompat.BuildCharacterIdentityKey(accountId, ownerName);
         var guildId = GuildsCompat.GetWardGuildId(zdo);

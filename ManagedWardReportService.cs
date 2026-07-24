@@ -12,7 +12,7 @@ internal static class ManagedWardReportService
     private static bool _rpcsRegistered;
     private static bool _consoleCommandRegistered;
 
-    internal static void OnZNetAwake()
+    internal static void ResetRuntimeState()
     {
         _rpcsRegistered = false;
     }

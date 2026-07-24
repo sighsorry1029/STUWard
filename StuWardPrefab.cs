@@ -25,11 +25,6 @@ internal sealed class StuWardArea : MonoBehaviour
 
 internal static class ManagedWardIdentity
 {
-    internal static bool IsManaged(PrivateArea? area)
-    {
-        return TryResolve(ManagedWardRef.FromArea(area), repairComponent: false, out _, out _);
-    }
-
     internal static bool EnsureManagedComponent(PrivateArea? area)
     {
         return EnsureManagedComponent(ManagedWardRef.FromArea(area));
@@ -91,7 +86,7 @@ internal sealed class StuWardPlacedHook : MonoBehaviour, IPlaced
 
         WardOwnership.TryStampLocalManagedWardOwnerAccount(ward);
         WardOwnership.NotifyServerManagedWardPlaced(ward);
-        ManagedWardMapStateService.NotifyLiveWardMutation(area);
+        ManagedWardMapStateService.NotifyWardMutation(area);
     }
 }
 
@@ -102,8 +97,6 @@ internal static class StuWardPrefab
     private static GameObject? _vanillaGuardStonePrefab;
     private static int _vanillaGuardStoneIndex = -1;
     private static Piece.Requirement[]? _defaultStuWardRequirements;
-    private static string? _lastLoggedPieceIconState;
-
     internal static void Register()
     {
         if (_registered || PieceManager.Instance.GetPiece(StuWardArea.PrefabName) != null)
@@ -178,15 +171,13 @@ internal static class StuWardPrefab
         var piece = GetStuWardPiece();
         if (piece != null && piece.m_icon != null)
         {
-            return LogPieceIconResolution(piece.m_icon, $"stuWardPrefab piece icon '{piece.m_icon.name}'");
+            return piece.m_icon;
         }
 
         var registeredPiece = PieceManager.Instance.GetPiece(StuWardArea.PrefabName);
         if (registeredPiece?.Piece != null && registeredPiece.Piece.m_icon != null)
         {
-            return LogPieceIconResolution(
-                registeredPiece.Piece.m_icon,
-                $"registered piece icon '{registeredPiece.Piece.m_icon.name}'");
+            return registeredPiece.Piece.m_icon;
         }
 
         var prefab = registeredPiece?.PiecePrefab ??
@@ -195,12 +186,10 @@ internal static class StuWardPrefab
         var prefabIcon = prefab != null ? prefab.GetComponent<Piece>()?.m_icon : null;
         if (prefabIcon != null)
         {
-            var prefabName = prefab != null ? prefab.name : "null";
-            return LogPieceIconResolution(prefabIcon, $"prefab '{prefabName}' piece icon '{prefabIcon.name}'");
+            return prefabIcon;
         }
 
-        return LogMissingPieceIcon(
-            $"stuWardPrefabPresent={_stuWardPrefab != null}, registeredPiecePresent={registeredPiece?.Piece != null}, registeredPiecePrefabPresent={registeredPiece?.PiecePrefab != null}, fallbackPrefab='{prefab?.name ?? "null"}'");
+        return null;
     }
 
     internal static Piece.Requirement[] GetCurrentStuWardRequirements()
@@ -219,29 +208,7 @@ internal static class StuWardPrefab
         return PieceManager.Instance.GetPiece(StuWardArea.PrefabName)?.Piece;
     }
 
-    private static Sprite LogPieceIconResolution(Sprite icon, string source)
-    {
-        var state = $"resolved:{source}";
-        if (_lastLoggedPieceIconState != state)
-        {
-            _lastLoggedPieceIconState = state;
-        }
-
-        return icon;
-    }
-
-    private static Sprite? LogMissingPieceIcon(string context)
-    {
-        var state = $"missing:{context}";
-        if (_lastLoggedPieceIconState != state)
-        {
-            _lastLoggedPieceIconState = state;
-        }
-
-        return null;
-    }
-
-    internal static void ApplyVanillaGuardStoneRecipeSetting()
+    private static void ApplyVanillaGuardStoneRecipeSetting()
     {
         var pieceTable = GetHammerPieceTable();
         var pieces = pieceTable?.m_pieces;

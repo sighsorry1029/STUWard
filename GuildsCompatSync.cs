@@ -5,48 +5,44 @@ namespace STUWard;
 
 internal readonly struct SyncedWardGuildIdentity
 {
-    internal SyncedWardGuildIdentity(bool hasGuild, int guildId, string guildName)
+    internal SyncedWardGuildIdentity(
+        bool hasGuild,
+        int guildId,
+        string guildName,
+        string accountId,
+        string playerName)
     {
         HasGuild = hasGuild;
         GuildId = guildId;
         GuildName = guildName ?? string.Empty;
+        AccountId = WardOwnership.NormalizeAccountIdValue(accountId);
+        PlayerName = playerName?.Trim() ?? string.Empty;
     }
 
     internal bool HasGuild { get; }
     internal int GuildId { get; }
     internal string GuildName { get; }
-}
-
-internal readonly struct PendingPlayerGuildSync
-{
-    internal PendingPlayerGuildSync(long senderUid, DateTime firstSeenUtc)
-    {
-        SenderUid = senderUid;
-        FirstSeenUtc = firstSeenUtc;
-    }
-
-    internal long SenderUid { get; }
-    internal DateTime FirstSeenUtc { get; }
+    internal string AccountId { get; }
+    internal string PlayerName { get; }
 }
 
 internal static partial class GuildsCompat
 {
     private const string SyncPlayerGuildRpc = "STUWard_SyncPlayerGuild";
-    private static readonly TimeSpan PendingPlayerGuildSyncLifetime = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan LocalGuildSyncHeartbeat = TimeSpan.FromSeconds(10);
     private static readonly Dictionary<long, SyncedWardGuildIdentity> ServerSyncedGuildByPlayerId = new();
     private static readonly Dictionary<string, SyncedWardGuildIdentity> ServerSyncedGuildByCharacterKey = new(StringComparer.Ordinal);
-    private static readonly Dictionary<long, PendingPlayerGuildSync> PendingPlayerGuildSyncsBySender = new();
 
     private static bool _syncRpcsRegistered;
     private static bool _localGuildSyncPending = true;
     private static long _lastSyncedLocalPlayerId;
     private static int _lastSyncedLocalGuildId = int.MinValue;
     private static string _lastSyncedLocalGuildName = string.Empty;
+    private static DateTime _nextLocalGuildSyncUtc = DateTime.MinValue;
 
     internal static void Update()
     {
         SyncLocalPlayerGuildIfNeeded(force: false);
-        ProcessPendingPlayerGuildSyncs();
         ProcessPendingWardGuildProjectionRefreshes();
     }
 
@@ -65,12 +61,12 @@ internal static partial class GuildsCompat
     {
         ServerSyncedGuildByPlayerId.Clear();
         ServerSyncedGuildByCharacterKey.Clear();
-        PendingPlayerGuildSyncsBySender.Clear();
         _syncRpcsRegistered = false;
         _localGuildSyncPending = true;
         _lastSyncedLocalPlayerId = 0L;
         _lastSyncedLocalGuildId = int.MinValue;
         _lastSyncedLocalGuildName = string.Empty;
+        _nextLocalGuildSyncUtc = DateTime.MinValue;
     }
 
     internal static bool TryGetSyncedGuildIdentity(long playerId, string accountId, string playerName, out WardGuildIdentity guild)
@@ -124,6 +120,11 @@ internal static partial class GuildsCompat
             return;
         }
 
+        if (!IsAvailable())
+        {
+            return;
+        }
+
         var playerId = localPlayer.GetPlayerID();
         var accountId = WardOwnership.GetPlayerAccountId(localPlayer);
         if (playerId == 0L || string.IsNullOrWhiteSpace(accountId))
@@ -133,19 +134,17 @@ internal static partial class GuildsCompat
 
         var guild = GetPlayerGuildIdentity(localPlayer);
         var guildName = guild.Name ?? string.Empty;
+        var now = DateTime.UtcNow;
+        var heartbeatDue = !znet.IsServer() && now >= _nextLocalGuildSyncUtc;
         var changed = _localGuildSyncPending ||
                       playerId != _lastSyncedLocalPlayerId ||
                       guild.Id != _lastSyncedLocalGuildId ||
-                      !string.Equals(guildName, _lastSyncedLocalGuildName, StringComparison.Ordinal);
+                      !string.Equals(guildName, _lastSyncedLocalGuildName, StringComparison.Ordinal) ||
+                      heartbeatDue;
         if (!force && !changed)
         {
             return;
         }
-
-        _lastSyncedLocalPlayerId = playerId;
-        _lastSyncedLocalGuildId = guild.Id;
-        _lastSyncedLocalGuildName = guildName;
-        _localGuildSyncPending = false;
 
         if (znet.IsServer())
         {
@@ -158,6 +157,7 @@ internal static partial class GuildsCompat
                     previousGuildId: previousGuild.Id);
             }
 
+            RememberLocalGuildSync(playerId, guild, now);
             return;
         }
 
@@ -177,79 +177,37 @@ internal static partial class GuildsCompat
         pkg.Write(guild.Id);
         pkg.Write(guildName);
         routedRpc.InvokeRoutedRPC(serverPeerId, SyncPlayerGuildRpc, pkg);
+        RememberLocalGuildSync(playerId, guild, now);
     }
 
     private static void HandleSyncPlayerGuild(long sender, ZPackage pkg)
     {
-        if (ZNet.instance == null || !ZNet.instance.IsServer() || pkg == null)
+        if (ZNet.instance == null || !ZNet.instance.IsServer() || pkg == null || !IsAvailable())
         {
             return;
         }
 
+        int reportedGuildId;
+        string reportedGuildName;
         try
         {
-            _ = pkg.ReadInt();
-            _ = pkg.ReadString();
+            reportedGuildId = pkg.ReadInt();
+            reportedGuildName = pkg.ReadString();
         }
         catch
         {
             return;
         }
 
-        if (!TryApplySyncedGuildIdentity(sender))
-        {
-            PendingPlayerGuildSyncsBySender[sender] = new PendingPlayerGuildSync(sender, DateTime.UtcNow);
-        }
-    }
-
-    private static void ProcessPendingPlayerGuildSyncs()
-    {
-        if (PendingPlayerGuildSyncsBySender.Count == 0 || ZNet.instance == null || !ZNet.instance.IsServer())
+        if (reportedGuildName.Length > 256)
         {
             return;
         }
 
-        List<long>? expiredSenders = null;
-        List<long>? appliedSenders = null;
-        var now = DateTime.UtcNow;
-        foreach (var entry in PendingPlayerGuildSyncsBySender)
-        {
-            if (now - entry.Value.FirstSeenUtc > PendingPlayerGuildSyncLifetime)
-            {
-                expiredSenders ??= new List<long>();
-                expiredSenders.Add(entry.Key);
-                continue;
-            }
-
-            if (!TryApplySyncedGuildIdentity(entry.Value.SenderUid))
-            {
-                continue;
-            }
-
-            appliedSenders ??= new List<long>();
-            appliedSenders.Add(entry.Key);
-        }
-
-        if (expiredSenders != null)
-        {
-            foreach (var sender in expiredSenders)
-            {
-                PendingPlayerGuildSyncsBySender.Remove(sender);
-            }
-        }
-
-        if (appliedSenders == null)
-        {
-            return;
-        }
-
-        foreach (var sender in appliedSenders)
-        {
-            PendingPlayerGuildSyncsBySender.Remove(sender);
-        }
+        _ = TryApplySyncedGuildIdentity(sender, reportedGuildId);
     }
 
-    private static bool TryApplySyncedGuildIdentity(long sender)
+    private static bool TryApplySyncedGuildIdentity(long sender, int reportedGuildId)
     {
         if (!WardOwnership.TryResolveAuthoritativePlayerIdFromSender(sender, out var playerId))
         {
@@ -273,6 +231,12 @@ internal static partial class GuildsCompat
             return false;
         }
 
+        if (!GuildIdentityPolicy.CanApplyAuthoritativeGuild(reportedGuildId, guild.Id))
+        {
+            InvalidateSyncedGuildIdentity(new WardGuildCharacterIdentity(playerId, accountId, playerName));
+            return false;
+        }
+
         if (UpsertSyncedGuildIdentity(playerId, accountId, playerName, guild, out var previousGuild))
         {
             WardOwnership.RefreshServerPlayerAccountIdForResolvedPlayer(playerId, accountId);
@@ -284,6 +248,97 @@ internal static partial class GuildsCompat
         }
 
         return true;
+    }
+
+    private static void RememberLocalGuildSync(long playerId, WardGuildIdentity guild, DateTime sentAtUtc)
+    {
+        _lastSyncedLocalPlayerId = playerId;
+        _lastSyncedLocalGuildId = guild.Id;
+        _lastSyncedLocalGuildName = guild.Name ?? string.Empty;
+        _localGuildSyncPending = false;
+        _nextLocalGuildSyncUtc = sentAtUtc + LocalGuildSyncHeartbeat;
+    }
+
+    internal static void ForgetServerPlayerGuildIdentity(
+        long playerId,
+        string accountId,
+        string playerName)
+    {
+        InvalidateSyncedGuildIdentity(new WardGuildCharacterIdentity(playerId, accountId, playerName));
+    }
+
+    internal static void InvalidateSyncedGuildIdentity(WardGuildCharacterIdentity identity)
+    {
+        var playerIdsToRemove = new HashSet<long>();
+        if (identity.HasPlayerId)
+        {
+            playerIdsToRemove.Add(identity.PlayerId);
+        }
+
+        if (identity.HasAccountAndName)
+        {
+            foreach (var entry in ServerSyncedGuildByPlayerId)
+            {
+                if (string.Equals(entry.Value.AccountId, identity.AccountId, StringComparison.Ordinal) &&
+                    string.Equals(entry.Value.PlayerName, identity.PlayerName, StringComparison.Ordinal))
+                {
+                    playerIdsToRemove.Add(entry.Key);
+                }
+            }
+        }
+
+        foreach (var playerId in playerIdsToRemove)
+        {
+            if (ServerSyncedGuildByPlayerId.Remove(playerId, out var removed))
+            {
+                RemoveSyncedGuildCharacterKey(removed.AccountId, removed.PlayerName);
+            }
+
+            PlayerGuildCache.Remove(playerId);
+        }
+
+        RemoveSyncedGuildCharacterKey(identity.AccountId, identity.PlayerName);
+    }
+
+    internal static void InvalidateSyncedGuildIdentitiesForGuild(int guildId)
+    {
+        if (guildId == 0)
+        {
+            return;
+        }
+
+        var affectedIdentities = new List<WardGuildCharacterIdentity>();
+        foreach (var entry in ServerSyncedGuildByPlayerId)
+        {
+            if (entry.Value.GuildId == guildId)
+            {
+                affectedIdentities.Add(new WardGuildCharacterIdentity(
+                    entry.Key,
+                    entry.Value.AccountId,
+                    entry.Value.PlayerName));
+            }
+        }
+
+        foreach (var identity in affectedIdentities)
+        {
+            InvalidateSyncedGuildIdentity(identity);
+        }
+    }
+
+    internal static void InvalidateAllSyncedGuildIdentities()
+    {
+        ServerSyncedGuildByPlayerId.Clear();
+        ServerSyncedGuildByCharacterKey.Clear();
+        PlayerGuildCache.Clear();
+    }
+
+    private static void RemoveSyncedGuildCharacterKey(string accountId, string playerName)
+    {
+        var characterKey = BuildCharacterIdentityKey(accountId, playerName);
+        if (!string.IsNullOrWhiteSpace(characterKey))
+        {
+            ServerSyncedGuildByCharacterKey.Remove(characterKey);
+        }
     }
 
     private static void NotifyGuildProjectionRefreshApplied(
@@ -301,16 +356,13 @@ internal static partial class GuildsCompat
             }
 
             var peers = ZNet.instance.GetPeers();
-            if (peers == null)
-            {
-                return;
-            }
-
-            recipientPeerUids = CollectGuildProjectionRefreshRecipients(peers, targetPlayerIds, targetCharacterKeys, affectedGuildIds);
-            if (recipientPeerUids.Count == 0)
-            {
-                return;
-            }
+            recipientPeerUids = peers == null
+                ? new HashSet<long>()
+                : CollectGuildProjectionRefreshRecipients(
+                    peers,
+                    targetPlayerIds,
+                    targetCharacterKeys,
+                    affectedGuildIds);
         }
 
         ManagedWardMapStateService.NotifyViewerProjectionChanged(
@@ -381,9 +433,8 @@ internal static partial class GuildsCompat
             return false;
         }
 
-        return TryGetSyncedGuildIdentity(playerId, accountId, playerName, out var guild) &&
-               guild.Id != 0 &&
-               affectedGuildIds.Contains(guild.Id);
+        var guild = GetPlayerGuildIdentity(playerId);
+        return guild.Id != 0 && affectedGuildIds.Contains(guild.Id);
     }
 
     private static bool UpsertSyncedGuildIdentity(
@@ -395,18 +446,34 @@ internal static partial class GuildsCompat
     {
         previousGuild = default;
         var changed = false;
-        var updated = new SyncedWardGuildIdentity(guild.Id != 0, guild.Id, guild.Name);
+        var updated = new SyncedWardGuildIdentity(
+            guild.Id != 0,
+            guild.Id,
+            guild.Name,
+            accountId,
+            playerName);
         if (playerId != 0L)
         {
             if (ServerSyncedGuildByPlayerId.TryGetValue(playerId, out var currentByPlayer))
             {
                 previousGuild = ToWardGuildIdentity(currentByPlayer);
+                var previousCharacterKey = BuildCharacterIdentityKey(
+                    currentByPlayer.AccountId,
+                    currentByPlayer.PlayerName);
+                var updatedCharacterKey = BuildCharacterIdentityKey(updated.AccountId, updated.PlayerName);
+                if (!string.Equals(previousCharacterKey, updatedCharacterKey, StringComparison.Ordinal) &&
+                    !string.IsNullOrWhiteSpace(previousCharacterKey))
+                {
+                    ServerSyncedGuildByCharacterKey.Remove(previousCharacterKey);
+                }
             }
 
             if (!ServerSyncedGuildByPlayerId.TryGetValue(playerId, out currentByPlayer) ||
                 currentByPlayer.HasGuild != updated.HasGuild ||
                 currentByPlayer.GuildId != updated.GuildId ||
-                !string.Equals(currentByPlayer.GuildName, updated.GuildName, StringComparison.Ordinal))
+                !string.Equals(currentByPlayer.GuildName, updated.GuildName, StringComparison.Ordinal) ||
+                !string.Equals(currentByPlayer.AccountId, updated.AccountId, StringComparison.Ordinal) ||
+                !string.Equals(currentByPlayer.PlayerName, updated.PlayerName, StringComparison.Ordinal))
             {
                 ServerSyncedGuildByPlayerId[playerId] = updated;
                 changed = true;

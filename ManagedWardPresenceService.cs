@@ -175,7 +175,9 @@ internal static class ManagedWardPresenceService
             return;
         }
 
-        var candidateQueryRadius = Mathf.Max(0f, WardSettings.MaxRadius + TrustedPlayerRangeBuffer);
+        // Each ward already occupies every spatial cell touched by its configured radius.
+        // Only the extra trusted-player range must expand this point query.
+        var candidateQueryRadius = TrustedPlayerRangeBuffer;
         for (var index = 0; index < players.Count; index++)
         {
             var player = players[index];

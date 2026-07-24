@@ -32,31 +32,21 @@ public sealed class WardLimitPolicyTests
     }
 
     [Fact]
-    public void EvaluatePlacement_allows_unlimited_negative_limit()
+    public void CanPlaceWard_allows_unlimited_negative_limit()
     {
-        var result = WardLimitPolicy.EvaluatePlacement(limit: -1, currentCount: 100);
-
-        Assert.True(result.Allowed);
-        Assert.True(result.IsUnlimited);
-        Assert.Equal("unlimited", result.Reason);
+        Assert.True(WardLimitPolicy.CanPlaceWard(limit: -1, currentCount: 100));
     }
 
     [Theory]
-    [InlineData(3, 0, true, "under_limit")]
-    [InlineData(3, 2, true, "under_limit")]
-    [InlineData(3, 3, false, "limit_reached")]
-    [InlineData(3, 4, false, "limit_reached")]
-    public void EvaluatePlacement_blocks_when_current_count_reaches_limit(
+    [InlineData(3, 0, true)]
+    [InlineData(3, 2, true)]
+    [InlineData(3, 3, false)]
+    [InlineData(3, 4, false)]
+    public void CanPlaceWard_blocks_when_current_count_reaches_limit(
         int limit,
         int currentCount,
-        bool expectedAllowed,
-        string expectedReason)
+        bool expectedAllowed)
     {
-        var result = WardLimitPolicy.EvaluatePlacement(limit, currentCount);
-
-        Assert.Equal(expectedAllowed, result.Allowed);
-        Assert.Equal(expectedReason, result.Reason);
-        Assert.Equal(limit, result.Limit);
-        Assert.Equal(currentCount, result.CurrentCount);
+        Assert.Equal(expectedAllowed, WardLimitPolicy.CanPlaceWard(limit, currentCount));
     }
 }

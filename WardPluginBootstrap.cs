@@ -20,14 +20,10 @@ internal static class WardPluginBootstrap
         RegisterStuWardPiece();
     }
 
-    internal static void Update()
-    {
-        ManagedWardRuntimeLifecycle.Update();
-    }
-
     internal static void Shutdown()
     {
         PrefabManager.OnVanillaPrefabsAvailable -= RegisterStuWardPiece;
+        DoorRpcUseDoorPatch.Reset();
         WardPluginConfigBindings.UnbindAll();
         WardItemPrefabPolicy.Shutdown();
         ManagedWardConfigFileService.Shutdown();
@@ -35,14 +31,9 @@ internal static class WardPluginBootstrap
         Localizer.Unload();
     }
 
-    internal static void ApplyRecipeSettings()
-    {
-        StuWardPrefab.ApplyRecipeSettings();
-    }
-
     private static void RegisterStuWardPiece()
     {
         StuWardPrefab.Register();
-        ApplyRecipeSettings();
+        StuWardPrefab.ApplyRecipeSettings();
     }
 }

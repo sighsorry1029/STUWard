@@ -188,8 +188,9 @@ internal static class WardItemPrefabPolicy
         try
         {
             var data = string.IsNullOrWhiteSpace(yaml)
-                ? new ItemPrefabYaml()
-                : Deserializer.Deserialize<ItemPrefabYaml>(yaml) ?? new ItemPrefabYaml();
+                ? new ManagedWardConfigFileService.ManagedWardItemPrefabPolicyYaml()
+                : Deserializer.Deserialize<ManagedWardConfigFileService.ManagedWardItemPrefabPolicyYaml>(yaml) ??
+                  new ManagedWardConfigFileService.ManagedWardItemPrefabPolicyYaml();
 
             AddEntries(blockedItemPrefabNames, data.BlockedItemPrefabs);
             AddEntries(pickupWhitelistPrefabNames, data.PickupWhitelist);
@@ -220,15 +221,4 @@ internal static class WardItemPrefabPolicy
         }
     }
 
-    private sealed class ItemPrefabYaml
-    {
-        [YamlMember(Alias = "blocked_item_prefabs")]
-        public List<string>? BlockedItemPrefabs { get; set; }
-
-        [YamlMember(Alias = "pickup_whitelist")]
-        public List<string>? PickupWhitelist { get; set; }
-
-        [YamlMember(Alias = "pickup_blacklist")]
-        public List<string>? PickupBlacklist { get; set; }
-    }
 }

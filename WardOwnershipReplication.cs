@@ -5,47 +5,44 @@ namespace STUWard;
 
 internal readonly struct PendingManagedWardPlacementObserve
 {
-    internal PendingManagedWardPlacementObserve(ZDOID wardZdoId, long requesterId, DateTime firstSeenUtc)
+    internal PendingManagedWardPlacementObserve(
+        DateTime firstSeenUtc,
+        bool isVerified = false)
     {
-        WardZdoId = wardZdoId;
-        RequesterId = requesterId;
         FirstSeenUtc = firstSeenUtc;
+        IsVerified = isVerified;
     }
 
-    internal ZDOID WardZdoId { get; }
-    internal long RequesterId { get; }
     internal DateTime FirstSeenUtc { get; }
+    internal bool IsVerified { get; }
 }
 
 internal readonly struct PendingManagedWardMapStateRefresh
 {
     internal PendingManagedWardMapStateRefresh(
-        ZDOID wardZdoId,
         uint expectedDataRevision,
         DateTime firstSeenUtc)
     {
-        WardZdoId = wardZdoId;
         ExpectedDataRevision = expectedDataRevision;
         FirstSeenUtc = firstSeenUtc;
     }
 
-    internal ZDOID WardZdoId { get; }
     internal uint ExpectedDataRevision { get; }
     internal DateTime FirstSeenUtc { get; }
 }
 
 internal static partial class WardOwnership
 {
+    private const int MaxPendingManagedWardPlacementObserves = 512;
+    private const int MaxPendingManagedWardPlacementObservesPerRequester = 32;
     private const uint MaxPendingMapStateRevisionLead = 128u;
+    private static readonly TimeSpan MinimumManagedWardPlacementObserveInterval = TimeSpan.FromMilliseconds(250);
     private static readonly TimeSpan PendingManagedWardPlacementObserveLifetime = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan PendingManagedWardMapStateRefreshLifetime = TimeSpan.FromSeconds(10);
-    private static readonly Dictionary<ZDOID, PendingManagedWardPlacementObserve> PendingManagedWardPlacementObserves = new();
+    private static readonly Dictionary<long, DateTime> LastManagedWardPlacementObserveUtcByRequesterId = new();
+    private static readonly Dictionary<(ZDOID WardZdoId, long RequesterId), PendingManagedWardPlacementObserve>
+        PendingManagedWardPlacementObserves = new();
     private static readonly Dictionary<ZDOID, PendingManagedWardMapStateRefresh> PendingManagedWardMapStateRefreshes = new();
-
-    internal static void ForceSyncManagedWardZdoToServer(PrivateArea? area)
-    {
-        ForceSyncManagedWardZdoToServer(ManagedWardRef.FromArea(area));
-    }
 
     internal static void ForceSyncManagedWardZdoToServer(ManagedWardRef ward)
     {
@@ -116,11 +113,6 @@ internal static partial class WardOwnership
         return true;
     }
 
-    internal static void NotifyServerManagedWardPlaced(PrivateArea? area)
-    {
-        NotifyServerManagedWardPlaced(ManagedWardRef.FromArea(area));
-    }
-
     internal static void NotifyServerManagedWardPlaced(ManagedWardRef ward)
     {
         var area = ward.Area;
@@ -185,14 +177,6 @@ internal static partial class WardOwnership
         return true;
     }
 
-    internal static bool CanHandleManagedWardStateRpc(ZNetView? nview)
-    {
-        return nview != null &&
-               nview.IsValid() &&
-               ZNet.instance != null &&
-               ZNet.instance.IsServer();
-    }
-
     internal static bool TryGetServerPeerId(out long serverPeerId)
     {
         serverPeerId = 0L;
@@ -233,7 +217,7 @@ internal static partial class WardOwnership
     internal static void CompleteAuthoritativeManagedWardMutation(ZDO zdo)
     {
         ZDOMan.instance?.ForceSendZDO(zdo.m_uid);
-        ManagedWardMapStateService.NotifyZdoWardMutation(zdo);
+        ManagedWardMapStateService.NotifyWardMutation(zdo);
 
         var instance = ZNetScene.instance?.FindInstance(zdo.m_uid);
         var area = instance != null
@@ -256,8 +240,18 @@ internal static partial class WardOwnership
             return;
         }
 
-        var claimedPlayerId = pkg.ReadLong();
-        var wardZdoId = pkg.ReadZDOID();
+        long claimedPlayerId;
+        ZDOID wardZdoId;
+        try
+        {
+            claimedPlayerId = pkg.ReadLong();
+            wardZdoId = pkg.ReadZDOID();
+        }
+        catch
+        {
+            return;
+        }
+
         if (!TryResolveClaimedPlayerIdFromSender(sender, claimedPlayerId, out var requesterId))
         {
             return;
@@ -281,20 +275,125 @@ internal static partial class WardOwnership
             return;
         }
 
+        var pendingObserveKey = (WardZdoId: wardZdoId, RequesterId: requesterId);
+        if (creatorPlayerId == requesterId &&
+            PendingManagedWardPlacementObserves.TryGetValue(pendingObserveKey, out var existingObserve))
+        {
+            PendingManagedWardPlacementObserves[pendingObserveKey] = new PendingManagedWardPlacementObserve(
+                existingObserve.FirstSeenUtc,
+                isVerified: true);
+            return;
+        }
+
+        if (!TryBeginManagedWardPlacementObserve(requesterId))
+        {
+            EnqueuePendingManagedWardPlacementObserve(
+                requesterId,
+                wardZdoId,
+                isVerified: true);
+            return;
+        }
+
         ObserveAuthoritativeManagedWardPlacement(zdo);
     }
 
-    private static void EnqueuePendingManagedWardPlacementObserve(long requesterId, ZDOID wardZdoId)
+    private static bool TryBeginManagedWardPlacementObserve(long requesterId)
     {
-        if (wardZdoId.IsNone())
+        var nowUtc = DateTime.UtcNow;
+        if (LastManagedWardPlacementObserveUtcByRequesterId.TryGetValue(requesterId, out var lastObserveUtc) &&
+            nowUtc >= lastObserveUtc &&
+            nowUtc - lastObserveUtc < MinimumManagedWardPlacementObserveInterval)
+        {
+            return false;
+        }
+
+        LastManagedWardPlacementObserveUtcByRequesterId[requesterId] = nowUtc;
+        return true;
+    }
+
+    private static void EnqueuePendingManagedWardPlacementObserve(
+        long requesterId,
+        ZDOID wardZdoId,
+        bool isVerified = false)
+    {
+        var pendingObserveKey = (WardZdoId: wardZdoId, RequesterId: requesterId);
+        if (wardZdoId.IsNone() || PendingManagedWardPlacementObserves.ContainsKey(pendingObserveKey))
         {
             return;
         }
 
-        PendingManagedWardPlacementObserves[wardZdoId] = new PendingManagedWardPlacementObserve(
-            wardZdoId,
-            requesterId,
-            DateTime.UtcNow);
+        if (!isVerified &&
+            PendingManagedWardPlacementObserves.Count >= MaxPendingManagedWardPlacementObserves)
+        {
+            return;
+        }
+
+        var requesterPendingCount = 0;
+        foreach (var pendingEntry in PendingManagedWardPlacementObserves)
+        {
+            if (pendingEntry.Key.RequesterId != requesterId)
+            {
+                continue;
+            }
+
+            requesterPendingCount++;
+            if (requesterPendingCount >= MaxPendingManagedWardPlacementObservesPerRequester)
+            {
+                break;
+            }
+        }
+
+        var requesterQueueFull =
+            requesterPendingCount >= MaxPendingManagedWardPlacementObservesPerRequester;
+        var globalQueueFull =
+            PendingManagedWardPlacementObserves.Count >= MaxPendingManagedWardPlacementObserves;
+        if ((requesterQueueFull || globalQueueFull) &&
+            (!isVerified ||
+             !TryEvictOldestUnverifiedPlacementObserve(
+                 requesterId,
+                 requireSameRequester: requesterQueueFull)))
+        {
+            return;
+        }
+
+        PendingManagedWardPlacementObserves.Add(
+            pendingObserveKey,
+            new PendingManagedWardPlacementObserve(
+                DateTime.UtcNow,
+                isVerified));
+    }
+
+    private static bool TryEvictOldestUnverifiedPlacementObserve(
+        long requesterId,
+        bool requireSameRequester)
+    {
+        var foundCandidate = false;
+        var candidateKey = default((ZDOID WardZdoId, long RequesterId));
+        var oldestFirstSeenUtc = DateTime.MaxValue;
+        foreach (var pendingEntry in PendingManagedWardPlacementObserves)
+        {
+            var pendingObserve = pendingEntry.Value;
+            if (pendingObserve.IsVerified ||
+                (requireSameRequester && pendingEntry.Key.RequesterId != requesterId) ||
+                pendingObserve.FirstSeenUtc >= oldestFirstSeenUtc)
+            {
+                continue;
+            }
+
+            var pendingZdo = ZDOMan.instance?.GetZDO(pendingEntry.Key.WardZdoId);
+            if (pendingZdo != null &&
+                pendingZdo.IsValid() &&
+                pendingZdo.GetLong(ZDOVars.s_creator, 0L) == pendingEntry.Key.RequesterId)
+            {
+                continue;
+            }
+
+            foundCandidate = true;
+            candidateKey = pendingEntry.Key;
+            oldestFirstSeenUtc = pendingObserve.FirstSeenUtc;
+        }
+
+        return foundCandidate && PendingManagedWardPlacementObserves.Remove(candidateKey);
     }
 
     private static void ProcessPendingManagedWardPlacementObserves()
@@ -310,12 +409,13 @@ internal static partial class WardOwnership
             return;
         }
 
-        List<ZDOID>? completedWardIds = null;
+        List<(ZDOID WardZdoId, long RequesterId)>? completedObserveKeys = null;
+        List<(ZDOID WardZdoId, long RequesterId)>? verifiedObserveKeys = null;
         var now = DateTime.UtcNow;
         foreach (var entry in PendingManagedWardPlacementObserves)
         {
             var pendingObserve = entry.Value;
-            var zdo = zdoMan.GetZDO(pendingObserve.WardZdoId);
+            var zdo = zdoMan.GetZDO(entry.Key.WardZdoId);
             if (zdo == null || !zdo.IsValid())
             {
                 if (now - pendingObserve.FirstSeenUtc < PendingManagedWardPlacementObserveLifetime)
@@ -323,32 +423,63 @@ internal static partial class WardOwnership
                     continue;
                 }
 
-                completedWardIds ??= new List<ZDOID>();
-                completedWardIds.Add(entry.Key);
+                completedObserveKeys ??= new List<(ZDOID WardZdoId, long RequesterId)>();
+                completedObserveKeys.Add(entry.Key);
                 continue;
             }
 
             var creatorPlayerId = zdo.GetLong(ZDOVars.s_creator, 0L);
-            if (creatorPlayerId != 0L && creatorPlayerId != pendingObserve.RequesterId)
+            if (creatorPlayerId != 0L && creatorPlayerId != entry.Key.RequesterId)
             {
-                completedWardIds ??= new List<ZDOID>();
-                completedWardIds.Add(entry.Key);
+                completedObserveKeys ??= new List<(ZDOID WardZdoId, long RequesterId)>();
+                completedObserveKeys.Add(entry.Key);
+                continue;
+            }
+
+            if (!TryBeginManagedWardPlacementObserve(entry.Key.RequesterId))
+            {
+                if (!pendingObserve.IsVerified && creatorPlayerId == entry.Key.RequesterId)
+                {
+                    verifiedObserveKeys ??= new List<(ZDOID WardZdoId, long RequesterId)>();
+                    verifiedObserveKeys.Add(entry.Key);
+                }
+
                 continue;
             }
 
             ObserveAuthoritativeManagedWardPlacement(zdo);
-            completedWardIds ??= new List<ZDOID>();
-            completedWardIds.Add(entry.Key);
+            completedObserveKeys ??= new List<(ZDOID WardZdoId, long RequesterId)>();
+            completedObserveKeys.Add(entry.Key);
         }
 
-        if (completedWardIds == null)
+        if (verifiedObserveKeys != null)
+        {
+            for (var index = 0; index < verifiedObserveKeys.Count; index++)
+            {
+                var verifiedObserveKey = verifiedObserveKeys[index];
+                if (!PendingManagedWardPlacementObserves.TryGetValue(
+                        verifiedObserveKey,
+                        out var pendingObserve) ||
+                    pendingObserve.IsVerified)
+                {
+                    continue;
+                }
+
+                PendingManagedWardPlacementObserves[verifiedObserveKey] =
+                    new PendingManagedWardPlacementObserve(
+                        pendingObserve.FirstSeenUtc,
+                        isVerified: true);
+            }
+        }
+
+        if (completedObserveKeys == null)
         {
             return;
         }
 
-        for (var index = 0; index < completedWardIds.Count; index++)
+        for (var index = 0; index < completedObserveKeys.Count; index++)
         {
-            PendingManagedWardPlacementObserves.Remove(completedWardIds[index]);
+            PendingManagedWardPlacementObserves.Remove(completedObserveKeys[index]);
         }
     }
 
@@ -402,7 +533,7 @@ internal static partial class WardOwnership
         if (expectedDataRevision <= serverDataRevision)
         {
             PendingManagedWardMapStateRefreshes.Remove(wardZdoId);
-            ManagedWardMapStateService.NotifyZdoWardMutation(zdo);
+            ManagedWardMapStateService.NotifyWardMutation(zdo);
             return;
         }
 
@@ -413,7 +544,6 @@ internal static partial class WardOwnership
         }
 
         PendingManagedWardMapStateRefreshes[wardZdoId] = new PendingManagedWardMapStateRefresh(
-            wardZdoId,
             expectedDataRevision,
             DateTime.UtcNow);
     }
@@ -437,7 +567,7 @@ internal static partial class WardOwnership
         {
             var pendingRefresh = entry.Value;
             var timedOut = now - pendingRefresh.FirstSeenUtc >= PendingManagedWardMapStateRefreshLifetime;
-            var zdo = zdoMan.GetZDO(pendingRefresh.WardZdoId);
+            var zdo = zdoMan.GetZDO(entry.Key);
             if (zdo == null || !zdo.IsValid())
             {
                 if (!timedOut)
@@ -462,7 +592,7 @@ internal static partial class WardOwnership
                 continue;
             }
 
-            ManagedWardMapStateService.NotifyZdoWardMutation(zdo);
+            ManagedWardMapStateService.NotifyWardMutation(zdo);
             completedWardIds ??= new List<ZDOID>();
             completedWardIds.Add(entry.Key);
         }

@@ -19,7 +19,7 @@ internal sealed class ConfigurationManagerAttributes
 public sealed class Plugin : BaseUnityPlugin
 {
     internal const string ModName = "STUWard";
-    internal const string ModVersion = "1.2.7";
+    internal const string ModVersion = "1.2.8";
     internal const string Author = "sighsorry";
     internal const string ModGuid = $"{Author}.{ModName}";
 
@@ -123,7 +123,7 @@ public sealed class Plugin : BaseUnityPlugin
 
     private void Update()
     {
-        WardPluginBootstrap.Update();
+        ManagedWardRuntimeLifecycle.Update();
     }
 
     private void OnDestroy()
@@ -131,16 +131,6 @@ public sealed class Plugin : BaseUnityPlugin
         WardPluginBootstrap.Shutdown();
         _harmony?.UnpatchSelf();
         Config.Save();
-    }
-
-    internal static bool IsBlockedItem(string prefabName)
-    {
-        return WardItemPrefabPolicy.IsBlockedItem(prefabName);
-    }
-
-    internal static bool HasBlockedItems()
-    {
-        return WardItemPrefabPolicy.HasBlockedItems();
     }
 
     internal static bool IsWardSettingsShortcutDown()

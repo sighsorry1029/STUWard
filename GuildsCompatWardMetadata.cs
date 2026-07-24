@@ -9,8 +9,8 @@ internal static partial class GuildsCompat
 {
     private sealed class PendingWardGuildProjectionRefreshState
     {
-        internal readonly Dictionary<long, WardGuildCharacterIdentity> TargetIdentitiesByPlayerId = new();
-        internal readonly Dictionary<string, WardGuildCharacterIdentity> TargetIdentitiesByCharacterKey = new(StringComparer.Ordinal);
+        internal readonly HashSet<long> TargetPlayerIds = new();
+        internal readonly HashSet<string> TargetCharacterKeys = new(StringComparer.Ordinal);
         internal readonly HashSet<int> AffectedGuildIds = new();
 
         internal bool PendingFullRefresh;
@@ -23,61 +23,12 @@ internal static partial class GuildsCompat
 
     internal static void ResetPendingWardGuildProjectionRefreshes()
     {
-        PendingWardGuildProjectionRefresh.TargetIdentitiesByPlayerId.Clear();
-        PendingWardGuildProjectionRefresh.TargetIdentitiesByCharacterKey.Clear();
+        PendingWardGuildProjectionRefresh.TargetPlayerIds.Clear();
+        PendingWardGuildProjectionRefresh.TargetCharacterKeys.Clear();
         PendingWardGuildProjectionRefresh.AffectedGuildIds.Clear();
         PendingWardGuildProjectionRefresh.PendingFullRefresh = false;
         PendingWardGuildProjectionRefresh.PendingLiveDisplayRefresh = false;
         PendingWardGuildProjectionRefresh.FlushAtUtc = DateTime.MinValue;
-    }
-
-    internal static bool TryStampLocalWardGuildMetadata(PrivateArea? area)
-    {
-        return TryStampLocalWardGuildMetadata(ManagedWardRef.FromArea(area));
-    }
-
-    internal static bool TryStampLocalWardGuildMetadata(ManagedWardRef ward)
-    {
-        var area = ward.Area;
-        if (area == null || !ManagedWardIdentity.EnsureManagedComponent(ward))
-        {
-            return false;
-        }
-
-        var localPlayer = Player.m_localPlayer;
-        if (localPlayer == null)
-        {
-            return false;
-        }
-
-        if (!WardAccess.IsDirectWardOwner(ward, localPlayer.GetPlayerID()))
-        {
-            return false;
-        }
-
-        if (!ward.HasValidNetworkIdentity || !ward.IsOwner)
-        {
-            return false;
-        }
-
-        var zdo = ward.Zdo;
-        if (zdo == null)
-        {
-            return false;
-        }
-
-        var guildIdentity = TryGetGuild(localPlayer, out var guild) && guild.Id != 0
-            ? new WardGuildIdentity(guild.Id, guild.Name ?? string.Empty)
-            : default;
-        var projection = ManagedWardProjectionService.ResolveExplicitProjection(
-            localPlayer.GetPlayerID(),
-            WardOwnership.GetPlayerAccountId(localPlayer),
-            guildIdentity);
-        var projectionResult = ManagedWardMetadataMutationService.ApplyOwnedLocalProjection(
-            zdo,
-            projection,
-            forceSendWhenMetadataChanged: false);
-        return projectionResult.GuildChanged;
     }
 
     internal static int GetWardGuildId(PrivateArea? area)
@@ -88,7 +39,7 @@ internal static partial class GuildsCompat
             return storedGuild.Id;
         }
 
-        return TryResolveWardGuildIdentity(area, allowMetadataStamp: false, out var guild) ? guild.Id : 0;
+        return TryResolveWardGuildIdentity(area, out var guild) ? guild.Id : 0;
     }
 
     internal static string GetWardGuildName(PrivateArea? area)
@@ -100,7 +51,7 @@ internal static partial class GuildsCompat
             return storedGuild.Name;
         }
 
-        if (TryResolveWardGuildIdentity(area, allowMetadataStamp: false, out var guild))
+        if (TryResolveWardGuildIdentity(area, out var guild))
         {
             return guild.Name;
         }
@@ -136,10 +87,7 @@ internal static partial class GuildsCompat
         }
 
         var ownerPlayerId = zdo.GetLong(ZDOVars.s_creator, 0L);
-        var wardSteamAccountId = WardOwnership.ResolveWardSteamAccountId(
-            zdo,
-            ownerPlayerId,
-            WardOwnership.GetWardSteamAccountId(zdo));
+        var wardSteamAccountId = WardOwnership.ResolveWardSteamAccountId(zdo, ownerPlayerId);
         var ownerName = GetWardOwnerNameForProjection(zdo);
         return TryResolveWardGuildIdentityReadOnly(
                 ownerPlayerId,
@@ -177,7 +125,6 @@ internal static partial class GuildsCompat
 
     private static bool TryResolveWardGuildIdentity(
         PrivateArea? area,
-        bool allowMetadataStamp,
         out WardGuildIdentity guild)
     {
         guild = default;
@@ -186,9 +133,10 @@ internal static partial class GuildsCompat
             return false;
         }
 
+        var zdo = GetWardZdo(area);
         var ownerPlayerId = WardAccess.GetCanonicalCreatorPlayerId(area);
-        var wardSteamAccountId = WardOwnership.ResolveWardSteamAccountId(GetWardZdo(area), ownerPlayerId, WardOwnership.GetWardSteamAccountId(area));
-        var ownerName = GetWardOwnerName(area);
+        var wardSteamAccountId = WardOwnership.ResolveWardSteamAccountId(zdo, ownerPlayerId);
+        var ownerName = GetWardOwnerNameForProjection(zdo);
         if (TryResolveWardGuildIdentityReadOnly(
                 ownerPlayerId,
                 wardSteamAccountId,
@@ -196,31 +144,10 @@ internal static partial class GuildsCompat
                 treatResolvedNoGuildAsResolved: true,
                 out guild))
         {
-            if (allowMetadataStamp)
-            {
-                StampResolvedWardGuildMetadata(area, ownerPlayerId, wardSteamAccountId, guild);
-            }
-
             return true;
         }
 
         return false;
-    }
-
-    private static string GetWardOwnerName(PrivateArea? area)
-    {
-        if (area == null)
-        {
-            return string.Empty;
-        }
-
-        var creatorName = WardPrivateAreaSafeAccess.GetCreatorName(area);
-        if (!string.IsNullOrWhiteSpace(creatorName))
-        {
-            return creatorName.Trim();
-        }
-
-        return GetWardOwnerNameForProjection(GetWardZdo(area));
     }
 
     internal static string GetWardOwnerNameForProjection(ZDO? zdo)
@@ -252,11 +179,27 @@ internal static partial class GuildsCompat
         guild = default;
         var normalizedAccountId = WardOwnership.NormalizeAccountIdValue(wardSteamAccountId);
         var normalizedOwnerName = ownerName?.Trim() ?? string.Empty;
-        if (ZNet.instance != null &&
-            ZNet.instance.IsServer() &&
-            TryGetSyncedGuildIdentity(ownerPlayerId, normalizedAccountId, normalizedOwnerName, out guild))
+        if (ZNet.instance != null && ZNet.instance.IsServer())
         {
-            return treatResolvedNoGuildAsResolved || guild.Id != 0;
+            if (TryGetSyncedGuildIdentity(
+                    ownerPlayerId,
+                    normalizedAccountId,
+                    normalizedOwnerName,
+                    out guild))
+            {
+                return treatResolvedNoGuildAsResolved || guild.Id != 0;
+            }
+
+            if (TryResolveAuthoritativeGuildIdentity(
+                    ownerPlayerId,
+                    normalizedAccountId,
+                    normalizedOwnerName,
+                    out guild))
+            {
+                return treatResolvedNoGuildAsResolved || guild.Id != 0;
+            }
+
+            return false;
         }
 
         if (ownerPlayerId != 0L && TryGetGuild(ownerPlayerId, out guild))
@@ -269,24 +212,6 @@ internal static partial class GuildsCompat
                TryGetGuildByAccountAndName(normalizedAccountId, normalizedOwnerName, out guild);
     }
 
-    private static void StampResolvedWardGuildMetadata(PrivateArea? area, long ownerPlayerId, string wardSteamAccountId, WardGuildIdentity guild)
-    {
-        if (guild.Id == 0 || ZNet.instance == null || !ZNet.instance.IsServer())
-        {
-            return;
-        }
-
-        var zdo = GetWardZdo(area);
-        if (zdo == null)
-        {
-            return;
-        }
-
-        _ = ManagedWardMetadataMutationService.ApplyExplicitProjection(
-            zdo,
-            ManagedWardProjectionService.ResolveExplicitProjection(ownerPlayerId, wardSteamAccountId, guild));
-    }
-
     internal static void HandleGuildSaved(object? guild)
     {
         RefreshWardGuildProjectionForGuild(guild);
@@ -294,12 +219,14 @@ internal static partial class GuildsCompat
 
     internal static void RefreshAllWardGuildProjections(bool liveDisplayRefresh = false)
     {
+        InvalidateAllSyncedGuildIdentities();
         QueueWardGuildProjectionRefreshForAll(liveDisplayRefresh);
     }
 
     private static void RefreshWardGuildProjectionForGuild(object? guild)
     {
         var resolvedGuildId = TryParseGuild(guild, out var resolvedGuild) ? resolvedGuild.Id : 0;
+        InvalidateSyncedGuildIdentitiesForGuild(resolvedGuildId);
         var memberIdentities = CollectGuildMemberCharacterIdentities(guild, out var hadUnresolvedMembers);
         if (memberIdentities.Count == 0 || hadUnresolvedMembers)
         {
@@ -309,6 +236,7 @@ internal static partial class GuildsCompat
 
         foreach (var identity in memberIdentities)
         {
+            InvalidateSyncedGuildIdentity(identity);
             RefreshWardGuildProjectionForCharacter(identity, affectedGuildId: resolvedGuildId);
         }
     }
@@ -338,17 +266,23 @@ internal static partial class GuildsCompat
 
     internal static void ProcessPendingWardGuildProjectionRefreshes()
     {
-        if (ZNet.instance == null || !ZNet.instance.IsServer())
+        var pendingState = PendingWardGuildProjectionRefresh;
+        if (!pendingState.PendingFullRefresh &&
+            pendingState.TargetPlayerIds.Count == 0 &&
+            pendingState.TargetCharacterKeys.Count == 0 &&
+            pendingState.AffectedGuildIds.Count == 0)
         {
             return;
         }
 
-        var pendingState = PendingWardGuildProjectionRefresh;
-        if (!pendingState.PendingFullRefresh &&
-            pendingState.TargetIdentitiesByPlayerId.Count == 0 &&
-            pendingState.TargetIdentitiesByCharacterKey.Count == 0 &&
-            pendingState.AffectedGuildIds.Count == 0)
+        if (ZNet.instance == null)
         {
+            return;
+        }
+
+        if (!ZNet.instance.IsServer())
+        {
+            ResetPendingWardGuildProjectionRefreshes();
             return;
         }
 
@@ -359,18 +293,18 @@ internal static partial class GuildsCompat
 
         var pendingFullRefresh = pendingState.PendingFullRefresh;
         var pendingLiveDisplayRefresh = pendingState.PendingLiveDisplayRefresh;
-        var targetPlayerIds = pendingState.TargetIdentitiesByPlayerId.Count == 0
+        var targetPlayerIds = pendingState.TargetPlayerIds.Count == 0
             ? null
-            : new HashSet<long>(pendingState.TargetIdentitiesByPlayerId.Keys);
-        var targetCharacterKeys = pendingState.TargetIdentitiesByCharacterKey.Count == 0
+            : new HashSet<long>(pendingState.TargetPlayerIds);
+        var targetCharacterKeys = pendingState.TargetCharacterKeys.Count == 0
             ? null
-            : new HashSet<string>(pendingState.TargetIdentitiesByCharacterKey.Keys, StringComparer.Ordinal);
+            : new HashSet<string>(pendingState.TargetCharacterKeys, StringComparer.Ordinal);
         var affectedGuildIds = pendingState.AffectedGuildIds.Count == 0
             ? null
             : new HashSet<int>(pendingState.AffectedGuildIds);
 
         ResetPendingWardGuildProjectionRefreshes();
-        _ = RefreshWardGuildProjectionForManagedWards(
+        RefreshWardGuildProjectionForManagedWards(
             targetPlayerIds,
             targetCharacterKeys,
             affectedGuildIds,
@@ -380,9 +314,19 @@ internal static partial class GuildsCompat
 
     private static void QueueWardGuildProjectionRefreshForAll(bool liveDisplayRefresh)
     {
+        if (ZNet.instance != null && !ZNet.instance.IsServer())
+        {
+            if (liveDisplayRefresh)
+            {
+                ManagedWardMapStateService.RequestLocalDisplayRefresh(refreshImmediatelyIfVisible: true);
+            }
+
+            return;
+        }
+
         PendingWardGuildProjectionRefresh.PendingFullRefresh = true;
-        PendingWardGuildProjectionRefresh.TargetIdentitiesByPlayerId.Clear();
-        PendingWardGuildProjectionRefresh.TargetIdentitiesByCharacterKey.Clear();
+        PendingWardGuildProjectionRefresh.TargetPlayerIds.Clear();
+        PendingWardGuildProjectionRefresh.TargetCharacterKeys.Clear();
         UpdatePendingWardGuildProjectionRefreshWindow(liveDisplayRefresh);
     }
 
@@ -392,15 +336,21 @@ internal static partial class GuildsCompat
         int affectedGuildId,
         int previousGuildId)
     {
+        if (ZNet.instance != null && !ZNet.instance.IsServer())
+        {
+            if (liveDisplayRefresh)
+            {
+                ManagedWardMapStateService.RequestLocalDisplayRefresh(refreshImmediatelyIfVisible: true);
+            }
+
+            return;
+        }
+
         if (!PendingWardGuildProjectionRefresh.PendingFullRefresh)
         {
             if (identity.HasPlayerId)
             {
-                PendingWardGuildProjectionRefresh.TargetIdentitiesByPlayerId[identity.PlayerId] = MergeQueuedWardGuildCharacterIdentity(
-                    PendingWardGuildProjectionRefresh.TargetIdentitiesByPlayerId.TryGetValue(identity.PlayerId, out var existingByPlayer)
-                        ? existingByPlayer
-                        : default,
-                    identity);
+                PendingWardGuildProjectionRefresh.TargetPlayerIds.Add(identity.PlayerId);
             }
 
             if (identity.HasAccountAndName)
@@ -408,11 +358,7 @@ internal static partial class GuildsCompat
                 var characterKey = BuildCharacterIdentityKey(identity.AccountId, identity.PlayerName);
                 if (!string.IsNullOrWhiteSpace(characterKey))
                 {
-                    PendingWardGuildProjectionRefresh.TargetIdentitiesByCharacterKey[characterKey] = MergeQueuedWardGuildCharacterIdentity(
-                        PendingWardGuildProjectionRefresh.TargetIdentitiesByCharacterKey.TryGetValue(characterKey, out var existingByCharacter)
-                            ? existingByCharacter
-                            : default,
-                        identity);
+                    PendingWardGuildProjectionRefresh.TargetCharacterKeys.Add(characterKey);
                 }
             }
         }
@@ -443,21 +389,7 @@ internal static partial class GuildsCompat
         }
     }
 
-    private static WardGuildCharacterIdentity MergeQueuedWardGuildCharacterIdentity(
-        WardGuildCharacterIdentity existingIdentity,
-        WardGuildCharacterIdentity incomingIdentity)
-    {
-        var mergedPlayerId = existingIdentity.HasPlayerId ? existingIdentity.PlayerId : incomingIdentity.PlayerId;
-        var mergedAccountId = !string.IsNullOrWhiteSpace(existingIdentity.AccountId)
-            ? existingIdentity.AccountId
-            : incomingIdentity.AccountId;
-        var mergedPlayerName = !string.IsNullOrWhiteSpace(existingIdentity.PlayerName)
-            ? existingIdentity.PlayerName
-            : incomingIdentity.PlayerName;
-        return new WardGuildCharacterIdentity(mergedPlayerId, mergedAccountId, mergedPlayerName);
-    }
-
-    private static bool RefreshWardGuildProjectionForManagedWards(
+    private static void RefreshWardGuildProjectionForManagedWards(
         HashSet<long>? targetPlayerIds,
         HashSet<string>? targetCharacterKeys,
         HashSet<int>? affectedGuildIds,
@@ -466,7 +398,7 @@ internal static partial class GuildsCompat
     {
         if (ZNet.instance == null || !ZNet.instance.IsServer())
         {
-            return false;
+            return;
         }
 
         if (!fullRefresh &&
@@ -474,7 +406,7 @@ internal static partial class GuildsCompat
             (targetCharacterKeys == null || targetCharacterKeys.Count == 0) &&
             (affectedGuildIds == null || affectedGuildIds.Count == 0))
         {
-            return false;
+            return;
         }
 
         if (fullRefresh)
@@ -489,7 +421,6 @@ internal static partial class GuildsCompat
             targetCharacterKeys,
             affectedGuildIds,
             fullRefresh);
-        var changedCount = 0;
         foreach (var candidateWardId in candidateWardIds)
         {
             var managedWardZdo = ZDOMan.instance?.GetZDO(candidateWardId);
@@ -501,23 +432,15 @@ internal static partial class GuildsCompat
 
             var ownerPlayerId = managedWardZdo.GetLong(ZDOVars.s_creator, 0L);
             var wardAccountId = WardOwnership.NormalizeAccountIdValue(
-                WardOwnership.ResolveWardSteamAccountId(
-                    managedWardZdo,
-                    ownerPlayerId,
-                    WardOwnership.GetWardSteamAccountId(managedWardZdo)));
+                WardOwnership.ResolveWardSteamAccountId(managedWardZdo, ownerPlayerId));
 
-            if (!ManagedWardMetadataMutationService.RefreshProjectedMetadata(
-                    managedWardZdo,
-                    ownerPlayerId,
-                    wardAccountId).AnyChanged)
-            {
-                continue;
-            }
-
-            changedCount++;
+            _ = ManagedWardProjectionService.RefreshProjectedMetadata(
+                managedWardZdo,
+                ownerPlayerId,
+                wardAccountId);
         }
 
-        if (changedCount > 0 && liveDisplayRefresh)
+        if (liveDisplayRefresh)
         {
             NotifyGuildProjectionRefreshApplied(
                 fullRefresh,
@@ -525,8 +448,6 @@ internal static partial class GuildsCompat
                 targetCharacterKeys,
                 affectedGuildIds);
         }
-
-        return changedCount > 0;
     }
 
     private static List<WardGuildCharacterIdentity> CollectGuildMemberCharacterIdentities(object? guild, out bool hadUnresolvedMembers)
@@ -636,76 +557,26 @@ internal static partial class GuildsCompat
         }
 
         var playerIdsToInvalidate = new HashSet<long>();
-        foreach (var cachedPlatformId in PlayerPlatformIdCache)
+        foreach (var cachedGuild in PlayerGuildCache)
         {
-            if (!cachedPlatformId.Value.HasPlatformId ||
-                !string.Equals(cachedPlatformId.Value.PlatformId, normalizedAccountId, StringComparison.Ordinal))
+            var authoritativeAccountId = WardOwnership.NormalizeAccountIdValue(
+                WardOwnership.GetPlayerAccountId(cachedGuild.Key));
+            if (!string.Equals(authoritativeAccountId, normalizedAccountId, StringComparison.Ordinal))
             {
                 continue;
             }
 
-            playerIdsToInvalidate.Add(cachedPlatformId.Key);
-        }
-
-        var players = ZNet.instance?.m_players;
-        if (players != null)
-        {
-            for (var index = 0; index < players.Count; index++)
-            {
-                var playerInfo = players[index];
-                var onlineAccountId = WardOwnership.NormalizeAccountIdValue(playerInfo.m_userInfo.m_id.ToString());
-                if (!string.Equals(onlineAccountId, normalizedAccountId, StringComparison.Ordinal))
-                {
-                    continue;
-                }
-
-                var playerZdo = ZDOMan.instance?.GetZDO(playerInfo.m_characterID);
-                var playerId = playerZdo?.GetLong(ZDOVars.s_playerID, 0L) ?? 0L;
-                if (playerId != 0L)
-                {
-                    playerIdsToInvalidate.Add(playerId);
-                }
-            }
-        }
-
-        var localPlayer = Player.m_localPlayer;
-        if (localPlayer != null &&
-            string.Equals(WardOwnership.NormalizeAccountIdValue(WardOwnership.GetPlayerAccountId(localPlayer)), normalizedAccountId, StringComparison.Ordinal))
-        {
-            playerIdsToInvalidate.Add(localPlayer.GetPlayerID());
+            playerIdsToInvalidate.Add(cachedGuild.Key);
         }
 
         foreach (var playerId in playerIdsToInvalidate)
         {
             PlayerGuildCache.Remove(playerId);
-            PlayerPlatformIdCache.Remove(playerId);
         }
     }
 
     private static void InvalidateAllGuildCaches()
     {
         PlayerGuildCache.Clear();
-        PlayerPlatformIdCache.Clear();
-    }
-
-    internal static string DescribeGuildObject(object? guild)
-    {
-        if (guild == null)
-        {
-            return "null";
-        }
-
-        try
-        {
-            var guildName = GuildNameField?.GetValue(guild) as string ?? string.Empty;
-            var guildId = GuildGeneralField != null && GuildGeneralIdField != null
-                ? Convert.ToInt32(GuildGeneralIdField.GetValue(GuildGeneralField.GetValue(guild)))
-                : 0;
-            return $"type={guild.GetType().FullName}, id={guildId}, name='{guildName}'";
-        }
-        catch
-        {
-            return $"type={guild.GetType().FullName}";
-        }
     }
 }

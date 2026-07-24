@@ -18,7 +18,6 @@ internal readonly struct ManagedWardRef
     internal bool HasArea => Area != null;
     internal bool HasManagedComponent => Component != null;
     internal bool IsManagedZdo => WardOwnership.IsManagedWardZdo(Zdo);
-    internal bool IsManaged => HasManagedComponent || IsManagedZdo;
     internal bool IsPlacementGhost => Area != null && Player.IsPlacementGhost(Area.gameObject);
     internal bool HasValidNetworkIdentity => NView != null && NView.IsValid() && Zdo != null;
     internal bool IsOwner => NView != null && NView.IsValid() && NView.IsOwner();

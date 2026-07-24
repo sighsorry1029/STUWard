@@ -18,20 +18,6 @@ internal readonly struct CachedWardGuildIdentity
     internal DateTime ExpiresAtUtc { get; }
 }
 
-internal readonly struct CachedPlayerPlatformIdentity
-{
-    internal CachedPlayerPlatformIdentity(bool hasPlatformId, string platformId, DateTime expiresAtUtc)
-    {
-        HasPlatformId = hasPlatformId;
-        PlatformId = platformId;
-        ExpiresAtUtc = expiresAtUtc;
-    }
-
-    internal bool HasPlatformId { get; }
-    internal string PlatformId { get; }
-    internal DateTime ExpiresAtUtc { get; }
-}
-
 internal readonly struct WardGuildCharacterIdentity
 {
     internal WardGuildCharacterIdentity(long playerId, string accountId, string playerName)
@@ -50,14 +36,13 @@ internal readonly struct WardGuildCharacterIdentity
 
 internal static partial class GuildsCompat
 {
-    private const string GuildIdKey = "stuw_guild_id";
-    private const string GuildNameKey = "stuw_guild_name";
+    internal const string GuildIdKey = "stuw_guild_id";
+    internal const string GuildNameKey = "stuw_guild_name";
     private static readonly TimeSpan GuildLookupCacheDuration = TimeSpan.FromSeconds(30);
 
     internal static void ResetRuntimeState()
     {
         PlayerGuildCache.Clear();
-        PlayerPlatformIdCache.Clear();
         ResetPendingWardGuildProjectionRefreshes();
         ResetSyncedGuildState();
         _availabilityState = AvailabilityState.Unknown;
@@ -67,12 +52,6 @@ internal static partial class GuildsCompat
     internal static void EnsureRuntimeBindings()
     {
         RegisterSyncRpcs();
-    }
-
-    internal static void OnZNetAwake()
-    {
-        ResetRuntimeState();
-        EnsureRuntimeBindings();
     }
 
     internal static WardGuildIdentity GetPlayerGuildIdentity(Player? player)

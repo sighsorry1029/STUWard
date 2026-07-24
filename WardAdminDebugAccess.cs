@@ -30,12 +30,6 @@ internal static class WardAdminDebugAccess
         RegisterRpcs();
     }
 
-    internal static void OnZNetAwake()
-    {
-        ResetRuntimeState();
-        EnsureRuntimeBindings();
-    }
-
     internal static void RegisterRpcs()
     {
         var routedRpc = ZRoutedRpc.instance;
@@ -74,7 +68,6 @@ internal static class WardAdminDebugAccess
 
         var stateChanged = !_lastLocalDebugAdminState.HasValue || _lastLocalDebugAdminState.Value != enabled;
         var shouldResend = enabled &&
-                           !_serverApprovedLocalDebugState &&
                            now - _lastLocalDebugAdminSyncUtc >= DebugStateResendInterval;
         if (!force && !stateChanged && !shouldResend)
         {
@@ -120,7 +113,19 @@ internal static class WardAdminDebugAccess
             return true;
         }
 
-        return ServerDebugAdminPlayerIds.Contains(playerId);
+        if (!ServerDebugAdminPlayerIds.Contains(playerId))
+        {
+            return false;
+        }
+
+        var accountId = WardOwnership.GetPlayerAccountId(playerId);
+        if (IsAdminAccountId(accountId))
+        {
+            return true;
+        }
+
+        ServerDebugAdminPlayerIds.Remove(playerId);
+        return false;
     }
 
     internal static void ForgetServerPlayer(long playerId)
@@ -235,17 +240,10 @@ internal static class WardAdminDebugAccess
         }
 
         var normalizedTarget = NormalizeAccountId(accountId);
-        var normalizedTargetCore = GetAccountIdCore(normalizedTarget);
         for (var index = 0; index < adminList.Count; index++)
         {
             var normalizedEntry = NormalizeAccountId(adminList[index]);
             if (string.Equals(normalizedEntry, normalizedTarget, StringComparison.Ordinal))
-            {
-                return true;
-            }
-
-            if (!string.IsNullOrWhiteSpace(normalizedTargetCore) &&
-                string.Equals(GetAccountIdCore(normalizedEntry), normalizedTargetCore, StringComparison.Ordinal))
             {
                 return true;
             }
@@ -262,22 +260,6 @@ internal static class WardAdminDebugAccess
         }
 
         return WardOwnership.NormalizeAccountIdValue(rawAccountId);
-    }
-
-    private static string GetAccountIdCore(string accountId)
-    {
-        if (string.IsNullOrWhiteSpace(accountId))
-        {
-            return string.Empty;
-        }
-
-        var separatorIndex = accountId.IndexOf('_');
-        if (separatorIndex < 0 || separatorIndex >= accountId.Length - 1)
-        {
-            return accountId;
-        }
-
-        return accountId.Substring(separatorIndex + 1);
     }
 }
 

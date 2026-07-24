@@ -103,7 +103,9 @@ internal static partial class WardMinimapPinsManager
     private static void UpsertActiveRangePin(Minimap minimap, WardMinimapSnapshotEntry entry)
     {
         var worldSize = Mathf.Max(0f, entry.Radius * 2f);
-        var rangeSprite = WardMapRangeSprites.GetRangeSprite(entry.Radius);
+        var rangeSprite = worldSize > 0f && !float.IsNaN(worldSize) && !float.IsInfinity(worldSize)
+            ? WardMapRangeSprites.GetRangeSprite()
+            : null;
         var pinChanged = false;
         var needsNewPin = !ActiveRangePins.TryGetValue(entry.ZdoId, out var pin);
         if (!needsNewPin && !IsTrackedPinOnMinimap(minimap, pin))
@@ -390,7 +392,9 @@ internal static partial class WardMinimapPinsManager
         {
             if (entry.IsEnabled)
             {
-                return WardMapRangeSprites.GetRangeSprite(entry.Radius);
+                return entry.Radius > 0f && !float.IsNaN(entry.Radius) && !float.IsInfinity(entry.Radius)
+                    ? WardMapRangeSprites.GetRangeSprite()
+                    : null;
             }
         }
 

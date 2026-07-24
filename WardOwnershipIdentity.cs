@@ -158,7 +158,7 @@ internal static partial class WardOwnership
 
     internal static string NormalizeOverrideAccountIdValue(string? rawAccountId)
     {
-        return NormalizeOverrideAccountId(rawAccountId);
+        return NormalizeAccountId(rawAccountId);
     }
 
     internal static long ResolvePlayerIdFromSender(long sender)
@@ -303,10 +303,16 @@ internal static partial class WardOwnership
             return;
         }
 
-        if (ServerSessionIdentitiesBySender.TryGetValue(peer.m_uid, out var sessionIdentity) &&
-            sessionIdentity.PlayerId != 0L)
+        if (ServerSessionIdentitiesBySender.TryGetValue(peer.m_uid, out var sessionIdentity))
         {
-            WardAdminDebugAccess.ForgetServerPlayer(sessionIdentity.PlayerId);
+            GuildsCompat.ForgetServerPlayerGuildIdentity(
+                sessionIdentity.PlayerId,
+                sessionIdentity.AccountId,
+                sessionIdentity.PlayerName);
+            if (sessionIdentity.PlayerId != 0L)
+            {
+                WardAdminDebugAccess.ForgetServerPlayer(sessionIdentity.PlayerId);
+            }
         }
 
         ServerSessionIdentitiesBySender.Remove(peer.m_uid);
@@ -671,38 +677,7 @@ internal static partial class WardOwnership
 
     private static string NormalizeAccountId(string? rawAccountId)
     {
-        var trimmedAccountId = rawAccountId?.Trim();
-        if (string.IsNullOrWhiteSpace(trimmedAccountId))
-        {
-            return string.Empty;
-        }
-
-        const string steamPrefix = "Steam_";
-        var canonicalAccountId = trimmedAccountId!;
-        return canonicalAccountId.StartsWith(steamPrefix, StringComparison.Ordinal)
-            ? canonicalAccountId.Substring(steamPrefix.Length)
-            : canonicalAccountId;
-    }
-
-    private static string NormalizeOverrideAccountId(string? rawAccountId)
-    {
-        var normalized = NormalizeAccountId(rawAccountId);
-        if (string.IsNullOrWhiteSpace(normalized))
-        {
-            return string.Empty;
-        }
-
-        const string steamPrefix = "Steam_";
-        return normalized.StartsWith(steamPrefix, StringComparison.Ordinal)
-            ? normalized.Substring(steamPrefix.Length)
-            : normalized;
-    }
-
-    private static bool MatchesAccountId(string left, string right)
-    {
-        return !string.IsNullOrWhiteSpace(left) &&
-               !string.IsNullOrWhiteSpace(right) &&
-               string.Equals(NormalizeAccountId(left), NormalizeAccountId(right), StringComparison.Ordinal);
+        return GuildIdentityPolicy.NormalizeAccountId(rawAccountId);
     }
 
     private static bool SameAccountId(string left, string right)

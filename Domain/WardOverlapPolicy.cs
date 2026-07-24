@@ -45,22 +45,11 @@ internal readonly struct WardOverlapQuery
 
 internal static class WardOverlapPolicy
 {
-    internal static bool WouldOverlapForeignWard(WardOverlapQuery query, IEnumerable<WardOverlapArea> areas)
+    internal static bool IsForeignOverlap(WardOverlapQuery query, WardOverlapArea area)
     {
-        foreach (var area in areas)
-        {
-            if (ShouldIgnoreArea(query, area) || SharesTrustedWardGroup(area, query))
-            {
-                continue;
-            }
-
-            if (Overlaps(query, area))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return !ShouldIgnoreArea(query, area) &&
+               !SharesTrustedWardGroup(area, query) &&
+               Overlaps(query, area);
     }
 
     internal static float GetMaxNonOverlappingRadius(

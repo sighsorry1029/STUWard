@@ -55,11 +55,6 @@ internal static partial class GuildsCompat
     private static readonly MethodInfo? SaveGuildMethod = ApiType != null && GuildType != null
         ? AccessTools.Method(ApiType, "SaveGuild", new[] { GuildType })
         : null;
-    private static readonly FieldInfo? PlayerInfoUserInfoField = AccessTools.Field(typeof(ZNet.PlayerInfo), "m_userInfo");
-    private static readonly FieldInfo? UserInfoIdField = PlayerInfoUserInfoField?.FieldType != null
-        ? AccessTools.Field(PlayerInfoUserInfoField.FieldType, "m_id")
-        : null;
-
     private static readonly FieldInfo? GuildNameField = GuildType != null ? AccessTools.Field(GuildType, "Name") : null;
     private static readonly FieldInfo? GuildGeneralField = GuildType != null ? AccessTools.Field(GuildType, "General") : null;
     private static readonly FieldInfo? GuildGeneralIdField = GuildGeneralType != null ? AccessTools.Field(GuildGeneralType, "id") : null;

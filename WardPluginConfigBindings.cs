@@ -175,7 +175,7 @@ internal static class WardPluginConfigBindings
 
     private static void HandleRecipeSettingsChanged(object? _, EventArgs __)
     {
-        WardPluginBootstrap.ApplyRecipeSettings();
+        StuWardPrefab.ApplyRecipeSettings();
     }
 
     private static void HandleLocalWardPinConfigChanged(object? _, EventArgs __)

@@ -331,67 +331,58 @@ internal static class WardSettings
 
     internal static WardConfiguration WithAreaMarkerSpeedMultiplier(WardConfiguration configuration, float value)
     {
-        return new WardConfiguration(
-            configuration.ShowAreaMarker,
-            Mathf.Clamp(value, MinAreaMarkerSpeedMultiplier, MaxAreaMarkerSpeedMultiplier),
-            configuration.AreaMarkerAlpha,
-            configuration.Radius,
-            configuration.AutoCloseDelay,
-            configuration.WarningSoundEnabled,
-            configuration.WarningFlashEnabled,
-            configuration.Restrictions);
+        return CopyConfiguration(
+            configuration,
+            areaMarkerSpeedMultiplier: Mathf.Clamp(value, MinAreaMarkerSpeedMultiplier, MaxAreaMarkerSpeedMultiplier));
     }
 
     internal static WardConfiguration WithAreaMarkerAlpha(WardConfiguration configuration, float value)
     {
-        return new WardConfiguration(
-            configuration.ShowAreaMarker,
-            configuration.AreaMarkerSpeedMultiplier,
-            Mathf.Clamp(value, MinAreaMarkerAlpha, MaxAreaMarkerAlpha),
-            configuration.Radius,
-            configuration.AutoCloseDelay,
-            configuration.WarningSoundEnabled,
-            configuration.WarningFlashEnabled,
-            configuration.Restrictions);
+        return CopyConfiguration(
+            configuration,
+            areaMarkerAlpha: Mathf.Clamp(value, MinAreaMarkerAlpha, MaxAreaMarkerAlpha));
     }
 
     internal static WardConfiguration WithRadius(WardConfiguration configuration, float value)
     {
-        return new WardConfiguration(
-            configuration.ShowAreaMarker,
-            configuration.AreaMarkerSpeedMultiplier,
-            configuration.AreaMarkerAlpha,
-            Mathf.Clamp(value, MinRadius, MaxRadius),
-            configuration.AutoCloseDelay,
-            configuration.WarningSoundEnabled,
-            configuration.WarningFlashEnabled,
-            configuration.Restrictions);
+        return CopyConfiguration(
+            configuration,
+            radius: Mathf.Clamp(value, MinRadius, MaxRadius));
     }
 
     internal static WardConfiguration WithAutoCloseDelay(WardConfiguration configuration, float value)
     {
-        return new WardConfiguration(
-            configuration.ShowAreaMarker,
-            configuration.AreaMarkerSpeedMultiplier,
-            configuration.AreaMarkerAlpha,
-            configuration.Radius,
-            Mathf.Clamp(value, MinAutoCloseDelay, MaxAutoCloseDelay),
-            configuration.WarningSoundEnabled,
-            configuration.WarningFlashEnabled,
-            configuration.Restrictions);
+        return CopyConfiguration(
+            configuration,
+            autoCloseDelay: Mathf.Clamp(value, MinAutoCloseDelay, MaxAutoCloseDelay));
     }
 
     internal static WardConfiguration WithRestrictions(WardConfiguration configuration, WardRestrictionOptions restrictions)
     {
+        return CopyConfiguration(
+            configuration,
+            restrictions: NormalizeRestrictions(restrictions));
+    }
+
+    private static WardConfiguration CopyConfiguration(
+        WardConfiguration configuration,
+        float? areaMarkerSpeedMultiplier = null,
+        float? areaMarkerAlpha = null,
+        float? radius = null,
+        float? autoCloseDelay = null,
+        bool? warningSoundEnabled = null,
+        bool? warningFlashEnabled = null,
+        WardRestrictionOptions? restrictions = null)
+    {
         return new WardConfiguration(
             configuration.ShowAreaMarker,
-            configuration.AreaMarkerSpeedMultiplier,
-            configuration.AreaMarkerAlpha,
-            configuration.Radius,
-            configuration.AutoCloseDelay,
-            configuration.WarningSoundEnabled,
-            configuration.WarningFlashEnabled,
-            NormalizeRestrictions(restrictions));
+            areaMarkerSpeedMultiplier ?? configuration.AreaMarkerSpeedMultiplier,
+            areaMarkerAlpha ?? configuration.AreaMarkerAlpha,
+            radius ?? configuration.Radius,
+            autoCloseDelay ?? configuration.AutoCloseDelay,
+            warningSoundEnabled ?? configuration.WarningSoundEnabled,
+            warningFlashEnabled ?? configuration.WarningFlashEnabled,
+            restrictions ?? configuration.Restrictions);
     }
 
     private static void AddForcedRestriction(
@@ -520,16 +511,6 @@ internal static class WardSettings
             warningSoundEnabled,
             warningFlashEnabled,
             restrictions);
-    }
-
-    internal static void ApplyAreaState(PrivateArea area)
-    {
-        ApplyAreaState(ManagedWardRef.FromArea(area));
-    }
-
-    internal static void ApplyAreaState(PrivateArea area, WardConfiguration configuration)
-    {
-        ApplyAreaState(ManagedWardRef.FromArea(area), configuration);
     }
 
     internal static void ApplyAreaState(ManagedWardRef ward)
@@ -805,28 +786,12 @@ internal static class WardSettings
 
     internal static WardConfiguration WithWarningSoundEnabled(WardConfiguration configuration, bool enabled)
     {
-        return new WardConfiguration(
-            configuration.ShowAreaMarker,
-            configuration.AreaMarkerSpeedMultiplier,
-            configuration.AreaMarkerAlpha,
-            configuration.Radius,
-            configuration.AutoCloseDelay,
-            enabled,
-            configuration.WarningFlashEnabled,
-            configuration.Restrictions);
+        return CopyConfiguration(configuration, warningSoundEnabled: enabled);
     }
 
     internal static WardConfiguration WithWarningFlashEnabled(WardConfiguration configuration, bool enabled)
     {
-        return new WardConfiguration(
-            configuration.ShowAreaMarker,
-            configuration.AreaMarkerSpeedMultiplier,
-            configuration.AreaMarkerAlpha,
-            configuration.Radius,
-            configuration.AutoCloseDelay,
-            configuration.WarningSoundEnabled,
-            enabled,
-            configuration.Restrictions);
+        return CopyConfiguration(configuration, warningFlashEnabled: enabled);
     }
 
     internal static float GetMaxNonOverlappingRadius(PrivateArea area)
@@ -1186,15 +1151,10 @@ internal static class WardSettings
     {
         var maxRadius = GetMaxNonOverlappingRadius(zdo);
         var clampedRadius = Mathf.Clamp(Mathf.Min(configuration.Radius, maxRadius), MinRadius, MaxRadius);
-        return new WardConfiguration(
-            configuration.ShowAreaMarker,
-            configuration.AreaMarkerSpeedMultiplier,
-            configuration.AreaMarkerAlpha,
-            clampedRadius,
-            configuration.AutoCloseDelay,
-            configuration.WarningSoundEnabled,
-            configuration.WarningFlashEnabled,
-            ApplyForcedRestrictions(configuration.Restrictions));
+        return CopyConfiguration(
+            configuration,
+            radius: clampedRadius,
+            restrictions: ApplyForcedRestrictions(configuration.Restrictions));
     }
 
     private static float GetMaxNonOverlappingRadius(ZDO zdo)

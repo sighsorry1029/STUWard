@@ -47,11 +47,6 @@ internal static class WardPermittedSnapshots
         WriteSnapshot(zdo, BuildEntries(zdo));
     }
 
-    internal static void Backfill(PrivateArea? area)
-    {
-        Backfill(ManagedWardRef.FromArea(area));
-    }
-
     internal static void Backfill(ManagedWardRef ward)
     {
         if (!TryGetOwnedSnapshotZdo(ward, out var zdo, out _))
@@ -81,6 +76,7 @@ internal static class WardPermittedSnapshots
             var request = PendingBackfillRequests[lastIndex];
             PendingBackfillRequests.RemoveAt(lastIndex);
             PendingBackfillAreaIds.Remove(request.InstanceId);
+            processed++;
 
             if (request.Area == null ||
                 !TryGetOwnedSnapshotZdo(request.Area, out var zdo, out _) ||
@@ -90,7 +86,6 @@ internal static class WardPermittedSnapshots
             }
 
             Refresh(request.Area);
-            processed++;
         }
     }
 
@@ -115,7 +110,7 @@ internal static class WardPermittedSnapshots
             return false;
         }
 
-        if (!TryGetSnapshot(area, nview, out var entries))
+        if (!TryGetSnapshot(nview, out var entries))
         {
             return false;
         }
@@ -188,9 +183,8 @@ internal static class WardPermittedSnapshots
 
     private static bool HasCurrentSnapshot(ZDO zdo)
     {
-        return zdo.GetInt(SnapshotVersionKey, 0) == SnapshotFormatVersion &&
-               zdo.GetInt(SnapshotRevisionKey, 0) > 0 &&
-               (zdo.GetByteArray(SnapshotDataKey, null)?.Length ?? 0) > 0;
+        return zdo.GetInt(SnapshotRevisionKey, 0) > 0 &&
+               TryDeserialize(zdo, out _);
     }
 
     private static void EnqueueBackfill(PrivateArea area)
@@ -233,7 +227,7 @@ internal static class WardPermittedSnapshots
         return true;
     }
 
-    private static bool TryGetSnapshot(PrivateArea area, ZNetView nview, out Dictionary<long, SnapshotEntry> entries)
+    private static bool TryGetSnapshot(ZNetView nview, out Dictionary<long, SnapshotEntry> entries)
     {
         entries = null!;
 
@@ -249,22 +243,21 @@ internal static class WardPermittedSnapshots
             return true;
         }
 
-        entries = Deserialize(zdo);
-        SnapshotCache[zdo.m_uid] = new CachedSnapshot(zdo.DataRevision, entries);
-        return entries.Count > 0;
-    }
+        if (!TryDeserialize(zdo, out entries))
+        {
+            return false;
+        }
 
-    private static List<SnapshotEntry> BuildEntries(PrivateArea area)
-    {
-        return BuildEntries(WardPrivateAreaSafeAccess.GetZdo(area));
+        SnapshotCache[zdo.m_uid] = new CachedSnapshot(zdo.DataRevision, entries);
+        return true;
     }
 
     private static List<SnapshotEntry> BuildEntries(ZDO? zdo)
     {
         var permittedPlayerIds = WardPrivateAreaSafeAccess.GetPermittedPlayerIds(zdo);
-        var entries = new List<SnapshotEntry>(permittedPlayerIds.Length);
+        var entries = new List<SnapshotEntry>(permittedPlayerIds.Count);
 
-        for (var index = 0; index < permittedPlayerIds.Length; index++)
+        for (var index = 0; index < permittedPlayerIds.Count; index++)
         {
             var playerId = permittedPlayerIds[index];
             if (playerId == 0L)
@@ -281,32 +274,32 @@ internal static class WardPermittedSnapshots
         return entries;
     }
 
-    private static Dictionary<long, SnapshotEntry> Deserialize(ZDO zdo)
+    private static bool TryDeserialize(ZDO zdo, out Dictionary<long, SnapshotEntry> entries)
     {
-        var entries = new Dictionary<long, SnapshotEntry>();
+        entries = new Dictionary<long, SnapshotEntry>();
         try
         {
             if (zdo.GetInt(SnapshotVersionKey, 0) != SnapshotFormatVersion)
             {
-                return entries;
+                return false;
             }
 
             var snapshotData = zdo.GetByteArray(SnapshotDataKey, null);
             if (snapshotData == null || snapshotData.Length == 0 || snapshotData.Length > MaxSnapshotDataBytes)
             {
-                return entries;
+                return false;
             }
 
             var package = new ZPackage(snapshotData);
             if (package.ReadInt() != SnapshotFormatVersion)
             {
-                return entries;
+                return false;
             }
 
             var count = package.ReadInt();
             if (count < 0 || count > WardPrivateAreaSafeAccess.MaxPermittedPlayers)
             {
-                return entries;
+                return false;
             }
 
             for (var index = 0; index < count; index++)
@@ -320,12 +313,12 @@ internal static class WardPermittedSnapshots
                 }
             }
 
-            return entries;
+            return true;
         }
         catch
         {
             entries.Clear();
-            return entries;
+            return false;
         }
     }
 
@@ -403,7 +396,7 @@ internal static class PrivateAreaAddPermittedSnapshotPatch
 
         WardPermittedSnapshots.Refresh(__instance);
         ManagedWardPresenceService.Invalidate();
-        ManagedWardMapStateService.NotifyLiveWardMutation(__instance);
+        ManagedWardMapStateService.NotifyWardMutation(__instance);
         WardOwnership.ForceSyncManagedWardZdoToServer(ward);
     }
 }
@@ -421,7 +414,7 @@ internal static class PrivateAreaRemovePermittedSnapshotPatch
 
         WardPermittedSnapshots.Refresh(__instance);
         ManagedWardPresenceService.Invalidate();
-        ManagedWardMapStateService.NotifyLiveWardMutation(__instance);
+        ManagedWardMapStateService.NotifyWardMutation(__instance);
         WardOwnership.ForceSyncManagedWardZdoToServer(ward);
     }
 }

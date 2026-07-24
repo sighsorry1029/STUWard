@@ -68,13 +68,21 @@ internal static partial class GuildsCompat
             return;
         }
 
-        var callback = CreateGuildCallback(delegateType, handlerName);
-        if (callback == null)
+        try
         {
-            return;
-        }
+            var callback = CreateGuildCallback(delegateType, handlerName);
+            if (callback == null)
+            {
+                return;
+            }
 
-        registerMethod.Invoke(null, new object[] { callback });
+            registerMethod.Invoke(null, new object[] { callback });
+        }
+        catch (Exception exception)
+        {
+            Plugin.Log.LogWarning(
+                $"Failed to register Guilds hook {handlerName}: {exception.GetType().Name}: {exception.Message}");
+        }
     }
 
     private static Delegate? CreateGuildCallback(Type delegateType, string handlerName)
@@ -113,6 +121,7 @@ internal static partial class GuildsCompat
             return;
         }
 
+        InvalidateSyncedGuildIdentity(identity);
         RefreshWardGuildProjectionForCharacter(
             identity,
             liveDisplayRefresh: true,
@@ -132,6 +141,7 @@ internal static partial class GuildsCompat
             return;
         }
 
+        InvalidateSyncedGuildIdentity(identity);
         RefreshWardGuildProjectionForCharacter(
             identity,
             liveDisplayRefresh: true,

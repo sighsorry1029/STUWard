@@ -6,22 +6,19 @@ using Xunit;
 public sealed class ManagedWardAccessPolicyTests
 {
     [Theory]
-    [InlineData(42L, 42L, false, 0, 0, false, true, "owner", false, false)]
-    [InlineData(100L, 42L, true, 0, 0, false, true, "admin_debug", false, false)]
-    [InlineData(100L, 42L, false, 7, 7, false, true, "guild", false, true)]
-    [InlineData(100L, 42L, false, 0, 0, true, true, "permitted", true, false)]
-    [InlineData(100L, 42L, false, 2, 3, false, false, "denied", false, false)]
-    public void Evaluate_returns_expected_decision(
+    [InlineData(42L, 42L, false, 0, 0, false, true)]
+    [InlineData(100L, 42L, true, 0, 0, false, true)]
+    [InlineData(100L, 42L, false, 7, 7, false, true)]
+    [InlineData(100L, 42L, false, 0, 0, true, true)]
+    [InlineData(100L, 42L, false, 2, 3, false, false)]
+    public void CanAccess_returns_expected_decision(
         long actorPlayerId,
         long ownerPlayerId,
         bool isAdminDebug,
         int playerGuildId,
         int wardGuildId,
         bool permitted,
-        bool expectedAllowed,
-        string expectedReason,
-        bool expectedPermitted,
-        bool expectedSameGuild)
+        bool expectedAllowed)
     {
         var actor = new ManagedWardAccessActor(
             actorPlayerId,
@@ -32,12 +29,7 @@ public sealed class ManagedWardAccessPolicyTests
             new WardGuildIdentity(wardGuildId, string.Empty),
             permitted);
 
-        var result = ManagedWardAccessPolicy.Evaluate(actor, subject);
-
-        Assert.Equal(expectedAllowed, result.Allowed);
-        Assert.Equal(expectedReason, result.Reason);
-        Assert.Equal(expectedPermitted, result.Permitted);
-        Assert.Equal(expectedSameGuild, result.SameGuild);
+        Assert.Equal(expectedAllowed, ManagedWardAccessPolicy.CanAccess(actor, subject));
     }
 
     [Fact]
@@ -66,12 +58,7 @@ public sealed class ManagedWardAccessPolicyTests
             wardGuild: new WardGuildIdentity(77, "Guild"),
             permitted: false);
 
-        var result = ManagedWardAccessPolicy.Evaluate(actor, subject);
-
-        Assert.True(result.Allowed);
-        Assert.Equal("guild", result.Reason);
-        Assert.True(result.SameGuild);
-        Assert.False(result.Permitted);
+        Assert.True(ManagedWardAccessPolicy.CanAccess(actor, subject));
     }
 
     [Theory]
@@ -88,10 +75,6 @@ public sealed class ManagedWardAccessPolicyTests
             wardGuild: new WardGuildIdentity(wardGuildId, "Guild"),
             permitted: false);
 
-        var result = ManagedWardAccessPolicy.Evaluate(actor, subject);
-
-        Assert.False(result.Allowed);
-        Assert.Equal("denied", result.Reason);
-        Assert.False(result.SameGuild);
+        Assert.False(ManagedWardAccessPolicy.CanAccess(actor, subject));
     }
 }

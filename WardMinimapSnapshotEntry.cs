@@ -32,8 +32,7 @@ internal readonly struct WardMinimapViewerSnapshot
         int visibleWardCount,
         int enabledWardCount,
         IReadOnlyList<WardMinimapSnapshotEntry>? entries,
-        IReadOnlyDictionary<ZDOID, uint>? visibleWardDataRevisions,
-        WardMinimapSnapshotEntry? firstEntry)
+        IReadOnlyDictionary<ZDOID, uint>? visibleWardDataRevisions)
     {
         ViewerRevisionToken = viewerRevisionToken;
         IndexedWardCount = indexedWardCount;
@@ -42,7 +41,6 @@ internal readonly struct WardMinimapViewerSnapshot
         EnabledWardCount = enabledWardCount;
         Entries = entries ?? Array.Empty<WardMinimapSnapshotEntry>();
         VisibleWardDataRevisions = visibleWardDataRevisions ?? EmptyVisibleWardDataRevisions;
-        FirstEntry = firstEntry;
     }
 
     internal static WardMinimapViewerSnapshot Empty { get; } = new(
@@ -52,8 +50,7 @@ internal readonly struct WardMinimapViewerSnapshot
         0,
         0,
         Array.Empty<WardMinimapSnapshotEntry>(),
-        EmptyVisibleWardDataRevisions,
-        null);
+        EmptyVisibleWardDataRevisions);
 
     internal int ViewerRevisionToken { get; }
     internal int IndexedWardCount { get; }
@@ -62,7 +59,6 @@ internal readonly struct WardMinimapViewerSnapshot
     internal int EnabledWardCount { get; }
     internal IReadOnlyList<WardMinimapSnapshotEntry> Entries { get; }
     internal IReadOnlyDictionary<ZDOID, uint> VisibleWardDataRevisions { get; }
-    internal WardMinimapSnapshotEntry? FirstEntry { get; }
 }
 
 internal static class WardMinimapViewerSnapshotBuilder
@@ -83,7 +79,6 @@ internal static class WardMinimapViewerSnapshotBuilder
         var candidateWardCount = visibleWardIds.Length;
         var visibleWardCount = 0;
         var enabledWardCount = 0;
-        WardMinimapSnapshotEntry? firstEntry = null;
         List<WardMinimapSnapshotEntry>? entries = includeEntries && visibleWardIds.Length > 0
             ? new List<WardMinimapSnapshotEntry>(visibleWardIds.Length)
             : null;
@@ -110,7 +105,6 @@ internal static class WardMinimapViewerSnapshotBuilder
                 enabledWardCount++;
             }
 
-            firstEntry ??= snapshotEntry;
             entries?.Add(snapshotEntry);
             if (visibleWardDataRevisions != null)
             {
@@ -128,7 +122,6 @@ internal static class WardMinimapViewerSnapshotBuilder
             visibleWardCount,
             enabledWardCount,
             entries == null || entries.Count == 0 ? Array.Empty<WardMinimapSnapshotEntry>() : entries,
-            visibleWardDataRevisions,
-            firstEntry);
+            visibleWardDataRevisions);
     }
 }

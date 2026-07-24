@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.2.8
+
+- Fixed revoked admin+debug access remaining cached and stopped treating cross-platform accounts with the same numeric suffix as the same administrator.
+- Fixed Guilds membership and ward projection refreshes, including stale join/leave data and prefixed or bare Steam account IDs, while keeping other platform identities distinct.
+- Fixed host-only and temporarily deferred ward minimap refreshes so local pins update without remote peers and queued server refreshes retry after index preparation.
+- Reworked automatic pickup protection to run the vanilla AutoPickup method while temporarily excluding denied drops, with exception-safe item-state restoration.
+- Made temporary interaction, portal, and pickup restriction scopes exception-safe so failed calls cannot affect later ward access checks.
+- Fixed valid empty permitted-player snapshots being treated as invalid and bounded snapshot backfill work for stale or malformed entries.
+- Hardened managed-ward placement and minimap snapshot RPCs with malformed-packet checks, request throttling, and bounded pending queues.
+- Changed newly generated `STUWard.yml` files to use empty `ward_limit_overrides`; sample Steam account entries are now comments instead of active mappings.
+
 ## 1.2.7
 
 - Fixed ward activation and deactivation VFX/SFX on dedicated servers by assigning the single networked effect spawn to the requesting client after server authorization.

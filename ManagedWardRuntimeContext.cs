@@ -48,6 +48,32 @@ internal readonly struct ManagedWardHoverTextCacheEntry
     internal string ShortcutLabel { get; }
     internal string GuildName { get; }
     internal string FinalText { get; }
+
+    internal bool Matches(ManagedWardHoverTextCacheEntry other)
+    {
+        return DataRevision == other.DataRevision &&
+               string.Equals(OriginalText, other.OriginalText, StringComparison.Ordinal) &&
+               PlayerId == other.PlayerId &&
+               CanConfigure == other.CanConfigure &&
+               CanAttemptAnyWardControl == other.CanAttemptAnyWardControl &&
+               HasSettingsShortcutBinding == other.HasSettingsShortcutBinding &&
+               string.Equals(ShortcutLabel, other.ShortcutLabel, StringComparison.Ordinal) &&
+               string.Equals(GuildName, other.GuildName, StringComparison.Ordinal);
+    }
+
+    internal ManagedWardHoverTextCacheEntry WithFinalText(string finalText)
+    {
+        return new ManagedWardHoverTextCacheEntry(
+            DataRevision,
+            OriginalText,
+            PlayerId,
+            CanConfigure,
+            CanAttemptAnyWardControl,
+            HasSettingsShortcutBinding,
+            ShortcutLabel,
+            GuildName,
+            finalText);
+    }
 }
 
 internal sealed class ManagedWardRuntimeContext
@@ -141,22 +167,6 @@ internal static class ManagedWardRuntimeContexts
     internal static void Reset()
     {
         Contexts.Clear();
-    }
-
-    internal static void ClearObservedStates()
-    {
-        foreach (var context in Contexts.Values)
-        {
-            context.ClearObservedState();
-        }
-    }
-
-    internal static void ClearHoverTexts()
-    {
-        foreach (var context in Contexts.Values)
-        {
-            context.ClearHoverText();
-        }
     }
 
     internal static void ClearConfigurationCaches()
@@ -253,13 +263,8 @@ internal static class ManagedWardRuntimeContexts
             return false;
         }
 
-        if (context.PendingEnabledFanOutState != currentEnabled)
-        {
-            return false;
-        }
-
         context.HasPendingEnabledFanOutSuppression = false;
-        return true;
+        return context.PendingEnabledFanOutState == currentEnabled;
     }
 
     internal static bool TryConsumeDataRevisionFanOutSuppression(PrivateArea? area, uint currentDataRevision)
@@ -269,13 +274,8 @@ internal static class ManagedWardRuntimeContexts
             return false;
         }
 
-        if (context.PendingDataRevisionFanOutBaseline == currentDataRevision)
-        {
-            return false;
-        }
-
         context.HasPendingDataRevisionFanOutSuppression = false;
-        return true;
+        return context.PendingDataRevisionFanOutBaseline != currentDataRevision;
     }
 
     internal static void ClearHoverText(PrivateArea? area)
@@ -308,11 +308,6 @@ internal static class WardRuntimeStateTracker
     internal static void Forget(PrivateArea? area)
     {
         ManagedWardRuntimeContexts.ClearObservedState(area);
-    }
-
-    internal static void Reset()
-    {
-        ManagedWardRuntimeContexts.ClearObservedStates();
     }
 
     internal static bool TryConsumeChanges(PrivateArea? area, out bool enabledChanged, out bool dataRevisionChanged)

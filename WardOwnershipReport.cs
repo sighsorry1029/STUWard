@@ -7,6 +7,20 @@ namespace STUWard;
 
 internal static partial class WardOwnership
 {
+    private const string ReportFileName = "STUWard.WardCountReport.yml";
+
+    private readonly struct ManagedWardScanEntry
+    {
+        internal ManagedWardScanEntry(long ownerPlayerId, string accountId)
+        {
+            OwnerPlayerId = ownerPlayerId;
+            AccountId = accountId ?? string.Empty;
+        }
+
+        internal long OwnerPlayerId { get; }
+        internal string AccountId { get; }
+    }
+
     internal static string GetReportFilePath()
     {
         return Path.Combine(Paths.ConfigPath, ReportFileName);
@@ -58,12 +72,13 @@ internal static partial class WardOwnership
         try
         {
             ReloadOverrides(force: false);
-            var scanEntries = new List<ManagedWardScanEntry>();
-            if (!TryBuildManagedWardScanEntries(scanEntries, out _))
+            var zdoMan = ZDOMan.instance;
+            if (zdoMan == null)
             {
                 return false;
             }
 
+            var scanEntries = BuildManagedWardScanEntries(zdoMan);
             var accounts = CollectReportWardCountsByAccount(scanEntries);
             accounts.Sort(static (left, right) =>
             {
@@ -95,11 +110,7 @@ internal static partial class WardOwnership
                 reportAccounts,
                 unresolvedPlayerEntries,
                 playerAccountMapGapEntries);
-            if (!ManagedWardReportBuilder.TryBuild(snapshot, out var buildResult))
-            {
-                return false;
-            }
-
+            var buildResult = ManagedWardReportBuilder.Build(snapshot);
             reportContents = buildResult.Contents;
             trackedAccounts = buildResult.TrackedAccounts;
             totalWards = buildResult.TotalWards;
@@ -111,6 +122,27 @@ internal static partial class WardOwnership
             Plugin.Log.LogWarning($"Failed to build ward report: {exception.Message}");
             return false;
         }
+    }
+
+    private static List<ManagedWardScanEntry> BuildManagedWardScanEntries(ZDOMan zdoMan)
+    {
+        var scannedZdoCount = PrepareManagedWardPrefabScan(zdoMan);
+        var scanEntries = new List<ManagedWardScanEntry>(scannedZdoCount);
+        for (var index = 0; index < scannedZdoCount; index++)
+        {
+            var zdo = ManagedWardPrefabScanBuffer[index];
+            if (!IsManagedWardZdo(zdo))
+            {
+                continue;
+            }
+
+            var ownerPlayerId = zdo.GetLong(ZDOVars.s_creator, 0L);
+            scanEntries.Add(new ManagedWardScanEntry(
+                ownerPlayerId,
+                NormalizeAccountIdValue(ResolveWardSteamAccountId(zdo, ownerPlayerId, string.Empty))));
+        }
+
+        return scanEntries;
     }
 
     private static List<KeyValuePair<string, int>> CollectReportWardCountsByAccount(IReadOnlyList<ManagedWardScanEntry> scanEntries)

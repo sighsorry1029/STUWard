@@ -5,27 +5,11 @@ internal readonly struct WardGuildIdentity
     internal WardGuildIdentity(int id, string name)
     {
         Id = id;
-        Name = name;
+        Name = name ?? string.Empty;
     }
 
     internal int Id { get; }
     internal string Name { get; }
-}
-
-internal readonly struct ManagedWardAccessEvaluation
-{
-    internal ManagedWardAccessEvaluation(bool allowed, string reason, bool permitted, bool sameGuild)
-    {
-        Allowed = allowed;
-        Reason = reason;
-        Permitted = permitted;
-        SameGuild = sameGuild;
-    }
-
-    internal bool Allowed { get; }
-    internal string Reason { get; }
-    internal bool Permitted { get; }
-    internal bool SameGuild { get; }
 }
 
 internal readonly struct ManagedWardAccessActor
@@ -58,32 +42,21 @@ internal readonly struct ManagedWardAccessSubject
 
 internal static class ManagedWardAccessPolicy
 {
-    internal static ManagedWardAccessEvaluation Evaluate(
+    internal static bool CanAccess(
         ManagedWardAccessActor actor,
         ManagedWardAccessSubject subject)
     {
         if (subject.OwnerPlayerId != 0L && subject.OwnerPlayerId == actor.PlayerId)
         {
-            return new ManagedWardAccessEvaluation(allowed: true, reason: "owner", permitted: subject.Permitted, sameGuild: false);
+            return true;
         }
 
         if (actor.IsAdminDebug)
         {
-            return new ManagedWardAccessEvaluation(allowed: true, reason: "admin_debug", permitted: subject.Permitted, sameGuild: false);
+            return true;
         }
 
-        var sameGuild = HasMatchingGuild(actor.PlayerGuild, subject.WardGuild);
-        if (sameGuild)
-        {
-            return new ManagedWardAccessEvaluation(allowed: true, reason: "guild", permitted: subject.Permitted, sameGuild: true);
-        }
-
-        if (subject.Permitted)
-        {
-            return new ManagedWardAccessEvaluation(allowed: true, reason: "permitted", permitted: true, sameGuild: false);
-        }
-
-        return new ManagedWardAccessEvaluation(allowed: false, reason: "denied", permitted: subject.Permitted, sameGuild: false);
+        return subject.Permitted || HasMatchingGuild(actor.PlayerGuild, subject.WardGuild);
     }
 
     internal static bool HasMatchingGuild(WardGuildIdentity playerGuild, WardGuildIdentity wardGuild)

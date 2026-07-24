@@ -8,36 +8,25 @@ internal static class ManagedWardMapStateService
     // - Live mutators update from the area.
     // - ZDO-only mutators update from the ZDO.
     // - Display-only requests do not mutate the visibility index.
-    internal static void NotifyLiveWardMutation(
+    internal static void NotifyWardMutation(
         PrivateArea? area,
         bool liveDisplayRefresh = false)
     {
-        WardMinimapVisibilityIndex.NotifyWardStateChanged(area);
-        WardMinimapPinsManager.NotifyWardDataMayHaveChanged(liveDisplayRefresh);
-    }
-
-    internal static void NotifyZdoWardMutation(
-        ZDO? zdo,
-        bool notifyPins = true,
-        bool liveDisplayRefresh = false)
-    {
-        WardMinimapVisibilityIndex.NotifyWardStateChanged(zdo);
-
-        if (notifyPins)
+        if (WardMinimapVisibilityIndex.NotifyWardStateChanged(area))
         {
             WardMinimapPinsManager.NotifyWardDataMayHaveChanged(liveDisplayRefresh);
         }
     }
 
-    internal static void NotifyWardObserved(ZDO? zdo, bool liveDisplayRefresh = false)
+    internal static void NotifyWardMutation(
+        ZDO? zdo,
+        bool notifyPins = true,
+        bool liveDisplayRefresh = false)
     {
-        if (zdo == null)
+        if (WardMinimapVisibilityIndex.NotifyWardStateChanged(zdo) && notifyPins)
         {
-            return;
+            WardMinimapPinsManager.NotifyWardDataMayHaveChanged(liveDisplayRefresh);
         }
-
-        WardMinimapVisibilityIndex.ObserveManagedWard(zdo);
-        WardMinimapPinsManager.NotifyWardDataMayHaveChanged(liveDisplayRefresh);
     }
 
     internal static void NotifyWardRemoved(ZDOID zdoId, bool liveDisplayRefresh = false)
@@ -56,8 +45,11 @@ internal static class ManagedWardMapStateService
         WardMinimapPinsManager.NotifyLocalWardDataMayHaveChanged(refreshImmediatelyIfVisible);
         if (ZNet.instance != null && ZNet.instance.IsServer())
         {
-            WardMinimapPinsManager.QueueServerViewerRefreshRecipients(
-                fullRefresh ? null : recipientPeerUids);
+            if (fullRefresh || recipientPeerUids == null || recipientPeerUids.Count > 0)
+            {
+                WardMinimapPinsManager.QueueServerViewerRefreshRecipients(
+                    fullRefresh ? null : recipientPeerUids);
+            }
         }
     }
 

@@ -95,12 +95,12 @@ internal static class WardPrivateAreaSafeAccess
         return permittedPlayers;
     }
 
-    internal static long[] GetPermittedPlayerIds(PrivateArea? area)
+    internal static IReadOnlyList<long> GetPermittedPlayerIds(PrivateArea? area)
     {
         return GetPermittedPlayerIds(GetZdo(area));
     }
 
-    internal static long[] GetPermittedPlayerIds(ZDO? zdo)
+    internal static IReadOnlyList<long> GetPermittedPlayerIds(ZDO? zdo)
     {
         if (zdo == null || !zdo.IsValid())
         {
@@ -135,7 +135,7 @@ internal static class WardPrivateAreaSafeAccess
         }
 
         var permittedPlayerIds = GetPermittedPlayerIds(zdo);
-        for (var index = 0; index < permittedPlayerIds.Length; index++)
+        for (var index = 0; index < permittedPlayerIds.Count; index++)
         {
             if (permittedPlayerIds[index] == playerId)
             {
@@ -199,11 +199,6 @@ internal static class WardPrivateAreaSafeAccess
     internal static void ResetRuntimeState()
     {
         PermittedPlayerIdsCache.Clear();
-    }
-
-    internal static void OnZNetAwake()
-    {
-        ResetRuntimeState();
     }
 
     private static long[] ReadPermittedPlayerIds(ZDO zdo)

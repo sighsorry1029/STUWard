@@ -146,26 +146,32 @@ internal static class WardPrivateAreaSafeAccess
         return false;
     }
 
-    internal static bool TogglePermittedPlayer(ZDO? zdo, long playerId, string playerName)
+    internal static bool AddPermittedPlayer(ZDO? zdo, long playerId, string playerName, out bool added)
     {
+        added = false;
         if (zdo == null || !zdo.IsValid() || playerId == 0L)
         {
             return false;
         }
 
         var permittedPlayers = GetPermittedPlayers(zdo);
-        var removed = permittedPlayers.RemoveAll(entry => entry.Key == playerId) > 0;
-        if (!removed)
+        for (var index = 0; index < permittedPlayers.Count; index++)
         {
-            if (permittedPlayers.Count >= MaxPermittedPlayers)
+            if (permittedPlayers[index].Key == playerId)
             {
-                return false;
+                // Add-only semantics make retries safe and never turn an add into a remove.
+                return true;
             }
-
-            permittedPlayers.Add(new KeyValuePair<long, string>(playerId, playerName ?? string.Empty));
         }
 
+        if (permittedPlayers.Count >= MaxPermittedPlayers)
+        {
+            return false;
+        }
+
+        permittedPlayers.Add(new KeyValuePair<long, string>(playerId, playerName ?? string.Empty));
         SetPermittedPlayers(zdo, permittedPlayers);
+        added = true;
         return true;
     }
 

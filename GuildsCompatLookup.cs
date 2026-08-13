@@ -71,7 +71,11 @@ internal static partial class GuildsCompat
             ZNet.instance.IsServer() &&
             TryGetSyncedGuildIdentity(playerId, accountId, playerName, out guild))
         {
-            CacheGuildLookup(playerId, guild.Id != 0, guild);
+            CacheGuildLookup(
+                playerId,
+                guild.Id != 0,
+                guild,
+                authoritativeNoGuild: guild.Id == 0);
             return guild.Id != 0;
         }
 
@@ -162,6 +166,63 @@ internal static partial class GuildsCompat
             normalizedAccountId,
             normalizedPlayerName,
             out guild);
+    }
+
+    internal static bool TryResolveCachedAuthoritativeGuildIdentity(
+        long playerId,
+        string accountId,
+        string playerName,
+        out WardGuildIdentity guild)
+    {
+        guild = default;
+        if (playerId == 0L)
+        {
+            return false;
+        }
+
+        var normalizedAccountId = WardOwnership.NormalizeAccountIdValue(accountId);
+        var normalizedPlayerName = playerName?.Trim() ?? string.Empty;
+        if (ZNet.instance != null &&
+            ZNet.instance.IsServer() &&
+            TryGetSyncedGuildIdentity(
+                playerId,
+                normalizedAccountId,
+                normalizedPlayerName,
+                out guild))
+        {
+            CacheGuildLookup(
+                playerId,
+                guild.Id != 0,
+                guild,
+                authoritativeNoGuild: guild.Id == 0);
+            return true;
+        }
+
+        if (TryGetCachedGuild(playerId, out guild))
+        {
+            return true;
+        }
+
+        if (IsCachedAuthoritativeNoGuild(playerId))
+        {
+            return true;
+        }
+
+        if (!TryResolveAuthoritativeGuildIdentity(
+                playerId,
+                normalizedAccountId,
+                normalizedPlayerName,
+                out guild))
+        {
+            return false;
+        }
+
+        CacheGuildLookup(
+            playerId,
+            guild.Id != 0,
+            guild,
+            authoritativeNoGuild: guild.Id == 0);
+        return true;
     }
 
     private static bool TryResolveGuildByPlayerFromApi(Player player, out WardGuildIdentity guild)
@@ -305,7 +366,27 @@ internal static partial class GuildsCompat
         return !cached.HasGuild;
     }
 
-    private static void CacheGuildLookup(long playerId, bool hasGuild, WardGuildIdentity guild)
+    private static bool IsCachedAuthoritativeNoGuild(long playerId)
+    {
+        if (!PlayerGuildCache.TryGetValue(playerId, out var cached))
+        {
+            return false;
+        }
+
+        if (cached.ExpiresAtUtc <= DateTime.UtcNow)
+        {
+            PlayerGuildCache.Remove(playerId);
+            return false;
+        }
+
+        return !cached.HasGuild && cached.AuthoritativeNoGuild;
+    }
+
+    private static void CacheGuildLookup(
+        long playerId,
+        bool hasGuild,
+        WardGuildIdentity guild,
+        bool authoritativeNoGuild = false)
     {
         if (playerId == 0L)
         {
@@ -316,7 +397,8 @@ internal static partial class GuildsCompat
             hasGuild && guild.Id != 0,
             guild.Id,
             guild.Name ?? string.Empty,
-            DateTime.UtcNow + GuildLookupCacheDuration);
+            DateTime.UtcNow + GuildLookupCacheDuration,
+            authoritativeNoGuild && !hasGuild);
     }
 
     private static bool TryParseGuild(object? guildObject, out WardGuildIdentity guild)

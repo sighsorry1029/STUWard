@@ -54,30 +54,24 @@ internal readonly struct WardRestrictionDefinition
 internal readonly struct WardConfiguration
 {
     internal WardConfiguration(
-        bool showAreaMarker,
-        float areaMarkerSpeedMultiplier,
-        float areaMarkerAlpha,
         float radius,
-        float autoCloseDelay,
+        bool areaMarkerRotationEnabled,
+        bool autoCloseEnabled,
         bool warningSoundEnabled,
         bool warningFlashEnabled,
         WardRestrictionOptions restrictions = WardRestrictionOptions.All)
     {
-        ShowAreaMarker = showAreaMarker;
-        AreaMarkerSpeedMultiplier = areaMarkerSpeedMultiplier;
-        AreaMarkerAlpha = areaMarkerAlpha;
         Radius = radius;
-        AutoCloseDelay = autoCloseDelay;
+        AreaMarkerRotationEnabled = areaMarkerRotationEnabled;
+        AutoCloseEnabled = autoCloseEnabled;
         WarningSoundEnabled = warningSoundEnabled;
         WarningFlashEnabled = warningFlashEnabled;
         Restrictions = restrictions;
     }
 
-    internal bool ShowAreaMarker { get; }
-    internal float AreaMarkerSpeedMultiplier { get; }
-    internal float AreaMarkerAlpha { get; }
     internal float Radius { get; }
-    internal float AutoCloseDelay { get; }
+    internal bool AreaMarkerRotationEnabled { get; }
+    internal bool AutoCloseEnabled { get; }
     internal bool WarningSoundEnabled { get; }
     internal bool WarningFlashEnabled { get; }
     internal WardRestrictionOptions Restrictions { get; }
@@ -111,8 +105,7 @@ internal readonly struct CachedAreaMarkerVisualState
         int firstSegmentInstanceId,
         int lastSegmentInstanceId,
         float maxRadius,
-        float radius,
-        float areaMarkerAlpha)
+        float radius)
     {
         MarkerInstanceId = markerInstanceId;
         SegmentCount = segmentCount;
@@ -120,7 +113,6 @@ internal readonly struct CachedAreaMarkerVisualState
         LastSegmentInstanceId = lastSegmentInstanceId;
         MaxRadius = maxRadius;
         Radius = radius;
-        AreaMarkerAlpha = areaMarkerAlpha;
     }
 
     internal int MarkerInstanceId { get; }
@@ -129,7 +121,6 @@ internal readonly struct CachedAreaMarkerVisualState
     internal int LastSegmentInstanceId { get; }
     internal float MaxRadius { get; }
     internal float Radius { get; }
-    internal float AreaMarkerAlpha { get; }
 }
 
 internal enum WardConfigurationRequestResultCode
@@ -147,78 +138,72 @@ internal readonly struct WardConfigurationRequestSubmission
         bool isPending,
         long requestId,
         WardConfigurationRequestResultCode resultCode,
-        WardConfiguration configuration,
-        bool showOverlapMessage)
+        WardConfiguration configuration)
     {
         IsPending = isPending;
         RequestId = requestId;
         ResultCode = resultCode;
         Configuration = configuration;
-        ShowOverlapMessage = showOverlapMessage;
     }
 
     internal bool IsPending { get; }
     internal long RequestId { get; }
     internal WardConfigurationRequestResultCode ResultCode { get; }
     internal WardConfiguration Configuration { get; }
-    internal bool ShowOverlapMessage { get; }
 }
 
 internal readonly struct WardConfigurationUpdateResult
 {
     internal WardConfigurationUpdateResult(
         WardConfigurationRequestResultCode resultCode,
-        WardConfiguration configuration,
-        bool showOverlapMessage)
+        WardConfiguration configuration)
     {
         ResultCode = resultCode;
         Configuration = configuration;
-        ShowOverlapMessage = showOverlapMessage;
     }
 
     internal WardConfigurationRequestResultCode ResultCode { get; }
     internal WardConfiguration Configuration { get; }
-    internal bool ShowOverlapMessage { get; }
 }
 
 internal static class WardSettings
 {
     internal const int ManagedAreaMarkerSegments = 36;
     private const float ManagedAreaMarkerSegmentLengthMultiplier = 2f;
-    internal const float MinAreaMarkerSpeedMultiplier = 0f;
-    internal const float MaxAreaMarkerSpeedMultiplier = 1f;
-    internal const float DefaultAreaMarkerSpeedMultiplier = 0.5f;
-    internal const float MinAreaMarkerAlpha = 0f;
-    internal const float MaxAreaMarkerAlpha = 1f;
-    internal const float DefaultAreaMarkerAlpha = 0.5f;
     internal const float MinRadius = 8f;
     internal const float MaxRadiusLimit = 64f;
     internal const float DefaultMaxRadius = 32f;
-    internal const float MinAutoCloseDelay = 0f;
-    internal const float MaxAutoCloseDelay = 10f;
-    internal const float DefaultAutoCloseDelay = 4f;
+    internal const bool DefaultAreaMarkerRotationEnabled = true;
+    internal const bool DefaultAutoCloseEnabled = true;
     internal const bool DefaultWarningSoundEnabled = true;
     internal const bool DefaultWarningFlashEnabled = true;
     private const float WarningEffectCooldownSeconds = 0.5f;
+    private const float AreaMarkerBoundaryFlashSeconds = 0.5f;
+    private const float AreaMarkerBoundaryHoldDistance = 0.75f;
+    private const float PlacementBlockerHighlightSeconds = 1.5f;
 
     private const string RpcUpdateSettings = "STUWard_UpdateSettings";
     private const string RpcUpdateSettingsResponse = "STUWard_UpdateSettingsResponse";
     private const string RpcRemovePermitted = "STUWard_RemovePermitted";
-    private const string ShowAreaMarkerKey = "stuw_show_area_marker";
-    private const string AreaMarkerSpeedMultiplierKey = "stuw_area_marker_speed_multiplier";
-    private const string AreaMarkerAlphaKey = "stuw_area_marker_alpha";
-    private const string RadiusKey = "stuw_radius";
-    private const string AutoCloseDelayKey = "stuw_auto_close_delay";
+    internal const string RadiusKey = "stuw_radius";
+    private const string AreaMarkerRotationEnabledKey = "stuw_area_marker_rotation_enabled";
+    private const string AutoCloseEnabledKey = "stuw_auto_close_enabled";
     private const string WarningSoundEnabledKey = "stuw_warning_sound_enabled";
     private const string WarningFlashEnabledKey = "stuw_warning_flash_enabled";
     private const string RestrictionOptionsKey = "stuw_restriction_options";
-    private const float FallbackAreaMarkerSpeed = 0.1f;
     private const float MinimumAreaMarkerBrightness = 0.35f;
-    private const float AreaMarkerBrightnessGamma = 1.8f;
-    private const float MinimumAreaMarkerBrightnessInput = 0.5f;
+    private const float FallbackNativeAreaMarkerSpeed = 0.1f;
+    private const float EnabledAreaMarkerSpeedMultiplier = 0.5f;
     private static readonly string[] AreaMarkerColorProperties = { "_Color", "_BaseColor", "_TintColor" };
 
     private static readonly MaterialPropertyBlock AreaMarkerPropertyBlock = new();
+    private static readonly List<PrivateArea> BoundaryFlashPreviousCandidates = new();
+    private static readonly List<PrivateArea> BoundaryFlashCurrentCandidates = new();
+    private static readonly HashSet<int> BoundaryFlashCandidateIds = new();
+    private static readonly List<PrivateArea> ActiveAreaMarkerBrightnessAreas = new();
+    private static bool _hasBoundaryFlashPlayerPosition;
+    private static int _boundaryFlashPlayerInstanceId;
+    private static Vector3 _boundaryFlashPlayerPosition;
     private static readonly WardRestrictionDefinition[] RestrictionDefinitionValues =
     {
         new(
@@ -329,32 +314,18 @@ internal static class WardSettings
         return WithRestrictions(configuration, restrictions);
     }
 
-    internal static WardConfiguration WithAreaMarkerSpeedMultiplier(WardConfiguration configuration, float value)
+    internal static WardConfiguration WithAutoCloseEnabled(WardConfiguration configuration, bool enabled)
     {
         return CopyConfiguration(
             configuration,
-            areaMarkerSpeedMultiplier: Mathf.Clamp(value, MinAreaMarkerSpeedMultiplier, MaxAreaMarkerSpeedMultiplier));
+            autoCloseEnabled: enabled);
     }
 
-    internal static WardConfiguration WithAreaMarkerAlpha(WardConfiguration configuration, float value)
+    internal static WardConfiguration WithAreaMarkerRotationEnabled(WardConfiguration configuration, bool enabled)
     {
         return CopyConfiguration(
             configuration,
-            areaMarkerAlpha: Mathf.Clamp(value, MinAreaMarkerAlpha, MaxAreaMarkerAlpha));
-    }
-
-    internal static WardConfiguration WithRadius(WardConfiguration configuration, float value)
-    {
-        return CopyConfiguration(
-            configuration,
-            radius: Mathf.Clamp(value, MinRadius, MaxRadius));
-    }
-
-    internal static WardConfiguration WithAutoCloseDelay(WardConfiguration configuration, float value)
-    {
-        return CopyConfiguration(
-            configuration,
-            autoCloseDelay: Mathf.Clamp(value, MinAutoCloseDelay, MaxAutoCloseDelay));
+            areaMarkerRotationEnabled: enabled);
     }
 
     internal static WardConfiguration WithRestrictions(WardConfiguration configuration, WardRestrictionOptions restrictions)
@@ -366,20 +337,17 @@ internal static class WardSettings
 
     private static WardConfiguration CopyConfiguration(
         WardConfiguration configuration,
-        float? areaMarkerSpeedMultiplier = null,
-        float? areaMarkerAlpha = null,
         float? radius = null,
-        float? autoCloseDelay = null,
+        bool? areaMarkerRotationEnabled = null,
+        bool? autoCloseEnabled = null,
         bool? warningSoundEnabled = null,
         bool? warningFlashEnabled = null,
         WardRestrictionOptions? restrictions = null)
     {
         return new WardConfiguration(
-            configuration.ShowAreaMarker,
-            areaMarkerSpeedMultiplier ?? configuration.AreaMarkerSpeedMultiplier,
-            areaMarkerAlpha ?? configuration.AreaMarkerAlpha,
             radius ?? configuration.Radius,
-            autoCloseDelay ?? configuration.AutoCloseDelay,
+            areaMarkerRotationEnabled ?? configuration.AreaMarkerRotationEnabled,
+            autoCloseEnabled ?? configuration.AutoCloseEnabled,
             warningSoundEnabled ?? configuration.WarningSoundEnabled,
             warningFlashEnabled ?? configuration.WarningFlashEnabled,
             restrictions ?? configuration.Restrictions);
@@ -401,25 +369,42 @@ internal static class WardSettings
         return Plugin.RestrictionModes.TryGetValue(restriction, out var config) ? config : null;
     }
 
-    internal static void CaptureAreaDefaults(PrivateArea area)
+    internal static void CaptureNativeAreaMarkerSpeed(PrivateArea area)
     {
-        var marker = area.m_areaMarker;
         var context = ManagedWardRuntimeContexts.GetOrCreate(area);
-        context.DefaultAreaMarkerSpeed = marker != null ? Mathf.Max(marker.m_speed, 0f) : FallbackAreaMarkerSpeed;
-        context.HasDefaultAreaMarkerSpeed = true;
+        if (context.HasNativeAreaMarkerSpeed)
+        {
+            return;
+        }
+
+        var marker = area.m_areaMarker;
+        var speed = marker != null ? marker.m_speed : FallbackNativeAreaMarkerSpeed;
+        if (float.IsNaN(speed) || float.IsInfinity(speed))
+        {
+            speed = FallbackNativeAreaMarkerSpeed;
+        }
+
+        context.NativeAreaMarkerSpeed = speed;
+        context.HasNativeAreaMarkerSpeed = true;
     }
 
-    internal static void InitializeArea(PrivateArea area)
+    private static float GetAreaMarkerSpeed(PrivateArea area, bool rotationEnabled)
     {
-        var context = ManagedWardRuntimeContexts.GetOrCreate(area);
-        if (!context.HasDefaultAreaMarkerSpeed)
+        if (!rotationEnabled)
         {
-            CaptureAreaDefaults(area);
+            return 0f;
         }
+
+        var nativeSpeed = ManagedWardRuntimeContexts.TryGet(area, out var context) &&
+                          context.HasNativeAreaMarkerSpeed
+            ? context.NativeAreaMarkerSpeed
+            : FallbackNativeAreaMarkerSpeed;
+        return nativeSpeed * EnabledAreaMarkerSpeedMultiplier;
     }
 
     internal static void HandleMaxRadiusChanged()
     {
+        ClampStoredRadiiToServerMaximum();
         ManagedWardRuntimeContexts.ClearConfigurationCaches();
 
         var allAreas = PrivateArea.m_allAreas;
@@ -443,9 +428,42 @@ internal static class WardSettings
         ManagedWardMapStateService.InvalidateProjection();
     }
 
+    internal static void ClampStoredRadiiToServerMaximum()
+    {
+        if (ZNet.instance == null || !ZNet.instance.IsServer() || ZDOMan.instance == null)
+        {
+            return;
+        }
+
+        var maximumRadius = MaxRadius;
+        foreach (var zdo in ZDOMan.instance.m_objectsByID.Values)
+        {
+            if (zdo == null ||
+                !WardOwnership.IsManagedWardZdo(zdo) ||
+                !WardOwnership.IsAcceptedManagedWard(zdo))
+            {
+                continue;
+            }
+
+            var storedRadius = GetStoredRadius(zdo);
+            var storedRadiusIsCanonical = zdo.GetFloat(RadiusKey, out var rawStoredRadius) &&
+                                          !float.IsNaN(rawStoredRadius) &&
+                                          !float.IsInfinity(rawStoredRadius) &&
+                                          Mathf.Approximately(rawStoredRadius, storedRadius);
+            var clampedRadius = Mathf.Min(storedRadius, maximumRadius);
+            if ((storedRadiusIsCanonical && storedRadius <= maximumRadius) ||
+                !WardOwnership.TryClaimManagedWardMutationOwnership(zdo))
+            {
+                continue;
+            }
+
+            zdo.Set(RadiusKey, clampedRadius);
+            WardOwnership.CompleteAuthoritativeManagedWardMutation(zdo);
+        }
+    }
+
     internal static WardConfiguration GetConfiguration(PrivateArea area)
     {
-        InitializeArea(area);
         var zdo = GetZdo(area);
         var maxRadius = MaxRadius;
         var forcedRestrictions = ForcedRestrictions;
@@ -486,16 +504,11 @@ internal static class WardSettings
         float maxRadius,
         WardRestrictionOptions forcedRestrictions)
     {
-        var showAreaMarker = zdo?.GetBool(ShowAreaMarkerKey, true) ?? true;
-        var areaMarkerSpeedMultiplier = Mathf.Clamp01(
-            zdo?.GetFloat(AreaMarkerSpeedMultiplierKey, DefaultAreaMarkerSpeedMultiplier) ?? DefaultAreaMarkerSpeedMultiplier);
-        var areaMarkerAlpha = Mathf.Clamp01(
-            zdo?.GetFloat(AreaMarkerAlphaKey, DefaultAreaMarkerAlpha) ?? DefaultAreaMarkerAlpha);
-        var radius = Mathf.Clamp(zdo?.GetFloat(RadiusKey, MinRadius) ?? MinRadius, MinRadius, maxRadius);
-        var autoCloseDelay = Mathf.Clamp(
-            zdo?.GetFloat(AutoCloseDelayKey, DefaultAutoCloseDelay) ?? DefaultAutoCloseDelay,
-            MinAutoCloseDelay,
-            MaxAutoCloseDelay);
+        var radius = Mathf.Min(GetStoredRadius(zdo), maxRadius);
+        var areaMarkerRotationEnabled = zdo?.GetBool(
+            AreaMarkerRotationEnabledKey,
+            DefaultAreaMarkerRotationEnabled) ?? DefaultAreaMarkerRotationEnabled;
+        var autoCloseEnabled = zdo?.GetBool(AutoCloseEnabledKey, DefaultAutoCloseEnabled) ?? DefaultAutoCloseEnabled;
         var warningSoundEnabled = zdo?.GetBool(WarningSoundEnabledKey, DefaultWarningSoundEnabled) ?? DefaultWarningSoundEnabled;
         var warningFlashEnabled = zdo?.GetBool(WarningFlashEnabledKey, DefaultWarningFlashEnabled) ?? DefaultWarningFlashEnabled;
         var restrictions = ApplyForcedRestrictions(
@@ -503,11 +516,9 @@ internal static class WardSettings
             forcedRestrictions);
 
         return new WardConfiguration(
-            showAreaMarker,
-            areaMarkerSpeedMultiplier,
-            areaMarkerAlpha,
             radius,
-            autoCloseDelay,
+            areaMarkerRotationEnabled,
+            autoCloseEnabled,
             warningSoundEnabled,
             warningFlashEnabled,
             restrictions);
@@ -532,7 +543,6 @@ internal static class WardSettings
             return;
         }
 
-        InitializeArea(area);
         var radiusChanged = !Mathf.Approximately(area.m_radius, configuration.Radius);
         if (radiusChanged)
         {
@@ -546,8 +556,7 @@ internal static class WardSettings
         }
         else
         {
-            var showAreaMarker = ShouldShowAreaMarker(area, configuration);
-            var desiredSpeed = GetDefaultAreaMarkerSpeed(area) * configuration.AreaMarkerSpeedMultiplier;
+            var markerVisible = ShouldShowAreaMarker(area);
             if (marker.m_nrOfSegments != ManagedAreaMarkerSegments)
             {
                 marker.m_nrOfSegments = ManagedAreaMarkerSegments;
@@ -558,15 +567,16 @@ internal static class WardSettings
                 marker.m_radius = configuration.Radius;
             }
 
-            if (!Mathf.Approximately(marker.m_speed, desiredSpeed))
+            var markerSpeed = GetAreaMarkerSpeed(area, configuration.AreaMarkerRotationEnabled);
+            if (!Mathf.Approximately(marker.m_speed, markerSpeed))
             {
-                marker.m_speed = desiredSpeed;
+                marker.m_speed = markerSpeed;
             }
 
-            ApplyManagedAreaMarkerVisibility(area, showAreaMarker);
+            ApplyManagedAreaMarkerVisibility(area, markerVisible);
             if (ShouldRefreshAreaMarkerVisuals(area, marker, configuration))
             {
-                ApplyAreaMarkerVisuals(marker, configuration);
+                ApplyAreaMarkerVisuals(area, marker, configuration);
                 CacheAreaMarkerVisualState(area, marker, configuration);
             }
         }
@@ -586,8 +596,9 @@ internal static class WardSettings
             return;
         }
 
-        InitializeArea(area);
-        var previewRadius = MaxRadius;
+        var player = Player.m_localPlayer;
+        _ = WardAccess.TryGetAutomaticPlacementRadius(player, area.transform.position, out var availableRadius);
+        var previewRadius = Mathf.Clamp(availableRadius, MinRadius, MaxRadius);
         if (!Mathf.Approximately(area.m_radius, previewRadius))
         {
             area.m_radius = previewRadius;
@@ -607,16 +618,21 @@ internal static class WardSettings
         {
             area.m_areaMarker.m_radius = previewRadius;
         }
+
+        if (!Mathf.Approximately(area.m_areaMarker.m_speed, 0f))
+        {
+            area.m_areaMarker.m_speed = 0f;
+        }
     }
 
     internal static bool ShouldShowAreaMarker(PrivateArea area)
     {
-        return ShouldShowAreaMarker(area, GetConfiguration(area));
+        return ShouldNormallyShowAreaMarker(area) || IsPlacementBlockerHighlightActive(area);
     }
 
-    internal static bool ShouldShowAreaMarker(PrivateArea area, WardConfiguration configuration)
+    private static bool ShouldNormallyShowAreaMarker(PrivateArea area)
     {
-        return Player.IsPlacementGhost(area.gameObject) || (area.IsEnabled() && configuration.ShowAreaMarker);
+        return Player.IsPlacementGhost(area.gameObject) || area.IsEnabled();
     }
 
     internal static void ShowManagedAreaMarker(PrivateArea area)
@@ -635,6 +651,326 @@ internal static class WardSettings
         ManagedWardRuntimeContexts.ClearAreaMarkerVisualState(area);
     }
 
+    internal static void ResetLocalBoundaryFlashState()
+    {
+        _hasBoundaryFlashPlayerPosition = false;
+        _boundaryFlashPlayerInstanceId = 0;
+        _boundaryFlashPlayerPosition = default;
+        BoundaryFlashPreviousCandidates.Clear();
+        BoundaryFlashCurrentCandidates.Clear();
+        BoundaryFlashCandidateIds.Clear();
+        ActiveAreaMarkerBrightnessAreas.Clear();
+    }
+
+    internal static void HandleLocalBoundaryBrightenModeChanged()
+    {
+        var now = Time.unscaledTime;
+        for (var index = ActiveAreaMarkerBrightnessAreas.Count - 1; index >= 0; index--)
+        {
+            var area = ActiveAreaMarkerBrightnessAreas[index];
+            if (area == null || !ManagedWardRuntimeContexts.TryGet(area, out var context))
+            {
+                ActiveAreaMarkerBrightnessAreas.RemoveAt(index);
+                continue;
+            }
+
+            context.AreaMarkerBoundaryFlashUntil = float.NegativeInfinity;
+            if (now < context.AreaMarkerPlacementHighlightUntil)
+            {
+                continue;
+            }
+
+            context.AreaMarkerPlacementHighlightUntil = float.NegativeInfinity;
+            ActiveAreaMarkerBrightnessAreas.RemoveAt(index);
+            // Presence in the tracked list means the last applied marker state may
+            // still be bright even when its deadline expired just before this event.
+            RefreshAreaMarkerVisuals(area);
+        }
+
+        ResetBoundaryTrackingState();
+    }
+
+    internal static void UpdateLocalBoundaryFlash()
+    {
+        var player = Player.m_localPlayer;
+        var playerId = player != null ? player.GetPlayerID() : 0L;
+        var mode = GetBoundaryBrightenMode();
+        UpdateActiveAreaMarkerBrightness(playerId, mode);
+
+        if (player == null)
+        {
+            ResetBoundaryTrackingState();
+            return;
+        }
+
+        if (player.IsTeleporting() || player.IsDead())
+        {
+            // Seed again after teleport/death so relocation is not mistaken for a
+            // physical boundary crossing on the first playable frame.
+            ResetBoundaryTrackingState();
+            return;
+        }
+
+        if (!IsBoundaryBrightenModeEnabled(mode))
+        {
+            ResetBoundaryTrackingState();
+            return;
+        }
+
+        var playerInstanceId = player.GetInstanceID();
+        var currentPosition = player.transform.position;
+        WardAccess.FillCandidateManagedWards(
+            currentPosition,
+            AreaMarkerBoundaryHoldDistance,
+            requireEnabled: true,
+            BoundaryFlashCurrentCandidates);
+        MaintainBoundaryBrightness(BoundaryFlashCurrentCandidates, currentPosition, playerId, mode);
+
+        if (!_hasBoundaryFlashPlayerPosition || _boundaryFlashPlayerInstanceId != playerInstanceId)
+        {
+            _hasBoundaryFlashPlayerPosition = true;
+            _boundaryFlashPlayerInstanceId = playerInstanceId;
+            _boundaryFlashPlayerPosition = currentPosition;
+            return;
+        }
+
+        var previousPosition = _boundaryFlashPlayerPosition;
+        _boundaryFlashPlayerPosition = currentPosition;
+        var deltaX = currentPosition.x - previousPosition.x;
+        var deltaZ = currentPosition.z - previousPosition.z;
+        var movementSquared = (deltaX * deltaX) + (deltaZ * deltaZ);
+        if (movementSquared <= 0.0001f)
+        {
+            return;
+        }
+
+        // Treat large discontinuities as teleports rather than walking across every
+        // intervening ward. Normal movement remains far below this per-frame limit.
+        var maximumSampleDistance = Mathf.Max(MinRadius, MaxRadius) * 2f;
+        if (movementSquared > maximumSampleDistance * maximumSampleDistance)
+        {
+            return;
+        }
+
+        WardAccess.FillCandidateManagedWards(
+            previousPosition,
+            0f,
+            requireEnabled: true,
+            BoundaryFlashPreviousCandidates);
+
+        BoundaryFlashCandidateIds.Clear();
+        DetectBoundaryCrossings(BoundaryFlashPreviousCandidates, previousPosition, currentPosition, playerId, mode);
+        DetectBoundaryCrossings(BoundaryFlashCurrentCandidates, previousPosition, currentPosition, playerId, mode);
+    }
+
+    private static void MaintainBoundaryBrightness(
+        IReadOnlyList<PrivateArea> candidates,
+        Vector3 playerPosition,
+        long playerId,
+        Plugin.BoundaryBrightenMode mode)
+    {
+        for (var index = 0; index < candidates.Count; index++)
+        {
+            var area = candidates[index];
+            if (area == null ||
+                !area.IsEnabled() ||
+                !ShouldBrightenBoundary(area, playerId, mode))
+            {
+                continue;
+            }
+
+            var areaPosition = area.transform.position;
+            var deltaX = playerPosition.x - areaPosition.x;
+            var deltaZ = playerPosition.z - areaPosition.z;
+            var distanceSquared = (deltaX * deltaX) + (deltaZ * deltaZ);
+            var radius = Mathf.Max(0f, area.m_radius);
+            var innerRadius = Mathf.Max(0f, radius - AreaMarkerBoundaryHoldDistance);
+            var outerRadius = radius + AreaMarkerBoundaryHoldDistance;
+            if (distanceSquared < innerRadius * innerRadius || distanceSquared > outerRadius * outerRadius)
+            {
+                continue;
+            }
+
+            // Reuse the crossing flash as a short lease. While the player remains
+            // on the boundary, only its deadline is extended; marker renderers are
+            // refreshed once on entry and once after the player leaves.
+            StartBoundaryFlash(area);
+        }
+    }
+
+    private static void DetectBoundaryCrossings(
+        IReadOnlyList<PrivateArea> candidates,
+        Vector3 previousPosition,
+        Vector3 currentPosition,
+        long playerId,
+        Plugin.BoundaryBrightenMode mode)
+    {
+        for (var index = 0; index < candidates.Count; index++)
+        {
+            var area = candidates[index];
+            if (area == null ||
+                !area.IsEnabled() ||
+                !BoundaryFlashCandidateIds.Add(area.GetInstanceID()) ||
+                !ShouldBrightenBoundary(area, playerId, mode) ||
+                area.IsInside(previousPosition, 0f) == area.IsInside(currentPosition, 0f))
+            {
+                continue;
+            }
+
+            StartBoundaryFlash(area);
+        }
+    }
+
+    private static void StartBoundaryFlash(PrivateArea area)
+    {
+        if (area.m_areaMarker == null || !ShouldNormallyShowAreaMarker(area))
+        {
+            return;
+        }
+
+        var context = ManagedWardRuntimeContexts.GetOrCreate(area);
+        var now = Time.unscaledTime;
+        var wasActive = IsAreaMarkerBrightnessActive(area, context, now);
+        context.AreaMarkerBoundaryFlashUntil = now + AreaMarkerBoundaryFlashSeconds;
+        EnsureAreaMarkerBrightnessTracked(area);
+        if (wasActive)
+        {
+            return;
+        }
+
+        RefreshAreaMarkerVisuals(area);
+    }
+
+    internal static void HighlightPlacementBlockingWard(PrivateArea? area)
+    {
+        if (area == null ||
+            area.m_areaMarker == null ||
+            !WardAccess.IsManagedWard(area, requireEnabled: false))
+        {
+            return;
+        }
+
+        var context = ManagedWardRuntimeContexts.GetOrCreate(area);
+        var now = Time.unscaledTime;
+        var wasActive = IsAreaMarkerBrightnessActive(area, context, now);
+        context.AreaMarkerPlacementHighlightUntil = now + PlacementBlockerHighlightSeconds;
+        EnsureAreaMarkerBrightnessTracked(area);
+        if (!wasActive)
+        {
+            RefreshAreaMarkerVisuals(area);
+        }
+    }
+
+    private static void UpdateActiveAreaMarkerBrightness(long playerId, Plugin.BoundaryBrightenMode mode)
+    {
+        var now = Time.unscaledTime;
+        for (var index = ActiveAreaMarkerBrightnessAreas.Count - 1; index >= 0; index--)
+        {
+            var area = ActiveAreaMarkerBrightnessAreas[index];
+            if (area == null || !ManagedWardRuntimeContexts.TryGet(area, out var context))
+            {
+                ActiveAreaMarkerBrightnessAreas.RemoveAt(index);
+                continue;
+            }
+
+            var boundaryActive = area.IsEnabled() &&
+                                 now < context.AreaMarkerBoundaryFlashUntil &&
+                                 ShouldNormallyShowAreaMarker(area) &&
+                                 ShouldBrightenBoundary(area, playerId, mode);
+            if (!boundaryActive)
+            {
+                context.AreaMarkerBoundaryFlashUntil = float.NegativeInfinity;
+            }
+
+            var placementHighlightActive = now < context.AreaMarkerPlacementHighlightUntil;
+            if (boundaryActive || placementHighlightActive)
+            {
+                continue;
+            }
+
+            context.AreaMarkerBoundaryFlashUntil = float.NegativeInfinity;
+            context.AreaMarkerPlacementHighlightUntil = float.NegativeInfinity;
+            ActiveAreaMarkerBrightnessAreas.RemoveAt(index);
+            RefreshAreaMarkerVisuals(area);
+        }
+    }
+
+    private static void EnsureAreaMarkerBrightnessTracked(PrivateArea area)
+    {
+        if (!ActiveAreaMarkerBrightnessAreas.Contains(area))
+        {
+            ActiveAreaMarkerBrightnessAreas.Add(area);
+        }
+    }
+
+    private static void ResetBoundaryTrackingState()
+    {
+        _hasBoundaryFlashPlayerPosition = false;
+        _boundaryFlashPlayerInstanceId = 0;
+        _boundaryFlashPlayerPosition = default;
+        BoundaryFlashPreviousCandidates.Clear();
+        BoundaryFlashCurrentCandidates.Clear();
+        BoundaryFlashCandidateIds.Clear();
+    }
+
+    private static void RefreshAreaMarkerVisuals(PrivateArea area)
+    {
+        InvalidateAreaMarkerVisuals(area);
+        ApplyAreaState(ManagedWardRef.FromArea(area));
+    }
+
+    private static bool IsAreaMarkerBrightnessActive(PrivateArea area)
+    {
+        return ManagedWardRuntimeContexts.TryGet(area, out var context) &&
+               IsAreaMarkerBrightnessActive(area, context, Time.unscaledTime);
+    }
+
+    private static bool IsAreaMarkerBrightnessActive(
+        PrivateArea area,
+        ManagedWardRuntimeContext context,
+        float now)
+    {
+        return (area.IsEnabled() && now < context.AreaMarkerBoundaryFlashUntil) ||
+               now < context.AreaMarkerPlacementHighlightUntil;
+    }
+
+    private static bool IsPlacementBlockerHighlightActive(PrivateArea area)
+    {
+        return ManagedWardRuntimeContexts.TryGet(area, out var context) &&
+               Time.unscaledTime < context.AreaMarkerPlacementHighlightUntil;
+    }
+
+    private static Plugin.BoundaryBrightenMode GetBoundaryBrightenMode()
+    {
+        return Plugin.WardBoundaryBrightenMode?.Value ?? Plugin.BoundaryBrightenMode.All;
+    }
+
+    private static bool IsBoundaryBrightenModeEnabled(Plugin.BoundaryBrightenMode mode)
+    {
+        return mode is Plugin.BoundaryBrightenMode.TrustedOnly or
+            Plugin.BoundaryBrightenMode.UntrustedOnly or
+            Plugin.BoundaryBrightenMode.All;
+    }
+
+    private static bool ShouldBrightenBoundary(
+        PrivateArea area,
+        long playerId,
+        Plugin.BoundaryBrightenMode mode)
+    {
+        if (playerId == 0L)
+        {
+            return false;
+        }
+
+        return mode switch
+        {
+            Plugin.BoundaryBrightenMode.All => true,
+            Plugin.BoundaryBrightenMode.TrustedOnly => WardAccess.HasManagedWardTrust(area, playerId),
+            Plugin.BoundaryBrightenMode.UntrustedOnly => !WardAccess.HasManagedWardTrust(area, playerId),
+            _ => false
+        };
+    }
+
     internal static float GetRadius(PrivateArea area)
     {
         return GetConfiguration(area).Radius;
@@ -647,21 +983,42 @@ internal static class WardSettings
 
     internal static float GetStoredRadius(ZDO? zdo, float defaultRadius = MinRadius)
     {
-        return Mathf.Clamp(zdo?.GetFloat(RadiusKey, defaultRadius) ?? defaultRadius, MinRadius, MaxRadius);
+        var storedRadius = zdo?.GetFloat(RadiusKey, defaultRadius) ?? defaultRadius;
+        if (float.IsNaN(storedRadius) || float.IsInfinity(storedRadius))
+        {
+            storedRadius = defaultRadius;
+        }
+
+        return Mathf.Clamp(storedRadius, MinRadius, MaxRadius);
     }
 
-    internal static bool TryGetAutoCloseDoorDelay(Vector3 point, out float delay)
+    internal static bool TryAssignAuthoritativePlacementRadius(ZDO? zdo, out float radius)
     {
-        var allAreas = WardAccess.GetCandidateManagedWards(point, 0f, requireEnabled: true);
-        if (allAreas.Count == 0)
+        radius = MinRadius;
+        if (zdo == null ||
+            !zdo.IsValid() ||
+            ZNet.instance == null ||
+            !ZNet.instance.IsServer() ||
+            zdo.GetOwner() != ZDOMan.GetSessionID())
         {
-            delay = 0f;
             return false;
         }
 
-        var found = false;
-        var selectedDelay = float.MaxValue;
+        var maxRadius = GetMaxNonOverlappingRadius(zdo);
+        if (float.IsNaN(maxRadius) || float.IsInfinity(maxRadius) || maxRadius < MinRadius)
+        {
+            radius = maxRadius;
+            return false;
+        }
 
+        radius = Mathf.Clamp(maxRadius, MinRadius, MaxRadius);
+        zdo.Set(RadiusKey, radius);
+        return true;
+    }
+
+    internal static bool IsDoorAutoCloseEnabledAt(Vector3 point)
+    {
+        var allAreas = WardAccess.GetCandidateManagedWards(point, 0f, requireEnabled: true);
         foreach (var area in allAreas)
         {
             if (area == null || !area.IsInside(point, 0f))
@@ -669,21 +1026,13 @@ internal static class WardSettings
                 continue;
             }
 
-            var configuration = GetConfiguration(area);
-            if (configuration.AutoCloseDelay <= 0f)
+            if (GetConfiguration(area).AutoCloseEnabled)
             {
-                continue;
-            }
-
-            found = true;
-            if (configuration.AutoCloseDelay < selectedDelay)
-            {
-                selectedDelay = configuration.AutoCloseDelay;
+                return true;
             }
         }
 
-        delay = found ? selectedDelay : 0f;
-        return found;
+        return false;
     }
 
     internal static bool HandleManagedFlashEffect(PrivateArea area)
@@ -794,11 +1143,6 @@ internal static class WardSettings
         return CopyConfiguration(configuration, warningFlashEnabled: enabled);
     }
 
-    internal static float GetMaxNonOverlappingRadius(PrivateArea area)
-    {
-        return Mathf.Max(MinRadius, WardAccess.GetMaxNonOverlappingRadius(area, MaxRadius));
-    }
-
     internal static WardConfigurationRequestSubmission RequestUpdateConfiguration(PrivateArea area, WardConfiguration configuration)
     {
         var nview = GetNView(area);
@@ -810,20 +1154,18 @@ internal static class WardSettings
                 isPending: false,
                 requestId: 0L,
                 WardConfigurationRequestResultCode.InvalidState,
-                currentConfiguration,
-                showOverlapMessage: false);
+                currentConfiguration);
         }
 
         if (WardOwnership.CanApplyManagedWardStateLocally(nview))
         {
-            if (!CanControlWard(area, player.GetPlayerID()))
+            if (!WardAccess.HasManagedWardTrust(area, player.GetPlayerID()))
             {
                 return new WardConfigurationRequestSubmission(
                     isPending: false,
                     requestId: 0L,
                     WardConfigurationRequestResultCode.Denied,
-                    currentConfiguration,
-                    showOverlapMessage: false);
+                    currentConfiguration);
             }
 
             var zdo = nview.GetZDO();
@@ -833,8 +1175,7 @@ internal static class WardSettings
                     isPending: false,
                     requestId: 0L,
                     WardConfigurationRequestResultCode.InvalidState,
-                    currentConfiguration,
-                    showOverlapMessage: false);
+                    currentConfiguration);
             }
 
             var localResult = ProcessConfigurationUpdate(zdo, configuration, currentConfiguration);
@@ -842,31 +1183,28 @@ internal static class WardSettings
                 isPending: false,
                 requestId: 0L,
                 localResult.ResultCode,
-                localResult.Configuration,
-                localResult.ShowOverlapMessage);
+                localResult.Configuration);
         }
 
         var requestId = AllocateConfigurationRequestId();
         var requestPackage = new ZPackage();
         requestPackage.Write(nview.GetZDO().m_uid);
         requestPackage.Write(requestId);
-        WriteConfiguration(requestPackage, configuration);
+        WriteConfigurationPayload(requestPackage, configuration);
         if (!WardOwnership.TryInvokeServerRoutedRpc(RpcUpdateSettings, requestPackage))
         {
             return new WardConfigurationRequestSubmission(
                 isPending: false,
                 requestId: 0L,
                 WardConfigurationRequestResultCode.InvalidState,
-                currentConfiguration,
-                showOverlapMessage: false);
+                currentConfiguration);
         }
 
         return new WardConfigurationRequestSubmission(
             isPending: true,
             requestId: requestId,
             WardConfigurationRequestResultCode.Applied,
-            currentConfiguration,
-            showOverlapMessage: false);
+            currentConfiguration);
     }
 
     internal static void RequestRemovePermitted(PrivateArea area, long targetPlayerId)
@@ -880,7 +1218,7 @@ internal static class WardSettings
 
         if (WardOwnership.CanApplyManagedWardStateLocally(nview))
         {
-            if (!CanControlWard(area, player.GetPlayerID()))
+            if (!WardAccess.HasManagedWardTrust(area, player.GetPlayerID()))
             {
                 return;
             }
@@ -923,8 +1261,7 @@ internal static class WardSettings
                 0L,
                 new WardConfigurationUpdateResult(
                     WardConfigurationRequestResultCode.InvalidPayload,
-                    currentConfiguration,
-                    showOverlapMessage: false));
+                    currentConfiguration));
             return;
         }
 
@@ -936,8 +1273,7 @@ internal static class WardSettings
                 requestId,
                 new WardConfigurationUpdateResult(
                     WardConfigurationRequestResultCode.InvalidState,
-                    requestedConfiguration,
-                    showOverlapMessage: false));
+                    requestedConfiguration));
             return;
         }
 
@@ -946,7 +1282,7 @@ internal static class WardSettings
                 wardZdoId,
                 out zdo,
                 out var requesterId) ||
-            !CanControlWard(zdo, requesterId))
+            !WardAccess.HasManagedWardTrust(zdo, requesterId))
         {
             SendRoutedUpdateConfigurationResponse(
                 sender,
@@ -954,8 +1290,7 @@ internal static class WardSettings
                 requestId,
                 new WardConfigurationUpdateResult(
                     WardConfigurationRequestResultCode.Denied,
-                    currentConfiguration,
-                    showOverlapMessage: false));
+                    currentConfiguration));
             return;
         }
 
@@ -967,8 +1302,7 @@ internal static class WardSettings
                 requestId,
                 new WardConfigurationUpdateResult(
                     WardConfigurationRequestResultCode.InvalidState,
-                    currentConfiguration,
-                    showOverlapMessage: false));
+                    currentConfiguration));
             return;
         }
 
@@ -1007,7 +1341,7 @@ internal static class WardSettings
             return;
         }
 
-        if (!CanControlWard(zdo, requesterId) ||
+        if (!WardAccess.HasManagedWardTrust(zdo, requesterId) ||
             !WardOwnership.TryClaimManagedWardMutationOwnership(zdo) ||
             !WardPrivateAreaSafeAccess.RemovePermittedPlayer(zdo, targetPlayerId))
         {
@@ -1024,54 +1358,45 @@ internal static class WardSettings
             return;
         }
 
-        if (!TryReadConfigurationResponse(area, pkg, out var requestId, out var resultCode, out var configuration, out var showOverlapMessage))
+        if (!TryReadConfigurationResponse(area, pkg, out var requestId, out var resultCode, out var configuration))
         {
             return;
         }
 
-        ShowConfigurationRequestFeedback(resultCode, showOverlapMessage);
+        ShowConfigurationRequestFeedback(resultCode);
         WardGuiController.Instance?.HandleWardConfigurationResponse(area, requestId, resultCode, configuration);
     }
 
     private static bool TryCreateConfiguration(
-        bool showAreaMarker,
-        float areaMarkerSpeedMultiplier,
-        float areaMarkerAlpha,
         float radius,
-        float autoCloseDelay,
+        bool areaMarkerRotationEnabled,
+        bool autoCloseEnabled,
         bool warningSoundEnabled,
         bool warningFlashEnabled,
         WardRestrictionOptions restrictions,
         out WardConfiguration configuration)
     {
         configuration = default;
-        if (float.IsNaN(areaMarkerSpeedMultiplier) || float.IsInfinity(areaMarkerSpeedMultiplier) ||
-            float.IsNaN(areaMarkerAlpha) || float.IsInfinity(areaMarkerAlpha) ||
-            float.IsNaN(radius) || float.IsInfinity(radius) ||
-            float.IsNaN(autoCloseDelay) || float.IsInfinity(autoCloseDelay))
+        if (float.IsNaN(radius) || float.IsInfinity(radius))
         {
             return false;
         }
 
         configuration = new WardConfiguration(
-            showAreaMarker,
-            Mathf.Clamp01(areaMarkerSpeedMultiplier),
-            Mathf.Clamp01(areaMarkerAlpha),
             Mathf.Clamp(radius, MinRadius, MaxRadius),
-            Mathf.Clamp(autoCloseDelay, MinAutoCloseDelay, MaxAutoCloseDelay),
+            areaMarkerRotationEnabled,
+            autoCloseEnabled,
             warningSoundEnabled,
             warningFlashEnabled,
             NormalizeRestrictions(restrictions));
         return true;
     }
 
-    private static void WriteConfiguration(ZPackage pkg, WardConfiguration configuration)
+    private static void WriteConfigurationPayload(ZPackage pkg, WardConfiguration configuration)
     {
-        pkg.Write(configuration.ShowAreaMarker);
-        pkg.Write(configuration.AreaMarkerSpeedMultiplier);
-        pkg.Write(configuration.AreaMarkerAlpha);
         pkg.Write(configuration.Radius);
-        pkg.Write(configuration.AutoCloseDelay);
+        pkg.Write(configuration.AreaMarkerRotationEnabled);
+        pkg.Write(configuration.AutoCloseEnabled);
         pkg.Write(configuration.WarningSoundEnabled);
         pkg.Write(configuration.WarningFlashEnabled);
         pkg.Write((int)configuration.Restrictions);
@@ -1082,29 +1407,19 @@ internal static class WardSettings
         WardConfiguration currentConfiguration,
         WardConfiguration configuration)
     {
-        if (currentConfiguration.ShowAreaMarker != configuration.ShowAreaMarker)
-        {
-            zdo.Set(ShowAreaMarkerKey, configuration.ShowAreaMarker);
-        }
-
-        if (!Mathf.Approximately(currentConfiguration.AreaMarkerSpeedMultiplier, configuration.AreaMarkerSpeedMultiplier))
-        {
-            zdo.Set(AreaMarkerSpeedMultiplierKey, configuration.AreaMarkerSpeedMultiplier);
-        }
-
-        if (!Mathf.Approximately(currentConfiguration.AreaMarkerAlpha, configuration.AreaMarkerAlpha))
-        {
-            zdo.Set(AreaMarkerAlphaKey, configuration.AreaMarkerAlpha);
-        }
-
         if (!Mathf.Approximately(currentConfiguration.Radius, configuration.Radius))
         {
             zdo.Set(RadiusKey, configuration.Radius);
         }
 
-        if (!Mathf.Approximately(currentConfiguration.AutoCloseDelay, configuration.AutoCloseDelay))
+        if (currentConfiguration.AreaMarkerRotationEnabled != configuration.AreaMarkerRotationEnabled)
         {
-            zdo.Set(AutoCloseDelayKey, configuration.AutoCloseDelay);
+            zdo.Set(AreaMarkerRotationEnabledKey, configuration.AreaMarkerRotationEnabled);
+        }
+
+        if (currentConfiguration.AutoCloseEnabled != configuration.AutoCloseEnabled)
+        {
+            zdo.Set(AutoCloseEnabledKey, configuration.AutoCloseEnabled);
         }
 
         if (currentConfiguration.WarningSoundEnabled != configuration.WarningSoundEnabled)
@@ -1129,13 +1444,11 @@ internal static class WardSettings
         WardConfiguration currentConfiguration)
     {
         var configuration = ClampConfiguration(zdo, requestedConfiguration);
-        var showOverlapMessage = configuration.Radius < requestedConfiguration.Radius;
         if (ConfigurationsMatch(currentConfiguration, configuration))
         {
             return new WardConfigurationUpdateResult(
                 WardConfigurationRequestResultCode.Unchanged,
-                currentConfiguration,
-                showOverlapMessage);
+                currentConfiguration);
         }
 
         SaveConfiguration(zdo, currentConfiguration, configuration);
@@ -1143,14 +1456,14 @@ internal static class WardSettings
 
         return new WardConfigurationUpdateResult(
             WardConfigurationRequestResultCode.Applied,
-            configuration,
-            showOverlapMessage);
+            configuration);
     }
 
     private static WardConfiguration ClampConfiguration(ZDO zdo, WardConfiguration configuration)
     {
         var maxRadius = GetMaxNonOverlappingRadius(zdo);
-        var clampedRadius = Mathf.Clamp(Mathf.Min(configuration.Radius, maxRadius), MinRadius, MaxRadius);
+        var storedRadius = GetStoredRadius(zdo);
+        var clampedRadius = Mathf.Clamp(Mathf.Min(storedRadius, maxRadius), MinRadius, MaxRadius);
         return CopyConfiguration(
             configuration,
             radius: clampedRadius,
@@ -1172,7 +1485,10 @@ internal static class WardSettings
         var overlapAreas = new List<WardOverlapArea>();
         foreach (var candidate in zdoMan.m_objectsByID.Values)
         {
-            if (candidate == null || candidate.m_uid == zdo.m_uid || !WardOwnership.IsManagedWardZdo(candidate))
+            if (candidate == null ||
+                candidate.m_uid == zdo.m_uid ||
+                !WardOwnership.IsManagedWardZdo(candidate) ||
+                !WardOwnership.IsAcceptedManagedWard(candidate))
             {
                 continue;
             }
@@ -1193,7 +1509,10 @@ internal static class WardSettings
             overlapAreas);
     }
 
-    private static void ApplyAreaMarkerVisuals(CircleProjector marker, WardConfiguration configuration)
+    private static void ApplyAreaMarkerVisuals(
+        PrivateArea area,
+        CircleProjector marker,
+        WardConfiguration configuration)
     {
         var segments = marker.m_segments;
         if (segments == null || segments.Count == 0)
@@ -1206,6 +1525,7 @@ internal static class WardSettings
             (configuration.Radius / MaxRadius) * ManagedAreaMarkerSegmentLengthMultiplier,
             0f,
             ManagedAreaMarkerSegmentLengthMultiplier);
+        var brightness = IsAreaMarkerBrightnessActive(area) ? 1f : MinimumAreaMarkerBrightness;
 
         for (var index = 0; index < segments.Count; index++)
         {
@@ -1216,7 +1536,7 @@ internal static class WardSettings
             }
 
             segment.transform.localScale = ScaleMarkerSegment(baseScale, lengthScale);
-            ApplyAreaMarkerAlpha(segment, configuration.AreaMarkerAlpha);
+            ApplyAreaMarkerBrightness(segment, brightness);
         }
     }
 
@@ -1230,15 +1550,8 @@ internal static class WardSettings
         return new Vector3(baseScale.x, baseScale.y, baseScale.z * lengthScale);
     }
 
-    private static void ApplyAreaMarkerAlpha(GameObject segment, float alpha)
+    private static void ApplyAreaMarkerBrightness(GameObject segment, float brightness)
     {
-        var normalizedAlpha = Mathf.Clamp01(alpha);
-        var remappedAlpha = Mathf.Lerp(MinimumAreaMarkerBrightnessInput, 1f, normalizedAlpha);
-        var brightness = Mathf.Lerp(
-            MinimumAreaMarkerBrightness,
-            1f,
-            Mathf.Pow(remappedAlpha, AreaMarkerBrightnessGamma));
-
         var renderers = segment.GetComponentsInChildren<Renderer>(true);
         for (var index = 0; index < renderers.Length; index++)
         {
@@ -1255,6 +1568,7 @@ internal static class WardSettings
             }
 
             AreaMarkerPropertyBlock.Clear();
+            renderer.GetPropertyBlock(AreaMarkerPropertyBlock);
             var applied = false;
             for (var propertyIndex = 0; propertyIndex < AreaMarkerColorProperties.Length; propertyIndex++)
             {
@@ -1339,8 +1653,7 @@ internal static class WardSettings
             firstSegment != null ? firstSegment.GetInstanceID() : 0,
             lastSegment != null ? lastSegment.GetInstanceID() : 0,
             MaxRadius,
-            configuration.Radius,
-            configuration.AreaMarkerAlpha);
+            configuration.Radius);
         return true;
     }
 
@@ -1351,25 +1664,7 @@ internal static class WardSettings
                left.FirstSegmentInstanceId == right.FirstSegmentInstanceId &&
                left.LastSegmentInstanceId == right.LastSegmentInstanceId &&
                Mathf.Approximately(left.MaxRadius, right.MaxRadius) &&
-               Mathf.Approximately(left.Radius, right.Radius) &&
-               Mathf.Approximately(left.AreaMarkerAlpha, right.AreaMarkerAlpha);
-    }
-
-    private static float GetDefaultAreaMarkerSpeed(PrivateArea area)
-    {
-        return ManagedWardRuntimeContexts.TryGet(area, out var context) && context.HasDefaultAreaMarkerSpeed
-            ? context.DefaultAreaMarkerSpeed
-            : FallbackAreaMarkerSpeed;
-    }
-
-    private static bool CanControlWard(PrivateArea area, long playerId)
-    {
-        return WardAccess.CanControlManagedWard(area, playerId);
-    }
-
-    private static bool CanControlWard(ZDO zdo, long playerId)
-    {
-        return WardAccess.CanControlManagedWard(zdo, playerId);
+               Mathf.Approximately(left.Radius, right.Radius);
     }
 
     private static long AllocateConfigurationRequestId()
@@ -1459,8 +1754,7 @@ internal static class WardSettings
         pkg.Write(wardZdoId);
         pkg.Write(requestId);
         pkg.Write((int)result.ResultCode);
-        pkg.Write(result.ShowOverlapMessage);
-        WriteConfiguration(pkg, result.Configuration);
+        WriteConfigurationPayload(pkg, result.Configuration);
         ZRoutedRpc.instance?.InvokeRoutedRPC(receiverUid, RpcUpdateSettingsResponse, pkg);
     }
 
@@ -1469,13 +1763,11 @@ internal static class WardSettings
         ZPackage? pkg,
         out long requestId,
         out WardConfigurationRequestResultCode resultCode,
-        out WardConfiguration configuration,
-        out bool showOverlapMessage)
+        out WardConfiguration configuration)
     {
         requestId = 0L;
         resultCode = WardConfigurationRequestResultCode.InvalidState;
         configuration = GetConfiguration(area);
-        showOverlapMessage = false;
         if (pkg == null)
         {
             return false;
@@ -1485,7 +1777,6 @@ internal static class WardSettings
         {
             requestId = pkg.ReadLong();
             resultCode = (WardConfigurationRequestResultCode)pkg.ReadInt();
-            showOverlapMessage = pkg.ReadBool();
             return TryReadConfigurationPayload(pkg, out configuration);
         }
         catch
@@ -1493,7 +1784,6 @@ internal static class WardSettings
             requestId = 0L;
             resultCode = WardConfigurationRequestResultCode.InvalidState;
             configuration = GetConfiguration(area);
-            showOverlapMessage = false;
             return false;
         }
     }
@@ -1508,20 +1798,17 @@ internal static class WardSettings
 
         try
         {
-            var showAreaMarker = pkg.ReadBool();
-            var areaMarkerSpeedMultiplier = pkg.ReadSingle();
-            var areaMarkerAlpha = pkg.ReadSingle();
             var radius = pkg.ReadSingle();
-            var autoCloseDelay = pkg.ReadSingle();
+            var areaMarkerRotationEnabled = pkg.ReadBool();
+            var autoCloseEnabled = pkg.ReadBool();
             var warningSoundEnabled = pkg.ReadBool();
             var warningFlashEnabled = pkg.ReadBool();
             var restrictions = (WardRestrictionOptions)pkg.ReadInt();
+
             return TryCreateConfiguration(
-                showAreaMarker,
-                areaMarkerSpeedMultiplier,
-                areaMarkerAlpha,
                 radius,
-                autoCloseDelay,
+                areaMarkerRotationEnabled,
+                autoCloseEnabled,
                 warningSoundEnabled,
                 warningFlashEnabled,
                 restrictions,
@@ -1534,16 +1821,9 @@ internal static class WardSettings
         }
     }
 
-    internal static void ShowConfigurationRequestFeedback(
-        WardConfigurationRequestResultCode resultCode,
-        bool showOverlapMessage)
+    internal static void ShowConfigurationRequestFeedback(WardConfigurationRequestResultCode resultCode)
     {
         var player = Player.m_localPlayer;
-        if (showOverlapMessage)
-        {
-            WardAccess.ShowWardOverlapMessage(player);
-        }
-
         if (resultCode == WardConfigurationRequestResultCode.Denied)
         {
             WardAccess.ShowNoAccessMessage(player);
@@ -1552,11 +1832,9 @@ internal static class WardSettings
 
     internal static bool ConfigurationsMatch(WardConfiguration left, WardConfiguration right)
     {
-        return left.ShowAreaMarker == right.ShowAreaMarker &&
-               Mathf.Approximately(left.AreaMarkerSpeedMultiplier, right.AreaMarkerSpeedMultiplier) &&
-               Mathf.Approximately(left.AreaMarkerAlpha, right.AreaMarkerAlpha) &&
-               Mathf.Approximately(left.Radius, right.Radius) &&
-               Mathf.Approximately(left.AutoCloseDelay, right.AutoCloseDelay) &&
+        return Mathf.Approximately(left.Radius, right.Radius) &&
+               left.AreaMarkerRotationEnabled == right.AreaMarkerRotationEnabled &&
+               left.AutoCloseEnabled == right.AutoCloseEnabled &&
                left.WarningSoundEnabled == right.WarningSoundEnabled &&
                left.WarningFlashEnabled == right.WarningFlashEnabled &&
                left.Restrictions == right.Restrictions;

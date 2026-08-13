@@ -4,18 +4,25 @@ namespace STUWard;
 
 internal readonly struct CachedWardGuildIdentity
 {
-    internal CachedWardGuildIdentity(bool hasGuild, int guildId, string guildName, DateTime expiresAtUtc)
+    internal CachedWardGuildIdentity(
+        bool hasGuild,
+        int guildId,
+        string guildName,
+        DateTime expiresAtUtc,
+        bool authoritativeNoGuild)
     {
         HasGuild = hasGuild;
         GuildId = guildId;
         GuildName = guildName;
         ExpiresAtUtc = expiresAtUtc;
+        AuthoritativeNoGuild = authoritativeNoGuild;
     }
 
     internal bool HasGuild { get; }
     internal int GuildId { get; }
     internal string GuildName { get; }
     internal DateTime ExpiresAtUtc { get; }
+    internal bool AuthoritativeNoGuild { get; }
 }
 
 internal readonly struct WardGuildCharacterIdentity
@@ -64,16 +71,6 @@ internal static partial class GuildsCompat
         return TryGetGuild(playerId, out var guild) ? guild : default;
     }
 
-    internal static WardGuildIdentity GetWardGuildIdentity(PrivateArea? area)
-    {
-        return new WardGuildIdentity(GetWardGuildId(area), GetWardGuildName(area));
-    }
-
-    internal static WardGuildIdentity GetWardGuildIdentity(ZDO? zdo)
-    {
-        return new WardGuildIdentity(GetWardGuildId(zdo), GetWardGuildName(zdo));
-    }
-
     internal static int GetPlayerGuildId(Player? player)
     {
         return TryGetGuild(player, out var guild) ? guild.Id : 0;
@@ -92,11 +89,6 @@ internal static partial class GuildsCompat
     internal static int GetWardGuildId(ZDO? zdo)
     {
         return zdo?.GetInt(GuildIdKey, 0) ?? 0;
-    }
-
-    internal static string GetWardGuildName(ZDO? zdo)
-    {
-        return zdo?.GetString(GuildNameKey, string.Empty) ?? string.Empty;
     }
 
     internal static string BuildCharacterIdentityKey(string accountId, string playerName)

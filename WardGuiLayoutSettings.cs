@@ -4,60 +4,36 @@ namespace STUWard;
 
 internal static class WardGuiLayoutSettings
 {
-    private const float SettingsSliderWidth = 520f;
-    private const float WarningToggleLabelGap = 12f;
-    private const float WarningToggleLabelWidth = 120f;
-    private const float WarningToggleY = 57f;
-
     internal static Vector2 GetPanelOffset() => new(0f, 0f);
     internal static Vector2 GetPanelSize() => new(1080f, 900f);
-    internal static Vector2 GetTitlePosition() => new(0f, 382f);
-    internal static Vector2 GetOwnerPosition() => new(-100f, 400f);
-    internal static Vector2 GetGuildPosition() => new(-100f, 360f);
+    internal static Vector2 GetTitlePosition() => new(0f, 400f);
+    internal static Vector2 GetTitleSize() => new(300f, 56f);
+    internal static Vector2 GetOwnerPosition() => new(-340f, 400f);
+    internal static Vector2 GetGuildPosition() => new(-340f, 362f);
+    internal static Vector2 GetOwnerGuildLabelSize() => new(360f, 34f);
     internal static Vector2 GetCloseButtonPosition() => new(440f, 400f);
-    internal static Vector2 GetPageArrowButtonPosition() => new(315f, 382f);
-    internal static Vector2 GetRadiusLabelPosition() => new(-360f, 300f);
-    internal static Vector2 GetRadiusSliderPosition() => new(20f, 300f);
-    internal static Vector2 GetRadiusValuePosition() => new(360f, 300f);
-    internal static Vector2 GetAreaMarkerSpeedLabelPosition() => new(-360f, 240f);
-    internal static Vector2 GetAreaMarkerSpeedSliderPosition() => new(20f, 240f);
-    internal static Vector2 GetAreaMarkerSpeedValuePosition() => new(360f, 240f);
-    internal static Vector2 GetAreaMarkerAlphaLabelPosition() => new(-360f, 180f);
-    internal static Vector2 GetAreaMarkerAlphaSliderPosition() => new(20f, 180f);
-    internal static Vector2 GetAreaMarkerAlphaValuePosition() => new(360f, 180f);
-    internal static Vector2 GetAutoCloseDelayLabelPosition() => new(-360f, 120f);
-    internal static Vector2 GetAutoCloseDelaySliderPosition() => new(20f, 120f);
-    internal static Vector2 GetAutoCloseDelayValuePosition() => new(360f, 120f);
-    internal static Vector2 GetWarningEffectsLabelPosition() => new(-360f, 60f);
-    internal static Vector2 GetWarningSoundLabelPosition(float toggleSize) => GetWarningToggleLabelPosition(GetSettingsSliderLeftEdge(), toggleSize);
-    internal static Vector2 GetWarningSoundTogglePosition(float toggleSize) => GetWarningTogglePosition(GetSettingsSliderLeftEdge(), toggleSize);
-    internal static Vector2 GetWarningFlashLabelPosition(float toggleSize) => GetWarningToggleLabelPosition(GetSettingsSliderCenterX(), toggleSize);
-    internal static Vector2 GetWarningFlashTogglePosition(float toggleSize) => GetWarningTogglePosition(GetSettingsSliderCenterX(), toggleSize);
+    internal static Vector2 GetPageArrowButtonPosition() => new(315f, 400f);
+
+    internal static float GetBehaviorToggleSize() => 30f;
+    internal static Vector2 GetBehaviorControlsGridPosition() => new(-15f, 245f);
+    internal static Vector2 GetBehaviorControlsGridSize() => new(960f, 118f);
+
     internal static Vector2 GetRegisteredPlayersRemoveButtonPosition() => new(395f, 0f);
-    internal static Vector2 GetRegisteredPlayersHeaderPosition() => new(0f, 10f);
-    internal static Vector2 GetPermittedListPosition() => new(-15f, -190f);
-    internal static Vector2 GetPermittedListSize() => new(960f, 360f);
-    internal static Vector2 GetRestrictionsHeaderPosition() => new(0f, 285f);
-    internal static Vector2 GetRestrictionListPosition() => new(-15f, -75f);
-    internal static Vector2 GetRestrictionListSize() => new(960f, 620f);
+    internal static Vector2 GetPlayerListHeaderLabelSize() => new(630f, 40f);
+    internal static Vector2 GetPlayerSearchSize() => new(280f, 36f);
+    internal static Vector2 GetRegisteredPlayersHeaderPosition() => new(-180f, 315f);
+    internal static Vector2 GetRegisteredPlayersSearchPosition() => new(325f, 315f);
+    internal static Vector2 GetPermittedListPosition() => new(-15f, 145f);
+    internal static Vector2 GetPermittedListSize() => new(960f, 280f);
 
-    private static float GetSettingsSliderLeftEdge()
-    {
-        return GetRadiusSliderPosition().x - SettingsSliderWidth * 0.5f;
-    }
+    internal static Vector2 GetRecentPlayersHeaderPosition() => new(-180f, -30f);
+    internal static Vector2 GetRecentPlayersSearchPosition() => new(325f, -30f);
+    internal static Vector2 GetRecentPlayersListPosition() => new(-15f, -230f);
+    internal static Vector2 GetRecentPlayersListSize() => new(960f, 340f);
 
-    private static float GetSettingsSliderCenterX()
-    {
-        return GetRadiusSliderPosition().x;
-    }
-
-    private static Vector2 GetWarningTogglePosition(float leftEdge, float toggleSize)
-    {
-        return new Vector2(leftEdge + toggleSize * 0.5f, WarningToggleY);
-    }
-
-    private static Vector2 GetWarningToggleLabelPosition(float leftEdge, float toggleSize)
-    {
-        return new Vector2(leftEdge + toggleSize + WarningToggleLabelGap + WarningToggleLabelWidth * 0.5f, WarningToggleY);
-    }
+    internal static Vector2 GetRestrictionsHeaderPosition() => new(0f, 150f);
+    internal static Vector2 GetRestrictionListPosition() => new(-15f, -133f);
+    internal static Vector2 GetRestrictionListSize() => new(960f, 504f);
+    internal static Vector2 GetRestrictionCellSize() => new(452f, 48f);
+    internal static Vector2 GetRestrictionCellSpacing() => new(8f, 6f);
 }

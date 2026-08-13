@@ -193,16 +193,7 @@ internal static class PrivateAreaHaveLocalAccessManagedPatch
             return;
         }
 
-        if (WardAdminDebugAccess.CanLocallyControlAnyWard(__instance, player))
-        {
-            __result = true;
-            return;
-        }
-
-        if (WardAccess.IsPlayerInWardGuild(player, __instance))
-        {
-            __result = true;
-        }
+        __result = WardAccess.HasManagedWardTrust(__instance, player.GetPlayerID());
     }
 }
 
@@ -292,6 +283,8 @@ internal static class ContainerCheckAccessManagedPatch
 }
 
 [HarmonyPatch]
+[HarmonyPriority(800)]
+[HarmonyBefore(new[] { "sighsorry.FeedLikeGrandma" })]
 internal static class UseItemInteractionPatches
 {
     private static IEnumerable<MethodBase> TargetMethods()
@@ -299,10 +292,16 @@ internal static class UseItemInteractionPatches
         return WardInteractionPatchTargets.GetCommonTargets(nameof(Container.UseItem));
     }
 
-    private static bool Prefix(Component __instance, Humanoid __0, ref bool __result, out WardCheckScopeState __state)
+    private static bool Prefix(Component __instance, Humanoid __0, ItemDrop.ItemData __1, ref bool __result, out WardCheckScopeState __state)
     {
         __state = default;
         var player = WardAccess.GetPlayer(__0);
+        if (!WardAccess.TryBlockItemUse(player, __1, __instance.transform.position))
+        {
+            __result = false;
+            return false;
+        }
+
         var continueOriginal = WardInteractionPatchTargets.TryGetRestriction(__instance, out var restriction)
             ? WardAccess.TryBlockInteraction(restriction, __instance, player, ref __result)
             : WardAccess.TryBlockInteraction(__instance, player, ref __result);
@@ -872,7 +871,7 @@ internal static class WearNTearDamagePatch
         if (ManagedWardIdentity.EnsureManagedComponent(area))
         {
             var controllingPlayer = WardPatchHelpers.GetLocalPlayerForCharacter(attacker);
-            if (controllingPlayer != null && !WardAccess.CanControlManagedWard(area, controllingPlayer.GetPlayerID()))
+            if (controllingPlayer != null && !WardAccess.HasManagedWardTrust(area, controllingPlayer.GetPlayerID()))
             {
                 WardAccess.ShowNoAccessMessage(controllingPlayer);
             }
@@ -1056,7 +1055,7 @@ internal static class FeastRpcTryEatPatch
 
 [HarmonyPatch(typeof(Player), "UseHotbarItem")]
 [HarmonyPriority(800)]
-[HarmonyBefore(new[] { "kg.TameableCollector" })]
+[HarmonyBefore(new[] { "kg.TameableCollector", "sighsorry.FeedLikeGrandma" })]
 internal static class PlayerUseHotbarItemPatch
 {
     private static bool Prefix(Player __instance, int index)
@@ -1067,16 +1066,18 @@ internal static class PlayerUseHotbarItemPatch
         }
 
         var item = __instance.m_inventory.GetItemAt(index - 1, 0);
-        return WardAccess.TryBlockItemUse(__instance, item);
+        return WardAccess.TryBlockItemUseAtPlayerOrHoveredTamedCreature(__instance, item);
     }
 }
 
 [HarmonyPatch(typeof(Humanoid), nameof(Humanoid.UseItem))]
+[HarmonyPriority(800)]
+[HarmonyBefore(new[] { "sighsorry.FeedLikeGrandma" })]
 internal static class HumanoidUseItemPatch
 {
     private static bool Prefix(Humanoid __instance, ItemDrop.ItemData item)
     {
-        return WardAccess.TryBlockItemUse(WardAccess.GetPlayer(__instance), item);
+        return WardAccess.TryBlockItemUseAtPlayerOrHoveredTamedCreature(WardAccess.GetPlayer(__instance), item);
     }
 }
 
@@ -1634,7 +1635,7 @@ internal static class WardPatchHelpers
 
         var area = piece.GetComponent<PrivateArea>();
         return ManagedWardIdentity.EnsureManagedComponent(area)
-            ? !WardAccess.CanControlManagedWard(area, player.GetPlayerID())
+            ? !WardAccess.HasManagedWardTrust(area, player.GetPlayerID())
             : WardAccess.ShouldBlock(piece.transform.position, 0f, player);
     }
 
@@ -1653,7 +1654,7 @@ internal static class WardPatchHelpers
         var area = piece.GetComponent<PrivateArea>();
         if (ManagedWardIdentity.EnsureManagedComponent(area))
         {
-            return WardAccess.CanControlManagedWard(area, playerId)
+            return WardAccess.HasManagedWardTrust(area, playerId)
                 ? ProtectedRpcDecision.Allow
                 : ProtectedRpcDecision.Deny;
         }

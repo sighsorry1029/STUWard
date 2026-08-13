@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text;
 using BepInEx;
 using YamlDotNet.Serialization;
 
@@ -25,11 +26,16 @@ internal static class ManagedWardConfigFileService
     // BepInEx cfg remains the home for scalar runtime settings.
     // STUWard.yml is reserved for structured server policy (lists, maps, overrides).
     internal const string ConfigFileName = "STUWard.yml";
+    internal const int MaxItemPolicyYamlBytes = 256 * 1024;
 
     private const double ReloadIntervalSeconds = 1d;
+    private const long MaxConfigFileBytes = 2L * 1024L * 1024L;
+    private const int MaxWardLimitOverrideCount = 4096;
+    private const int MaxItemPrefabCountPerList = 4096;
+    private const int MaxPrefabNameLength = 256;
 
     private static readonly IDeserializer Deserializer = new DeserializerBuilder()
-        .IgnoreUnmatchedProperties()
+        .WithDuplicateKeyChecking()
         .Build();
 
     private static readonly ISerializer Serializer = new SerializerBuilder().Build();
@@ -111,13 +117,26 @@ internal static class ManagedWardConfigFileService
         var path = GetConfigFilePath();
         if (!File.Exists(path))
         {
-            return;
+            EnsureConfigFileExists();
+            if (!File.Exists(path))
+            {
+                return;
+            }
         }
 
         DateTime lastWriteUtc;
         string yaml;
         try
         {
+            var fileLength = new FileInfo(path).Length;
+            if (fileLength > MaxConfigFileBytes)
+            {
+                Plugin.Log.LogWarning(
+                    $"Managed ward config file '{path}' is {fileLength} bytes; the maximum is {MaxConfigFileBytes} bytes. Keeping the last valid configuration.");
+                _lastProcessedWriteUtc = File.GetLastWriteTimeUtc(path);
+                return;
+            }
+
             lastWriteUtc = File.GetLastWriteTimeUtc(path);
             if (!force && lastWriteUtc == _lastProcessedWriteUtc)
             {
@@ -170,9 +189,15 @@ internal static class ManagedWardConfigFileService
     private static bool TryParseYaml(string yaml, out ManagedWardConfigSnapshot snapshot)
     {
         snapshot = DefaultSnapshot;
+        yaml ??= string.Empty;
 
         try
         {
+            if (Encoding.UTF8.GetByteCount(yaml) > MaxConfigFileBytes)
+            {
+                throw new FormatException($"The YAML exceeds the {MaxConfigFileBytes}-byte limit.");
+            }
+
             var data = string.IsNullOrWhiteSpace(yaml)
                 ? new ManagedWardConfigYaml()
                 : Deserializer.Deserialize<ManagedWardConfigYaml>(yaml) ?? new ManagedWardConfigYaml();
@@ -180,21 +205,44 @@ internal static class ManagedWardConfigFileService
             var wardLimitOverrides = new Dictionary<string, int>(StringComparer.Ordinal);
             if (data.WardLimitOverrides != null)
             {
+                if (data.WardLimitOverrides.Count > MaxWardLimitOverrideCount)
+                {
+                    throw new FormatException(
+                        $"ward_limit_overrides contains {data.WardLimitOverrides.Count} entries; the maximum is {MaxWardLimitOverrideCount}.");
+                }
+
                 foreach (var entry in data.WardLimitOverrides)
                 {
-                    var accountId = WardOwnership.NormalizeOverrideAccountIdValue(entry.Key);
+                    var accountId = WardOwnership.NormalizeAccountIdValue(entry.Key);
                     if (string.IsNullOrWhiteSpace(accountId) || !ulong.TryParse(accountId, out _))
                     {
-                        Plugin.Log.LogWarning($"Ignoring invalid ward_limit_overrides entry for account '{entry.Key}'.");
-                        continue;
+                        throw new FormatException($"ward_limit_overrides contains invalid account id '{entry.Key}'.");
                     }
 
-                    wardLimitOverrides[accountId] = entry.Value;
+                    if (entry.Value < -1)
+                    {
+                        throw new FormatException(
+                            $"ward_limit_overrides['{entry.Key}'] is {entry.Value}; only -1 or a non-negative ward count is allowed.");
+                    }
+
+                    if (wardLimitOverrides.ContainsKey(accountId))
+                    {
+                        throw new FormatException(
+                            $"ward_limit_overrides contains multiple keys for normalized account id '{accountId}'.");
+                    }
+
+                    wardLimitOverrides.Add(accountId, entry.Value);
                 }
             }
 
             var itemPolicyData = data.ItemPrefabPolicy ?? new ManagedWardItemPrefabPolicyYaml();
+            ValidateItemPrefabPolicy(itemPolicyData);
             var itemPolicyYaml = SerializeItemPrefabPolicy(itemPolicyData);
+            if (Encoding.UTF8.GetByteCount(itemPolicyYaml) > MaxItemPolicyYamlBytes)
+            {
+                throw new FormatException(
+                    $"item_prefab_policy exceeds the {MaxItemPolicyYamlBytes}-byte synchronized payload limit.");
+            }
 
             snapshot = new ManagedWardConfigSnapshot(wardLimitOverrides, itemPolicyYaml);
             return true;
@@ -211,21 +259,54 @@ internal static class ManagedWardConfigFileService
         return Serializer.Serialize(data);
     }
 
+    internal static void ValidateItemPrefabPolicy(ManagedWardItemPrefabPolicyYaml data)
+    {
+        ValidatePrefabList(data.BlockedItemPrefabs, "blocked_item_prefabs");
+        ValidatePrefabList(data.PickupWhitelist, "pickup_whitelist");
+        ValidatePrefabList(data.PickupBlacklist, "pickup_blacklist");
+    }
+
+    private static void ValidatePrefabList(IReadOnlyCollection<string>? prefabNames, string fieldName)
+    {
+        if (prefabNames == null)
+        {
+            return;
+        }
+
+        if (prefabNames.Count > MaxItemPrefabCountPerList)
+        {
+            throw new FormatException(
+                $"item_prefab_policy.{fieldName} contains {prefabNames.Count} entries; the maximum is {MaxItemPrefabCountPerList}.");
+        }
+
+        foreach (var prefabName in prefabNames)
+        {
+            if (string.IsNullOrWhiteSpace(prefabName))
+            {
+                throw new FormatException($"item_prefab_policy.{fieldName} contains an empty prefab name.");
+            }
+
+            if (prefabName.Length > MaxPrefabNameLength)
+            {
+                throw new FormatException(
+                    $"item_prefab_policy.{fieldName} contains a prefab name longer than {MaxPrefabNameLength} characters.");
+            }
+        }
+    }
+
     private static string GetDefaultConfigFileContents()
     {
         var data = new ManagedWardConfigYaml
         {
-            WardLimitOverrides = new Dictionary<string, int>(StringComparer.Ordinal),
             ItemPrefabPolicy = CreateDefaultItemPrefabPolicy()
         };
+        var defaultFileSerializer = new SerializerBuilder()
+            .ConfigureDefaultValuesHandling(DefaultValuesHandling.OmitNull)
+            .Build();
 
         return
             "# Generated by STUWard\n" +
             "# Unified server config for ward limit overrides and item prefab policy.\n" +
-            "#\n" +
-            "# ward_limit_overrides:\n" +
-            "#   Map Steam64 account ids to max ward counts.\n" +
-            "#   Use -1 for unlimited wards.\n" +
             "#\n" +
             "# item_prefab_policy.blocked_item_prefabs:\n" +
             "#   Cannot be used, equipped, or attacked with inside a foreign enabled ward.\n" +
@@ -236,11 +317,15 @@ internal static class ManagedWardConfigFileService
             "# item_prefab_policy.pickup_blacklist:\n" +
             "#   Blocked when Pickup Block Mode = AllowAllExceptBlacklist.\n" +
             "#\n" +
-            "# Example overrides:\n" +
-            "#   \"76561198000000000\": 6\n" +
-            "#   \"76561198000000001\": -1\n" +
+            "# ward_limit_overrides:\n" +
+            "#   Map Steam64 account ids to max ward counts.\n" +
+            "#   Use -1 for unlimited wards.\n" +
             "\n" +
-            Serializer.Serialize(data);
+            "ward_limit_overrides:\n" +
+            "  # \"76561198000000000\": 6\n" +
+            "  # \"76561198000000001\": -1\n" +
+            "\n" +
+            defaultFileSerializer.Serialize(data);
     }
 
     private static ManagedWardConfigSnapshot CreateDefaultSnapshot()

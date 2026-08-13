@@ -7,13 +7,20 @@ internal static partial class WardMinimapPinsManager
     private const string RequestWardPinsRpc = "STUWard_RequestWardPins";
     private const string ReceiveWardPinsRpc = "STUWard_ReceiveWardPins";
     private const string PushWardPinsRpc = "STUWard_PushWardPins";
-    private const int MaxSnapshotEntryCount = 16384;
 
     private enum WardPinsResponseKind
     {
         Unavailable = 0,
         FullSnapshot = 1,
-        Unchanged = 2
+        Unchanged = 2,
+        TooLarge = 3
+    }
+
+    private enum WardPinsPushKind
+    {
+        FullSnapshot = 0,
+        Delta = 1,
+        TooLarge = 2
     }
 
     private static bool _rpcsRegistered;
@@ -39,40 +46,23 @@ internal static partial class WardMinimapPinsManager
             return;
         }
 
-        var requestId = 0;
-        var knownViewerRevisionToken = 0;
-        var requestFullSnapshot = true;
+        int requestId;
+        int knownViewerRevisionToken;
+        bool requestFullSnapshot;
         try
         {
             requestId = pkg?.ReadInt() ?? 0;
+            knownViewerRevisionToken = pkg?.ReadInt() ?? 0;
+            requestFullSnapshot = pkg?.ReadBool() ?? false;
         }
         catch
         {
-            requestId = 0;
+            return;
         }
 
         if (requestId <= 0 || pkg == null)
         {
             return;
-        }
-
-        try
-        {
-            knownViewerRevisionToken = pkg.ReadInt();
-        }
-        catch
-        {
-            knownViewerRevisionToken = 0;
-        }
-
-        requestFullSnapshot = knownViewerRevisionToken == 0;
-        try
-        {
-            requestFullSnapshot = pkg.ReadBool();
-        }
-        catch
-        {
-            // Older clients only send the revision token. Treat token 0 as a full snapshot request.
         }
 
         if (!WardOwnership.TryResolveAuthoritativePlayerIdFromSender(sender, out var playerId) ||
@@ -102,8 +92,16 @@ internal static partial class WardMinimapPinsManager
                 viewerRevisionToken,
                 includeEntries,
                 includeVisibleWardDataRevisions: true);
-            responseKind = includeEntries ? WardPinsResponseKind.FullSnapshot : WardPinsResponseKind.Unchanged;
-            TrackServerViewerSyncState(sender, snapshot);
+            if (snapshot.VisibleWardCount > WardMinimapSnapshotProtocol.MaxEntryCount)
+            {
+                responseKind = WardPinsResponseKind.TooLarge;
+                TrackServerViewerSnapshotTooLarge(sender, snapshot.ViewerRevisionToken);
+            }
+            else
+            {
+                responseKind = includeEntries ? WardPinsResponseKind.FullSnapshot : WardPinsResponseKind.Unchanged;
+                TrackServerViewerSyncState(sender, snapshot);
+            }
         }
 
         SendWardPinsResponse(
@@ -129,6 +127,24 @@ internal static partial class WardMinimapPinsManager
             return;
         }
 
+        IReadOnlyList<WardMinimapSnapshotEntry> entriesToSend = System.Array.Empty<WardMinimapSnapshotEntry>();
+        if (responseKind == WardPinsResponseKind.FullSnapshot)
+        {
+            if (snapshot.Entries.Count > WardMinimapSnapshotProtocol.MaxEntryCount)
+            {
+                responseKind = WardPinsResponseKind.TooLarge;
+                TrackServerViewerSnapshotTooLarge(receiverUid, snapshot.ViewerRevisionToken);
+            }
+            else if (!AreSnapshotEntriesValid(snapshot.Entries))
+            {
+                responseKind = WardPinsResponseKind.Unavailable;
+            }
+            else
+            {
+                entriesToSend = snapshot.Entries;
+            }
+        }
+
         var pkg = new ZPackage();
         pkg.Write(requestId);
         pkg.Write((int)responseKind);
@@ -139,15 +155,15 @@ internal static partial class WardMinimapPinsManager
         pkg.Write(snapshot.CandidateWardCount);
         pkg.Write(snapshot.VisibleWardCount);
         pkg.Write(snapshot.EnabledWardCount);
-        pkg.Write(snapshot.Entries.Count);
-        WriteSnapshotEntries(pkg, snapshot.Entries);
+        pkg.Write(entriesToSend.Count);
+        WriteSnapshotEntries(pkg, entriesToSend);
 
         routedRpc.InvokeRoutedRPC(receiverUid, ReceiveWardPinsRpc, pkg);
     }
 
     private static void SendWardPinsPush(
         long receiverUid,
-        bool fullSnapshot,
+        WardPinsPushKind pushKind,
         int viewerRevisionToken,
         long playerId,
         bool canSeeAllWards,
@@ -164,8 +180,41 @@ internal static partial class WardMinimapPinsManager
             return;
         }
 
+        var entryCount = snapshotEntries.Count;
+        var removedCount = removedWardIds.Count;
+        if (pushKind != WardPinsPushKind.TooLarge &&
+            visibleWardCount > WardMinimapSnapshotProtocol.MaxEntryCount)
+        {
+            pushKind = WardPinsPushKind.TooLarge;
+            snapshotEntries = System.Array.Empty<WardMinimapSnapshotEntry>();
+            removedWardIds = System.Array.Empty<ZDOID>();
+            TrackServerViewerSnapshotTooLarge(receiverUid, viewerRevisionToken);
+        }
+        else if (pushKind == WardPinsPushKind.TooLarge)
+        {
+            if (visibleWardCount <= WardMinimapSnapshotProtocol.MaxEntryCount)
+            {
+                Plugin.Log.LogError("Refusing to send an invalid ward minimap TooLarge response.");
+                return;
+            }
+
+            snapshotEntries = System.Array.Empty<WardMinimapSnapshotEntry>();
+            removedWardIds = System.Array.Empty<ZDOID>();
+        }
+        else if (entryCount > WardMinimapSnapshotProtocol.MaxEntryCount ||
+                 removedCount > WardMinimapSnapshotProtocol.MaxEntryCount - entryCount)
+        {
+            Plugin.Log.LogError("Refusing to send an oversized ward minimap snapshot payload.");
+            return;
+        }
+        else if (!AreSnapshotEntriesValid(snapshotEntries) || !AreRemovedWardIdsValid(removedWardIds))
+        {
+            Plugin.Log.LogError("Refusing to send an invalid ward minimap snapshot payload.");
+            return;
+        }
+
         var pkg = new ZPackage();
-        pkg.Write(fullSnapshot);
+        pkg.Write((int)pushKind);
         pkg.Write(viewerRevisionToken);
         pkg.Write(playerId);
         pkg.Write(canSeeAllWards);
@@ -190,17 +239,21 @@ internal static partial class WardMinimapPinsManager
         int requestId;
         WardPinsResponseKind responseKind;
         int viewerRevisionToken;
+        int visibleWardCount;
         int snapshotCount;
         try
         {
             requestId = pkg.ReadInt();
-            responseKind = ReadWardPinsResponseKind(pkg.ReadInt());
+            if (!TryReadWardPinsResponseKind(pkg.ReadInt(), out responseKind))
+            {
+                return;
+            }
             viewerRevisionToken = pkg.ReadInt();
             _ = pkg.ReadLong();
             _ = pkg.ReadBool();
             _ = pkg.ReadInt();
             _ = pkg.ReadInt();
-            _ = pkg.ReadInt();
+            visibleWardCount = pkg.ReadInt();
             _ = pkg.ReadInt();
             snapshotCount = pkg.ReadInt();
         }
@@ -226,13 +279,44 @@ internal static partial class WardMinimapPinsManager
             return;
         }
 
+        if (responseKind != WardPinsResponseKind.TooLarge &&
+            (visibleWardCount < 0 || visibleWardCount > WardMinimapSnapshotProtocol.MaxEntryCount))
+        {
+            QueueRemoteSnapshotBootstrapRequest();
+            return;
+        }
+
         if (responseKind == WardPinsResponseKind.Unavailable)
         {
+            if (snapshotCount != 0)
+            {
+                QueueRemoteSnapshotBootstrapRequest();
+            }
+
+            return;
+        }
+
+        if (responseKind == WardPinsResponseKind.TooLarge)
+        {
+            if (snapshotCount != 0 || visibleWardCount <= WardMinimapSnapshotProtocol.MaxEntryCount)
+            {
+                QueueRemoteSnapshotBootstrapRequest();
+                return;
+            }
+
+            MarkLocalSnapshotTooLarge(viewerRevisionToken, visibleWardCount);
+            UpdateLocalState(Player.m_localPlayer, force: false);
             return;
         }
 
         if (responseKind == WardPinsResponseKind.Unchanged)
         {
+            if (snapshotCount != 0)
+            {
+                QueueRemoteSnapshotBootstrapRequest();
+                return;
+            }
+
             if (_snapshotState != ClientSnapshotState.Ready)
             {
                 _pendingSnapshotRequestId = 0;
@@ -250,7 +334,8 @@ internal static partial class WardMinimapPinsManager
             return;
         }
 
-        if (!TryReadSnapshotEntries(pkg, snapshotCount, out var snapshotEntries))
+        if (visibleWardCount < 0 || snapshotCount != visibleWardCount ||
+            !TryReadSnapshotEntries(pkg, snapshotCount, out var snapshotEntries))
         {
             QueueRemoteSnapshotBootstrapRequest();
             return;
@@ -264,15 +349,20 @@ internal static partial class WardMinimapPinsManager
         UpdateLocalState(Player.m_localPlayer, force: false);
     }
 
-    private static WardPinsResponseKind ReadWardPinsResponseKind(int rawValue)
+    private static bool TryReadWardPinsResponseKind(int rawValue, out WardPinsResponseKind responseKind)
     {
-        return rawValue switch
+        switch (rawValue)
         {
-            (int)WardPinsResponseKind.Unavailable => WardPinsResponseKind.Unavailable,
-            (int)WardPinsResponseKind.FullSnapshot => WardPinsResponseKind.FullSnapshot,
-            (int)WardPinsResponseKind.Unchanged => WardPinsResponseKind.Unchanged,
-            _ => WardPinsResponseKind.Unavailable
-        };
+            case (int)WardPinsResponseKind.Unavailable:
+            case (int)WardPinsResponseKind.FullSnapshot:
+            case (int)WardPinsResponseKind.Unchanged:
+            case (int)WardPinsResponseKind.TooLarge:
+                responseKind = (WardPinsResponseKind)rawValue;
+                return true;
+            default:
+                responseKind = WardPinsResponseKind.Unavailable;
+                return false;
+        }
     }
 
     private static void HandlePushWardPins(long sender, ZPackage pkg)
@@ -282,19 +372,24 @@ internal static partial class WardMinimapPinsManager
             return;
         }
 
-        bool fullSnapshot;
+        WardPinsPushKind pushKind;
         int viewerRevisionToken;
+        int visibleWardCount;
         int snapshotCount;
         int removedWardCount;
         try
         {
-            fullSnapshot = pkg.ReadBool();
+            if (!TryReadWardPinsPushKind(pkg.ReadInt(), out pushKind))
+            {
+                QueueRemoteSnapshotBootstrapRequest();
+                return;
+            }
             viewerRevisionToken = pkg.ReadInt();
             _ = pkg.ReadLong();
             _ = pkg.ReadBool();
             _ = pkg.ReadInt();
             _ = pkg.ReadInt();
-            _ = pkg.ReadInt();
+            visibleWardCount = pkg.ReadInt();
             _ = pkg.ReadInt();
             snapshotCount = pkg.ReadInt();
         }
@@ -333,14 +428,47 @@ internal static partial class WardMinimapPinsManager
             return;
         }
 
-        if (!fullSnapshot && _snapshotState != ClientSnapshotState.Ready)
+        if (snapshotCount > WardMinimapSnapshotProtocol.MaxEntryCount - removedWardCount)
         {
             QueueRemoteSnapshotBootstrapRequest();
             return;
         }
 
-        if (fullSnapshot)
+        if (pushKind != WardPinsPushKind.TooLarge &&
+            (visibleWardCount < 0 || visibleWardCount > WardMinimapSnapshotProtocol.MaxEntryCount))
         {
+            QueueRemoteSnapshotBootstrapRequest();
+            return;
+        }
+
+        if (pushKind == WardPinsPushKind.TooLarge)
+        {
+            if (snapshotCount != 0 || removedWardCount != 0 ||
+                visibleWardCount <= WardMinimapSnapshotProtocol.MaxEntryCount)
+            {
+                QueueRemoteSnapshotBootstrapRequest();
+                return;
+            }
+
+            MarkLocalSnapshotTooLarge(viewerRevisionToken, visibleWardCount);
+            UpdateLocalState(Player.m_localPlayer, force: false);
+            return;
+        }
+
+        if (pushKind == WardPinsPushKind.Delta && _snapshotState != ClientSnapshotState.Ready)
+        {
+            QueueRemoteSnapshotBootstrapRequest();
+            return;
+        }
+
+        if (pushKind == WardPinsPushKind.FullSnapshot)
+        {
+            if (removedWardCount != 0 || visibleWardCount < 0 || snapshotCount != visibleWardCount)
+            {
+                QueueRemoteSnapshotBootstrapRequest();
+                return;
+            }
+
             ReplaceLocalSnapshot(snapshotEntries);
         }
         else
@@ -353,6 +481,21 @@ internal static partial class WardMinimapPinsManager
         _pendingSnapshotRequestId = 0;
         _lastViewerRevisionToken = viewerRevisionToken;
         UpdateLocalState(Player.m_localPlayer, force: false);
+    }
+
+    private static bool TryReadWardPinsPushKind(int rawValue, out WardPinsPushKind pushKind)
+    {
+        switch (rawValue)
+        {
+            case (int)WardPinsPushKind.FullSnapshot:
+            case (int)WardPinsPushKind.Delta:
+            case (int)WardPinsPushKind.TooLarge:
+                pushKind = (WardPinsPushKind)rawValue;
+                return true;
+            default:
+                pushKind = WardPinsPushKind.Delta;
+                return false;
+        }
     }
 
     private static void WriteSnapshotEntries(ZPackage pkg, IReadOnlyList<WardMinimapSnapshotEntry> snapshotEntries)
@@ -380,7 +523,7 @@ internal static partial class WardMinimapPinsManager
         int snapshotCount,
         out WardMinimapSnapshotEntry[] snapshotEntries)
     {
-        if (snapshotCount < 0 || snapshotCount > MaxSnapshotEntryCount)
+        if (snapshotCount < 0 || snapshotCount > WardMinimapSnapshotProtocol.MaxEntryCount)
         {
             snapshotEntries = System.Array.Empty<WardMinimapSnapshotEntry>();
             return false;
@@ -393,11 +536,18 @@ internal static partial class WardMinimapPinsManager
         {
             for (var index = 0; index < snapshotEntries.Length; index++)
             {
-                snapshotEntries[index] = new WardMinimapSnapshotEntry(
+                var entry = new WardMinimapSnapshotEntry(
                     pkg.ReadZDOID(),
                     pkg.ReadVector3(),
                     pkg.ReadSingle(),
                     pkg.ReadBool());
+                if (!WardMinimapSnapshotProtocol.IsValidEntry(entry))
+                {
+                    snapshotEntries = System.Array.Empty<WardMinimapSnapshotEntry>();
+                    return false;
+                }
+
+                snapshotEntries[index] = entry;
             }
 
             return true;
@@ -411,7 +561,7 @@ internal static partial class WardMinimapPinsManager
 
     private static bool TryReadRemovedWardIds(ZPackage pkg, int removedWardCount, out ZDOID[] removedWardIds)
     {
-        if (removedWardCount < 0 || removedWardCount > MaxSnapshotEntryCount)
+        if (removedWardCount < 0 || removedWardCount > WardMinimapSnapshotProtocol.MaxEntryCount)
         {
             removedWardIds = System.Array.Empty<ZDOID>();
             return false;
@@ -424,7 +574,14 @@ internal static partial class WardMinimapPinsManager
         {
             for (var index = 0; index < removedWardIds.Length; index++)
             {
-                removedWardIds[index] = pkg.ReadZDOID();
+                var removedWardId = pkg.ReadZDOID();
+                if (removedWardId.IsNone())
+                {
+                    removedWardIds = System.Array.Empty<ZDOID>();
+                    return false;
+                }
+
+                removedWardIds[index] = removedWardId;
             }
 
             return true;
@@ -434,6 +591,32 @@ internal static partial class WardMinimapPinsManager
             removedWardIds = System.Array.Empty<ZDOID>();
             return false;
         }
+    }
+
+    private static bool AreSnapshotEntriesValid(IReadOnlyList<WardMinimapSnapshotEntry> snapshotEntries)
+    {
+        for (var index = 0; index < snapshotEntries.Count; index++)
+        {
+            if (!WardMinimapSnapshotProtocol.IsValidEntry(snapshotEntries[index]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool AreRemovedWardIdsValid(IReadOnlyList<ZDOID> removedWardIds)
+    {
+        for (var index = 0; index < removedWardIds.Count; index++)
+        {
+            if (removedWardIds[index].IsNone())
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
 }

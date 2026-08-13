@@ -1,4 +1,3 @@
-using System;
 using System.Collections;
 using HarmonyLib;
 using LocalizationManager;
@@ -7,12 +6,6 @@ using System.Text;
 using UnityEngine;
 
 namespace STUWard;
-
-[DisallowMultipleComponent]
-internal sealed class ManagedWardLocalInitializationState : MonoBehaviour
-{
-    internal bool LocalInitializationComplete;
-}
 
 internal static class ManagedWardInitializationCoordinator
 {
@@ -23,14 +16,7 @@ internal static class ManagedWardInitializationCoordinator
             return;
         }
 
-        var state = GetOrAddState(area);
-        if (state.LocalInitializationComplete)
-        {
-            return;
-        }
-
-        WardSettings.CaptureAreaDefaults(area);
-        state.LocalInitializationComplete = true;
+        WardSettings.CaptureNativeAreaMarkerSpeed(area);
     }
 
     internal static bool TryGetValidZdo(ManagedWardRef ward, out ZDO zdo)
@@ -43,17 +29,6 @@ internal static class ManagedWardInitializationCoordinator
 
         zdo = ward.Zdo!;
         return true;
-    }
-
-    internal static ManagedWardLocalInitializationState GetOrAddState(PrivateArea area)
-    {
-        var state = area.GetComponent<ManagedWardLocalInitializationState>();
-        if (state != null)
-        {
-            return state;
-        }
-
-        return area.gameObject.AddComponent<ManagedWardLocalInitializationState>();
     }
 }
 
@@ -73,6 +48,8 @@ internal static class ManagedWardLifecycle
         {
             return;
         }
+
+        ManagedWardInitializationCoordinator.EnsureLocalInitialization(area);
 
         var context = ManagedWardRuntimeContexts.GetOrCreate(area);
         if (!context.NetworkInitializationComplete)
@@ -204,7 +181,6 @@ internal static class PrivateAreaUpdateStatusPatch
 
         if (dataRevisionChanged)
         {
-            ManagedWardInteractionRpc.NotifyLocalPermittedStateObserved(__instance);
             WardSettings.ApplyAreaState(ward);
         }
 
@@ -281,7 +257,7 @@ internal static class PrivateAreaShowAreaMarkerPatch
 
         if (!WardSettings.ShouldShowAreaMarker(__instance))
         {
-            return true;
+            return false;
         }
 
         WardSettings.ShowManagedAreaMarker(__instance);
@@ -292,7 +268,6 @@ internal static class PrivateAreaShowAreaMarkerPatch
 internal static class ManagedWardInteractionRpc
 {
     private const string RpcRequestToggleEnabled = "STUWard_RequestToggleEnabled";
-    private const string RpcRequestTogglePermitted = "STUWard_RequestTogglePermitted";
     private const string RpcPlayToggleEffect = "STUWard_PlayToggleEffect";
 
     private readonly struct PendingLocalBoolToggleRequest
@@ -311,13 +286,11 @@ internal static class ManagedWardInteractionRpc
     // reflects the pre-toggle value, so keep exactly one enabled-toggle request in flight
     // per ward until the synchronized enabled state is observed or the request times out.
     private static readonly Dictionary<ZDOID, PendingLocalBoolToggleRequest> PendingLocalEnabledToggleRequests = new();
-    private static readonly Dictionary<ZDOID, PendingLocalBoolToggleRequest> PendingLocalPermittedToggleRequests = new();
     private const float PendingLocalToggleTimeoutSeconds = 1.5f;
 
     internal static void RegisterRoutedRpcs(ZRoutedRpc routedRpc)
     {
         routedRpc.Register<ZPackage>(RpcRequestToggleEnabled, HandleRoutedToggleEnabled);
-        routedRpc.Register<ZPackage>(RpcRequestTogglePermitted, HandleRoutedTogglePermitted);
         routedRpc.Register<ZPackage>(RpcPlayToggleEffect, HandleRoutedPlayToggleEffect);
     }
 
@@ -334,7 +307,6 @@ internal static class ManagedWardInteractionRpc
     internal static void ResetLocalInteractionState()
     {
         PendingLocalEnabledToggleRequests.Clear();
-        PendingLocalPermittedToggleRequests.Clear();
     }
 
     internal static bool TryHandleInteract(PrivateArea area, Player player, bool hold, ref bool result)
@@ -364,20 +336,13 @@ internal static class ManagedWardInteractionRpc
         }
 
         var playerId = player.GetPlayerID();
-        var canControl = WardAccess.CanControlManagedWard(area, playerId) ||
-                         WardAdminDebugAccess.CanLocallyAttemptAnyWardControl(area, player);
-        if (canControl)
+        var isTrusted = WardAccess.HasManagedWardTrust(area, playerId) ||
+                        WardAdminDebugAccess.CanLocallyAttemptAnyWardControl(area, player);
+        if (isTrusted)
         {
             result = RequestToggleEnabled(area);
-            return false;
         }
 
-        if (area.IsEnabled())
-        {
-            return false;
-        }
-
-        result = RequestTogglePermitted(area, player);
         return false;
     }
 
@@ -388,7 +353,7 @@ internal static class ManagedWardInteractionRpc
             return null;
         }
 
-        if (WardAccess.CanControlManagedWard(area, player.GetPlayerID()) ||
+        if (WardAccess.HasManagedWardTrust(area, player.GetPlayerID()) ||
             WardAdminDebugAccess.CanLocallyAttemptAnyWardControl(area, player))
         {
             return LocalizeUseAction(
@@ -396,15 +361,7 @@ internal static class ManagedWardInteractionRpc
                 area.IsEnabled() ? "Deactivate" : "Activate");
         }
 
-        if (area.IsEnabled())
-        {
-            return null;
-        }
-
-        var isPermitted = WardPrivateAreaSafeAccess.IsPlayerPermitted(area, player.GetPlayerID());
-        return LocalizeUseAction(
-            isPermitted ? "$piece_guardstone_remove" : "$piece_guardstone_add",
-            isPermitted ? "Remove" : "Add");
+        return null;
     }
 
     private static bool RequestToggleEnabled(PrivateArea area)
@@ -440,40 +397,6 @@ internal static class ManagedWardInteractionRpc
         return true;
     }
 
-    private static bool RequestTogglePermitted(PrivateArea area, Player player)
-    {
-        var nview = GetNView(area);
-        if (nview == null || !nview.IsValid())
-        {
-            return false;
-        }
-
-        var zdo = WardPrivateAreaSafeAccess.GetZdo(area);
-        if (zdo == null || !zdo.IsValid())
-        {
-            return false;
-        }
-
-        var isPermitted = WardPrivateAreaSafeAccess.IsPlayerPermitted(area, player.GetPlayerID());
-        if (IsLocalToggleRequestInFlight(PendingLocalPermittedToggleRequests, zdo.m_uid, isPermitted))
-        {
-            return true;
-        }
-
-        var expectedPermitted = !isPermitted;
-        var request = new ZPackage();
-        request.Write(zdo.m_uid);
-        if (!WardOwnership.TryInvokeServerRoutedRpc(RpcRequestTogglePermitted, request))
-        {
-            return false;
-        }
-
-        PendingLocalPermittedToggleRequests[zdo.m_uid] = new PendingLocalBoolToggleRequest(
-            expectedPermitted,
-            Time.time + PendingLocalToggleTimeoutSeconds);
-        return true;
-    }
-
     private static void HandleRoutedToggleEnabled(long sender, ZPackage? request)
     {
         if (!TryResolveServerWardRequest(sender, request, out var zdo, out var requesterId))
@@ -481,7 +404,7 @@ internal static class ManagedWardInteractionRpc
             return;
         }
 
-        if (!WardAccess.CanControlManagedWard(zdo, requesterId))
+        if (!WardAccess.HasManagedWardTrust(zdo, requesterId))
         {
             return;
         }
@@ -535,42 +458,6 @@ internal static class ManagedWardInteractionRpc
 
         var transform = area.transform;
         _ = effectList.Create(transform.position, transform.rotation, null, 1f, -1);
-    }
-
-    private static void HandleRoutedTogglePermitted(long sender, ZPackage? request)
-    {
-        if (!TryReadRoutedWardRequest(request, out var wardZdoId))
-        {
-            return;
-        }
-
-        if (!TryResolveServerWardRequest(sender, wardZdoId, out var zdo, out var requesterId))
-        {
-            return;
-        }
-
-        if (WardAccess.CanControlManagedWard(zdo, requesterId) || zdo.GetBool(ZDOVars.s_enabled, false))
-        {
-            return;
-        }
-
-        if (!WardOwnership.TryClaimManagedWardMutationOwnership(zdo))
-        {
-            return;
-        }
-
-        var requesterName = WardOwnership.GetPlayerName(requesterId);
-        if (string.IsNullOrWhiteSpace(requesterName))
-        {
-            requesterName = requesterId.ToString();
-        }
-
-        if (!WardPrivateAreaSafeAccess.TogglePermittedPlayer(zdo, requesterId, requesterName))
-        {
-            return;
-        }
-
-        WardOwnership.CompleteAuthoritativePermittedMutation(zdo);
     }
 
     private static bool TryResolveServerWardRequest(
@@ -659,65 +546,9 @@ internal static class ManagedWardInteractionRpc
         return ApplyToggleEnabled(area, requesterId);
     }
 
-    internal static bool TryHandleVanillaTogglePermitted(PrivateArea area, long sender, long claimedPlayerId, string name)
-    {
-        var nview = GetNView(area);
-        if (!WardOwnership.CanApplyManagedWardStateLocally(nview))
-        {
-            return false;
-        }
-
-        if (!WardOwnership.TryResolveClaimedPlayerIdFromSender(sender, claimedPlayerId, out var requesterId))
-        {
-            return false;
-        }
-
-        if (requesterId == 0L)
-        {
-            return false;
-        }
-
-        if (WardAccess.CanControlManagedWard(area, requesterId))
-        {
-            return false;
-        }
-
-        if (area.IsEnabled())
-        {
-            return false;
-        }
-
-        if (!WardOwnership.TryClaimManagedWardMutationOwnership(area))
-        {
-            return false;
-        }
-
-        if (WardPrivateAreaSafeAccess.IsPlayerPermitted(area, requesterId))
-        {
-            var hadBaselineRevision = ManagedWardRuntimeContexts.TryGetCurrentDataRevision(area, out var baselineDataRevision);
-            area.RemovePermitted(requesterId);
-            if (hadBaselineRevision)
-            {
-                ManagedWardRuntimeContexts.ArmNextDataRevisionFanOutSuppressionIfChanged(area, baselineDataRevision);
-            }
-
-            return true;
-        }
-
-        var requesterName = !string.IsNullOrWhiteSpace(name) ? name : WardOwnership.GetPlayerName(requesterId);
-        if (string.IsNullOrWhiteSpace(requesterName))
-        {
-            requesterName = requesterId.ToString();
-        }
-
-        ManagedWardRuntimeContexts.ArmNextDataRevisionFanOutSuppression(area);
-        area.AddPermitted(requesterId, requesterName);
-        return true;
-    }
-
     private static bool ApplyToggleEnabled(PrivateArea area, long requesterId)
     {
-        if (!WardAccess.CanControlManagedWard(area, requesterId))
+        if (!WardAccess.HasManagedWardTrust(area, requesterId))
         {
             return false;
         }
@@ -748,19 +579,6 @@ internal static class ManagedWardInteractionRpc
         }
 
         PendingLocalEnabledToggleRequests.Remove(zdo.m_uid);
-    }
-
-    internal static void NotifyLocalPermittedStateObserved(PrivateArea area)
-    {
-        var localPlayer = Player.m_localPlayer;
-        var zdo = WardPrivateAreaSafeAccess.GetZdo(area);
-        if (localPlayer == null || zdo == null || !zdo.IsValid())
-        {
-            return;
-        }
-
-        var currentPermitted = WardPrivateAreaSafeAccess.IsPlayerPermitted(area, localPlayer.GetPlayerID());
-        _ = IsLocalToggleRequestInFlight(PendingLocalPermittedToggleRequests, zdo.m_uid, currentPermitted);
     }
 
     private static bool IsLocalToggleRequestInFlight(
@@ -851,7 +669,12 @@ internal static class ManagedWardHoverTextService
                 shortcutLabel);
         }
 
-        if (guildLine == null && actionLine == null && settingsLine == null)
+        var hasVanillaActionLine = originalText[0] == '[' ||
+                                   originalText.IndexOf("\n[", System.StringComparison.Ordinal) >= 0;
+        if (guildLine == null &&
+            actionLine == null &&
+            settingsLine == null &&
+            !hasVanillaActionLine)
         {
             ManagedWardRuntimeContexts.ClearHoverText(area);
             return false;
@@ -881,26 +704,23 @@ internal static class ManagedWardHoverTextService
             return false;
         }
 
+        // Vanilla adds an opt-in/opt-out action for every non-owner looking at an
+        // inactive ward. Managed wards no longer support self-registration, so
+        // remove the vanilla action before adding the trusted-only control action.
+        if (actionLineIndex >= 0)
+        {
+            lines.RemoveAt(actionLineIndex);
+        }
+
         if (guildLine != null)
         {
-            lines.Insert(2, new HoverTextLine(guildLine));
+            lines.Insert(Mathf.Min(2, lines.Count), new HoverTextLine(guildLine));
         }
 
         if (actionLine != null)
         {
-            if (actionLineIndex >= 0)
-            {
-                if (guildLine != null && actionLineIndex >= 2)
-                {
-                    actionLineIndex++;
-                }
-
-                lines[actionLineIndex] = new HoverTextLine(actionLine);
-            }
-            else
-            {
-                lines.Insert(Mathf.Max(2, lines.Count - 1), new HoverTextLine(actionLine));
-            }
+            var actionInsertIndex = lines.Count > 1 ? lines.Count - 1 : lines.Count;
+            lines.Insert(actionInsertIndex, new HoverTextLine(actionLine));
         }
 
         if (settingsLine != null && lines.Count >= 3)
@@ -1032,14 +852,15 @@ internal static class PrivateAreaRpcToggleEnabledAdminDebugPatch
 [HarmonyPatch(typeof(PrivateArea), "RPC_TogglePermitted")]
 internal static class PrivateAreaRpcTogglePermittedManagedPatch
 {
-    private static bool Prefix(PrivateArea __instance, long uid, long playerID, string name)
+    private static bool Prefix(PrivateArea __instance)
     {
         if (!ManagedWardInteractionRpc.IsManagedWardForHooks(__instance))
         {
             return true;
         }
 
-        _ = ManagedWardInteractionRpc.TryHandleVanillaTogglePermitted(__instance, uid, playerID, name);
+        // Managed wards never use vanilla's disabled-ward self-registration path.
+        // Membership changes are handled only by STUWard's server-authorized list operations.
         return false;
     }
 }
@@ -1081,7 +902,7 @@ internal static class CircleProjectorCreateSegmentsPatch
             return;
         }
 
-        WardSettings.InvalidateAreaMarkerVisuals(area);
+        ManagedWardInitializationCoordinator.EnsureLocalInitialization(area);
         WardSettings.ApplyAreaState(ward);
     }
 }
@@ -1098,18 +919,44 @@ internal static class PrivateAreaRpcFlashShieldVolumePatch
 [HarmonyPatch(typeof(Door), nameof(Door.RPC_UseDoor))]
 internal static class DoorRpcUseDoorPatch
 {
-    private static readonly Dictionary<int, Coroutine> DoorCloseCoroutines = new();
+    private const float AutoCloseDelaySeconds = 5f;
 
-    private static void Postfix(Door __instance)
+    private sealed class ScheduledDoorClose
     {
-        var nview = __instance.m_nview != null ? __instance.m_nview : __instance.GetComponent<ZNetView>();
-        if (nview == null || !nview.IsValid())
+        internal ScheduledDoorClose(int generation, Coroutine coroutine)
+        {
+            Generation = generation;
+            Coroutine = coroutine;
+        }
+
+        internal int Generation { get; }
+        internal Coroutine Coroutine { get; }
+    }
+
+    private static readonly Dictionary<int, ScheduledDoorClose> DoorCloseCoroutines = new();
+    private static int _nextScheduleGeneration;
+
+    private static void Prefix(Door __instance, out int __state)
+    {
+        __state = GetDoorState(__instance);
+    }
+
+    private static void Postfix(Door __instance, int __state)
+    {
+        var currentState = GetDoorState(__instance);
+        if (__state != 0 && currentState == 0)
+        {
+            CancelDoorAutoClose(__instance);
+            return;
+        }
+
+        if (__state != 0 || currentState == 0 || currentState == __state)
         {
             return;
         }
 
-        var state = nview.GetZDO()?.GetInt(ZDOVars.s_state, 0) ?? 0;
-        if (state == 0)
+        if (!CanAutoClose(__instance) ||
+            !WardSettings.IsDoorAutoCloseEnabledAt(__instance.transform.position))
         {
             CancelDoorAutoClose(__instance);
             return;
@@ -1120,37 +967,45 @@ internal static class DoorRpcUseDoorPatch
 
     internal static void Reset()
     {
-        foreach (var coroutine in DoorCloseCoroutines.Values)
+        var plugin = Plugin.Instance;
+        if (plugin != null)
         {
-            Plugin.Instance.StopCoroutine(coroutine);
+            foreach (var scheduledClose in DoorCloseCoroutines.Values)
+            {
+                plugin.StopCoroutine(scheduledClose.Coroutine);
+            }
         }
 
         DoorCloseCoroutines.Clear();
+        _nextScheduleGeneration = 0;
     }
 
-    private static void ScheduleDoorAutoClose(Door door)
+    private static void ScheduleDoorAutoClose(Door? door)
     {
-        if (door == null || door.m_canNotBeClosed)
+        if (door == null || !CanAutoClose(door))
         {
             return;
         }
 
-        if (!WardSettings.TryGetAutoCloseDoorDelay(door.transform.position, out var delay))
+        var nview = GetValidNView(door);
+        var plugin = Plugin.Instance;
+        if (nview == null || !nview.IsOwner() || plugin == null)
         {
-            CancelDoorAutoClose(door);
             return;
         }
 
         var key = door.GetInstanceID();
         if (DoorCloseCoroutines.TryGetValue(key, out var existing))
         {
-            Plugin.Instance.StopCoroutine(existing);
+            plugin.StopCoroutine(existing.Coroutine);
         }
 
-        DoorCloseCoroutines[key] = Plugin.Instance.StartCoroutine(CloseDoorAfterDelay(door, delay));
+        var generation = AllocateScheduleGeneration();
+        var coroutine = plugin.StartCoroutine(CloseDoorAfterDelay(door, key, generation));
+        DoorCloseCoroutines[key] = new ScheduledDoorClose(generation, coroutine);
     }
 
-    private static void CancelDoorAutoClose(Door door)
+    private static void CancelDoorAutoClose(Door? door)
     {
         if (door == null)
         {
@@ -1158,29 +1013,43 @@ internal static class DoorRpcUseDoorPatch
         }
 
         var key = door.GetInstanceID();
-        if (!DoorCloseCoroutines.TryGetValue(key, out var coroutine))
+        if (!DoorCloseCoroutines.TryGetValue(key, out var scheduledClose))
         {
             return;
         }
 
-        Plugin.Instance.StopCoroutine(coroutine);
         DoorCloseCoroutines.Remove(key);
+        var plugin = Plugin.Instance;
+        if (plugin != null)
+        {
+            plugin.StopCoroutine(scheduledClose.Coroutine);
+        }
     }
 
-    private static IEnumerator CloseDoorAfterDelay(Door door, float delay)
+    private static IEnumerator CloseDoorAfterDelay(Door door, int key, int generation)
     {
-        var key = door.GetInstanceID();
-        yield return new WaitForSeconds(delay);
+        yield return new WaitForSeconds(AutoCloseDelaySeconds);
 
-        DoorCloseCoroutines.Remove(key);
-        if (door == null || door.m_canNotBeClosed)
+        if (!DoorCloseCoroutines.TryGetValue(key, out var scheduledClose) ||
+            scheduledClose.Generation != generation)
         {
             yield break;
         }
 
-        var nview = door.m_nview != null ? door.m_nview : door.GetComponent<ZNetView>();
-        if (nview == null || !nview.IsValid() ||
-            !WardSettings.TryGetAutoCloseDoorDelay(door.transform.position, out _))
+        DoorCloseCoroutines.Remove(key);
+        if (!CanAutoClose(door))
+        {
+            yield break;
+        }
+
+        var nview = GetValidNView(door);
+        if (nview == null)
+        {
+            yield break;
+        }
+
+        if (!nview.IsOwner() ||
+            !WardSettings.IsDoorAutoCloseEnabledAt(door.transform.position))
         {
             yield break;
         }
@@ -1190,6 +1059,37 @@ internal static class DoorRpcUseDoorPatch
         {
             nview.InvokeRPC("UseDoor", new object[] { true });
         }
+    }
+
+    private static ZNetView? GetValidNView(Door? door)
+    {
+        if (door == null)
+        {
+            return null;
+        }
+
+        var nview = door.m_nview != null ? door.m_nview : door.GetComponent<ZNetView>();
+        return nview != null && nview.IsValid() ? nview : null;
+    }
+
+    private static int GetDoorState(Door? door)
+    {
+        return GetValidNView(door)?.GetZDO()?.GetInt(ZDOVars.s_state, 0) ?? 0;
+    }
+
+    private static bool CanAutoClose(Door? door)
+    {
+        return door != null && !door.m_canNotBeClosed && door.m_keyItem == null;
+    }
+
+    private static int AllocateScheduleGeneration()
+    {
+        if (_nextScheduleGeneration == int.MaxValue)
+        {
+            _nextScheduleGeneration = 0;
+        }
+
+        return ++_nextScheduleGeneration;
     }
 }
 

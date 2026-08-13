@@ -34,6 +34,7 @@ internal static class WardPluginConfigBindings
         UnbindHandler(Plugin.StuWardRecipe, HandleRecipeSettingsChanged);
         UnbindHandler(Plugin.WardMinimapPinScale, HandleLocalWardPinConfigChanged);
         UnbindHandler(Plugin.WardMinimapActiveRanges, HandleLocalWardPinConfigChanged);
+        UnbindHandler(Plugin.WardBoundaryBrightenMode, HandleLocalBoundaryBrightenModeChanged);
         _handlersBound = false;
     }
 
@@ -52,7 +53,7 @@ internal static class WardPluginConfigBindings
             "1 - General",
             "Max Ward Radius",
             32f,
-            "Maximum configurable Ward radius. Valid range: 8 to 64.",
+            "Maximum radius automatically assigned when a Ward is placed. Valid range: 8 to 64.",
             configManagerOrder: GeneralOrderStart - OrderStep
         );
 
@@ -150,6 +151,15 @@ internal static class WardPluginConfigBindings
             configManagerOrder: ClientOrderStart - OrderStep * 2
         );
 
+        Plugin.WardBoundaryBrightenMode = Plugin.BindConfigEntry(
+            "3 - Client",
+            "Ward Boundary Brighten Mode",
+            Plugin.BoundaryBrightenMode.All,
+            "Controls which enabled ward boundaries brighten near the local player. TrustedOnly applies to wards where the player is trusted, UntrustedOnly applies to wards where the player is not trusted, All applies to every ward, and Off disables the boundary cue. Placement-conflict highlights remain enabled in every mode.",
+            synchronizedSetting: false,
+            configManagerOrder: ClientOrderStart - OrderStep * 3
+        );
+
     }
 
     private static void BindHandlers()
@@ -160,6 +170,7 @@ internal static class WardPluginConfigBindings
         BindHandler(Plugin.StuWardRecipe, HandleRecipeSettingsChanged);
         BindHandler(Plugin.WardMinimapPinScale, HandleLocalWardPinConfigChanged);
         BindHandler(Plugin.WardMinimapActiveRanges, HandleLocalWardPinConfigChanged);
+        BindHandler(Plugin.WardBoundaryBrightenMode, HandleLocalBoundaryBrightenModeChanged);
         _handlersBound = true;
     }
 
@@ -181,6 +192,11 @@ internal static class WardPluginConfigBindings
     private static void HandleLocalWardPinConfigChanged(object? _, EventArgs __)
     {
         WardMinimapPinsManager.HandleLocalConfigChanged();
+    }
+
+    private static void HandleLocalBoundaryBrightenModeChanged(object? _, EventArgs __)
+    {
+        WardSettings.HandleLocalBoundaryBrightenModeChanged();
     }
 
     private static void BindHandler<T>(ConfigEntry<T>? entry, EventHandler handler)

@@ -30,11 +30,6 @@ internal static class ManagedWardIdentity
         return EnsureManagedComponent(ManagedWardRef.FromArea(area));
     }
 
-    internal static bool EnsureManagedComponent(PrivateArea? area, ZDO? zdo)
-    {
-        return EnsureManagedComponent(ManagedWardRef.FromArea(area, zdo));
-    }
-
     internal static bool EnsureManagedComponent(ManagedWardRef ward)
     {
         return TryResolve(ward, repairComponent: true, out var matchedByComponent, out _) && matchedByComponent;

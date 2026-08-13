@@ -92,4 +92,34 @@ public sealed class WardOverlapPolicyTests
 
         Assert.Equal(0f, maxRadius);
     }
+
+    [Fact]
+    public void TryGetPlacementRadius_uses_the_largest_radius_left_by_an_existing_foreign_ward()
+    {
+        var query = new WardOverlapQuery(x: 0f, z: 0f, radius: 32f, ownerPlayerId: 10L, guildId: 1);
+        var areas = new[]
+        {
+            new WardOverlapArea(id: 1, x: 50f, z: 0f, radius: 32f, ownerPlayerId: 20L, guildId: 2)
+        };
+
+        var canPlace = WardOverlapPolicy.TryGetPlacementRadius(8f, 32f, query, areas, out var radius);
+
+        Assert.True(canPlace);
+        Assert.Equal(18f, radius);
+    }
+
+    [Fact]
+    public void TryGetPlacementRadius_rejects_when_less_than_the_minimum_radius_remains()
+    {
+        var query = new WardOverlapQuery(x: 0f, z: 0f, radius: 32f, ownerPlayerId: 10L, guildId: 1);
+        var areas = new[]
+        {
+            new WardOverlapArea(id: 1, x: 39f, z: 0f, radius: 32f, ownerPlayerId: 20L, guildId: 2)
+        };
+
+        var canPlace = WardOverlapPolicy.TryGetPlacementRadius(8f, 32f, query, areas, out var radius);
+
+        Assert.False(canPlace);
+        Assert.Equal(7f, radius);
+    }
 }

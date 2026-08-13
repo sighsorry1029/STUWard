@@ -421,6 +421,11 @@ internal static partial class GuildsCompat
             targetCharacterKeys,
             affectedGuildIds,
             fullRefresh);
+        WardPermittedSnapshots.RefreshKnownSnapshotsForGuildIdentityChanges(
+            targetPlayerIds,
+            targetCharacterKeys,
+            affectedGuildIds,
+            fullRefresh);
         foreach (var candidateWardId in candidateWardIds)
         {
             var managedWardZdo = ZDOMan.instance?.GetZDO(candidateWardId);

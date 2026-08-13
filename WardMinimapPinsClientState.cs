@@ -21,6 +21,7 @@ internal static partial class WardMinimapPinsManager
     private static int _lastViewerRevisionToken;
     private static int _nextSnapshotRequestId;
     private static int _pendingSnapshotRequestId;
+    private static bool _snapshotTooLargeWarningLogged;
     private static DateTime _lastRemoteSnapshotRequestUtc = DateTime.MinValue;
     private static Minimap? _boundMinimap;
     private static Minimap? _customPinTypesMinimap;
@@ -29,7 +30,8 @@ internal static partial class WardMinimapPinsManager
     {
         Uninitialized,
         AwaitingFullSnapshot,
-        Ready
+        Ready,
+        TooLarge
     }
 
     private static void ResetClientRuntimeState()
@@ -42,6 +44,7 @@ internal static partial class WardMinimapPinsManager
         _lastViewerRevisionToken = 0;
         _nextSnapshotRequestId = 0;
         _pendingSnapshotRequestId = 0;
+        _snapshotTooLargeWarningLogged = false;
         _lastRemoteSnapshotRequestUtc = DateTime.MinValue;
         _boundMinimap = null;
         _customPinTypesMinimap = null;
@@ -134,7 +137,9 @@ internal static partial class WardMinimapPinsManager
         if (player == null ||
             player != Player.m_localPlayer ||
             !IsLargeMapOpen(Minimap.instance) ||
-            (!_pendingForceRefresh && _snapshotState == ClientSnapshotState.Ready && _pendingSnapshotRequestId == 0))
+            (!_pendingForceRefresh &&
+             (_snapshotState == ClientSnapshotState.Ready || _snapshotState == ClientSnapshotState.TooLarge) &&
+             _pendingSnapshotRequestId == 0))
         {
             return;
         }
@@ -209,22 +214,32 @@ internal static partial class WardMinimapPinsManager
         var playerId = player.GetPlayerID();
         var playerGuildId = GuildsCompat.GetPlayerGuildId(playerId);
         var viewerRevisionToken = WardMinimapVisibilityIndex.GetViewerRevisionToken(playerId, playerGuildId, canSeeAllWards);
-        if (!force &&
+        if (_snapshotState == ClientSnapshotState.TooLarge &&
             !_pendingForceRefresh &&
-            _snapshotState == ClientSnapshotState.Ready &&
             viewerRevisionToken == _lastViewerRevisionToken)
         {
             return;
         }
 
-        ClearPendingForceRefresh();
-        _lastViewerRevisionToken = viewerRevisionToken;
-        RebuildLocalSnapshot(playerId, playerGuildId, canSeeAllWards);
+        if (!force &&
+            !_pendingForceRefresh &&
+            (_snapshotState == ClientSnapshotState.Ready || _snapshotState == ClientSnapshotState.TooLarge) &&
+            viewerRevisionToken == _lastViewerRevisionToken)
+        {
+            return;
+        }
+
+        RebuildLocalSnapshot(playerId, playerGuildId, canSeeAllWards, viewerRevisionToken);
     }
 
     private static void RequestRemoteSnapshotIfNeeded(Player player, bool canSeeAllWards, bool force)
     {
         RegisterRpcs();
+
+        if (_snapshotState == ClientSnapshotState.TooLarge && !_pendingForceRefresh)
+        {
+            return;
+        }
 
         var now = DateTime.UtcNow;
         var shouldRetryPendingRequest = _pendingSnapshotRequestId != 0 &&
@@ -273,18 +288,46 @@ internal static partial class WardMinimapPinsManager
         routedRpc.InvokeRoutedRPC(RequestWardPinsRpc, pkg);
     }
 
-    private static void RebuildLocalSnapshot(long playerId, int playerGuildId, bool canSeeAllWards)
+    private static void RebuildLocalSnapshot(
+        long playerId,
+        int playerGuildId,
+        bool canSeeAllWards,
+        int viewerRevisionToken)
     {
         var snapshot = WardMinimapViewerSnapshotBuilder.Build(
             playerId,
             playerGuildId,
             canSeeAllWards,
-            _lastViewerRevisionToken,
+            viewerRevisionToken,
             includeEntries: true,
             includeVisibleWardDataRevisions: false);
+        if (snapshot.VisibleWardCount > WardMinimapSnapshotProtocol.MaxEntryCount)
+        {
+            MarkLocalSnapshotTooLarge(viewerRevisionToken, snapshot.VisibleWardCount);
+            return;
+        }
+
         ReplaceLocalSnapshot(snapshot.Entries);
         _pendingSnapshotRequestId = 0;
+        _lastViewerRevisionToken = viewerRevisionToken;
+        _snapshotTooLargeWarningLogged = false;
         ClearPendingForceRefresh();
         ClearPendingRemoteSnapshotBootstrapRequest();
+    }
+
+    private static void MarkLocalSnapshotTooLarge(int viewerRevisionToken, int visibleWardCount)
+    {
+        _pendingSnapshotRequestId = 0;
+        _lastViewerRevisionToken = viewerRevisionToken;
+        _snapshotState = ClientSnapshotState.TooLarge;
+        ClearPendingForceRefresh();
+        if (_snapshotTooLargeWarningLogged)
+        {
+            return;
+        }
+
+        _snapshotTooLargeWarningLogged = true;
+        Plugin.Log.LogWarning(
+            $"Ward minimap snapshot has {visibleWardCount} visible wards, exceeding the supported limit of {WardMinimapSnapshotProtocol.MaxEntryCount}. Keeping the previous snapshot until it fits.");
     }
 }

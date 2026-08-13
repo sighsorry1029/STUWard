@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Text;
 
 namespace STUWard;
 
@@ -8,6 +10,10 @@ internal static class ManagedWardReportService
     private const string RequestWardReportRpc = "STUWard_RequestWardReport";
     private const string ReceiveWardReportRpc = "STUWard_ReceiveWardReport";
     private const string WardReportConsoleCommand = "stuw_wardreport";
+    private const int MaxReportBytes = 2 * 1024 * 1024;
+    private const int MaxResponseMessageLength = 1024;
+    private static readonly TimeSpan MinimumRequestInterval = TimeSpan.FromSeconds(5);
+    private static readonly Dictionary<long, DateTime> LastRequestUtcBySender = new();
 
     private static bool _rpcsRegistered;
     private static bool _consoleCommandRegistered;
@@ -15,6 +21,15 @@ internal static class ManagedWardReportService
     internal static void ResetRuntimeState()
     {
         _rpcsRegistered = false;
+        LastRequestUtcBySender.Clear();
+    }
+
+    internal static void ForgetSender(long senderUid)
+    {
+        if (senderUid != 0L)
+        {
+            LastRequestUtcBySender.Remove(senderUid);
+        }
     }
 
     internal static void RegisterRpcs()
@@ -55,7 +70,7 @@ internal static class ManagedWardReportService
             return true;
         }
 
-        WardOwnership.RegisterRpcs();
+        RegisterRpcs();
         terminal?.AddString($"{Plugin.ModName}: requested ward report generation on the server.");
         ZRoutedRpc.instance?.InvokeRoutedRPC(RequestWardReportRpc);
         return true;
@@ -115,9 +130,18 @@ internal static class ManagedWardReportService
 
         if (!WardOwnership.TryResolveAuthoritativePlayerIdFromSender(sender, out var playerId))
         {
-            SendWardReportResponse(sender, success: false, string.Empty, 0, 0, 0, "Could not resolve the requesting player on the server.");
             return;
         }
+
+        var now = DateTime.UtcNow;
+        if (LastRequestUtcBySender.TryGetValue(sender, out var lastRequestUtc) &&
+            now >= lastRequestUtc &&
+            now - lastRequestUtc < MinimumRequestInterval)
+        {
+            return;
+        }
+
+        LastRequestUtcBySender[sender] = now;
 
         var accountId = WardOwnership.GetPlayerAccountId(playerId);
         if (!WardAdminDebugAccess.IsAdminAccountId(accountId))
@@ -129,6 +153,22 @@ internal static class ManagedWardReportService
 
         if (WardOwnership.TryBuildWardCountReport(out var reportContents, out var trackedAccounts, out var totalWards, out var unresolvedOwners))
         {
+            reportContents ??= string.Empty;
+            if (Encoding.UTF8.GetByteCount(reportContents) > MaxReportBytes)
+            {
+                Plugin.Log.LogWarning(
+                    $"Ward report for admin playerId={playerId} exceeds the {MaxReportBytes}-byte response limit.");
+                SendWardReportResponse(
+                    sender,
+                    success: false,
+                    string.Empty,
+                    0,
+                    0,
+                    0,
+                    "The ward report is too large to transfer. Generate it from the server console instead.");
+                return;
+            }
+
             Plugin.Log.LogInfo(
                 $"Prepared ward report for admin playerId={playerId}. tracked accounts={trackedAccounts}, total wards={totalWards}, unresolved owner wards={unresolvedOwners}");
             SendWardReportResponse(sender, success: true, reportContents, trackedAccounts, totalWards, unresolvedOwners, string.Empty);
@@ -168,6 +208,12 @@ internal static class ManagedWardReportService
             return;
         }
 
+        if (message.Length > MaxResponseMessageLength || Encoding.UTF8.GetByteCount(reportContents) > MaxReportBytes)
+        {
+            Plugin.Log.LogWarning($"{Plugin.ModName}: rejected an oversized ward report response.");
+            return;
+        }
+
         if (!success)
         {
             Plugin.Log.LogWarning($"{Plugin.ModName}: {message}");
@@ -195,13 +241,25 @@ internal static class ManagedWardReportService
             return;
         }
 
+        reportContents ??= string.Empty;
+        message ??= string.Empty;
+        if (Encoding.UTF8.GetByteCount(reportContents) > MaxReportBytes || message.Length > MaxResponseMessageLength)
+        {
+            success = false;
+            reportContents = string.Empty;
+            trackedAccounts = 0;
+            totalWards = 0;
+            unresolvedOwners = 0;
+            message = "The ward report response exceeded its transfer limit.";
+        }
+
         var pkg = new ZPackage();
         pkg.Write(success);
         pkg.Write(trackedAccounts);
         pkg.Write(totalWards);
         pkg.Write(unresolvedOwners);
-        pkg.Write(message ?? string.Empty);
-        pkg.Write(reportContents ?? string.Empty);
+        pkg.Write(message);
+        pkg.Write(reportContents);
         routedRpc.InvokeRoutedRPC(receiverUid, ReceiveWardReportRpc, pkg);
     }
 }

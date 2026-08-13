@@ -80,15 +80,6 @@ internal static class WardAdminDebugAccess
         ZRoutedRpc.instance?.InvokeRoutedRPC(RpcSetAdminDebugState, enabled);
     }
 
-    internal static bool CanLocallyControlAnyWard(PrivateArea? area, Player? player)
-    {
-        return area != null &&
-               player != null &&
-               player == Player.m_localPlayer &&
-               WardAccess.IsManagedWard(area, false) &&
-               IsLocalAdminDebugController(player);
-    }
-
     // UI/input preview path only. Server-side RPC validation remains authoritative.
     internal static bool CanLocallyAttemptAnyWardControl(PrivateArea? area, Player? player)
     {

@@ -1,5 +1,38 @@
 # Changelog
 
+## 1.3.1
+
+- Simplified ward-ring visibility: placement previews and enabled wards show their ring, while disabled wards remain hidden unless highlighted as the closest placement blocker.
+- Removed the unused per-ward marker-visibility state and the settings-response overlap-feedback flag from the exact-version settings protocol while retaining authoritative radius clamping and the normal placement-conflict warning/highlight path.
+- Preserved registered-player identity snapshots when offline lookups are unavailable and removed quadratic recent-player filtering.
+- Rejected oversized or invalid server YAML safely, bounded report and minimap payloads, and preserved the last valid client minimap snapshot when the server exceeds the supported ward count.
+- Simplified runtime RPC ownership, player-list UI construction, and local deployment while making release packaging stage the manifest without modifying the tracked source file.
+- This wire format is not backward compatible; servers and all clients must update to STUWard 1.3.1 together.
+
+## 1.3.0
+
+- Expanded the second-page behavior labels and arranged ward alert sound, ward alert visual effect, ward-range rotation, and door auto-close in a two-column grid. Range rotation defaults to on at 50% of the native marker speed.
+- Added a server-authoritative, per-world list of characters seen within the last fourteen days so trusted players can add them directly to a ward. Records previously pruned by the shorter retention policy cannot be recovered retroactively.
+- Restored the two-page Ward Settings layout: player management on the first page, behavior toggles and restrictions on the second, with independent scrolling lists.
+- Removed confirmation popups from ward dismantling, trusted-player removal, and ward activation changes; authorized actions now apply immediately.
+- Removed disabled-ward outsider self-registration and its stale vanilla opt-in/opt-out hover prompts. Trusted players now manage individual ward registration from Ward Settings.
+- Recent-player history starts with this release and is not imported from logs or older STUWard data.
+- Added a local full-brightness ward-ring cue that pulses for 0.5 seconds when crossing and remains active while standing within 0.75m of the boundary.
+- Added a client-only boundary brightness scope setting for trusted wards, untrusted wards, all wards, or off; placement conflicts independently highlight the closest blocking ward ring for 1.5 seconds.
+- Added guild, public platform account IDs, and online/last-seen status to player rows, plus independent local search fields for the registered and unregistered lists.
+- Made generated `STUWard.yml` ward-limit examples directly uncommentable under the active `ward_limit_overrides` mapping.
+
+## 1.2.9
+
+- Unified existing-ward permissions for owners, individually trusted players, same-guild members, and admin+debug users.
+- Added confirmation prompts before removing an individually trusted player, dismantling a ward, or deactivating a ward.
+- Made new wards automatically use the largest legal radius up to the server maximum, yielding to older foreign wards.
+- Fixed ward marker speed and brightness at their minimum settings and removed all three marker sliders.
+- Simplified door auto-close to a per-ward on/off switch with one shared fixed delay of 5 seconds.
+- Fixed the one-page restrictions grid failing to build because its ScrollView still had Jotunn's default vertical layout component.
+- Removed the legacy ward-settings payload and door-delay migration path; servers and clients must update together.
+- Combined warning toggles, individually trusted players, and the two-column restrictions grid on one page with independent scrolling blocks.
+
 ## 1.2.8
 
 - Fixed revoked admin+debug access remaining cached and stopped treating cross-platform accounts with the same numeric suffix as the same administrator.

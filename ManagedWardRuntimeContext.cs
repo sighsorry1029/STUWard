@@ -81,14 +81,16 @@ internal sealed class ManagedWardRuntimeContext
     internal bool NetworkInitializationComplete;
     internal bool OwnershipObserved;
 
-    internal bool HasDefaultAreaMarkerSpeed;
-    internal float DefaultAreaMarkerSpeed;
+    internal bool HasNativeAreaMarkerSpeed;
+    internal float NativeAreaMarkerSpeed;
 
     internal bool HasCachedConfiguration;
     internal CachedWardConfiguration CachedConfiguration;
 
     internal bool HasAreaMarkerVisualState;
     internal CachedAreaMarkerVisualState AreaMarkerVisualState;
+    internal float AreaMarkerBoundaryFlashUntil = float.NegativeInfinity;
+    internal float AreaMarkerPlacementHighlightUntil = float.NegativeInfinity;
 
     internal bool HasObservedState;
     internal ManagedWardObservedState ObservedState;
@@ -243,17 +245,6 @@ internal static class ManagedWardRuntimeContexts
         var context = GetOrCreate(area);
         context.HasPendingDataRevisionFanOutSuppression = true;
         context.PendingDataRevisionFanOutBaseline = baselineDataRevision;
-    }
-
-    internal static void ArmNextDataRevisionFanOutSuppressionIfChanged(PrivateArea? area, uint baselineDataRevision)
-    {
-        if (!TryGetCurrentDataRevision(area, out var currentDataRevision) ||
-            currentDataRevision == baselineDataRevision)
-        {
-            return;
-        }
-
-        ArmNextDataRevisionFanOutSuppression(area, baselineDataRevision);
     }
 
     internal static bool TryConsumeEnabledFanOutSuppression(PrivateArea? area, bool currentEnabled)

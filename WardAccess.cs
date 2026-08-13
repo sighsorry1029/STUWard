@@ -576,6 +576,18 @@ internal static class WardAccess
         return false;
     }
 
+    internal static bool TryBlockItemUseAtPlayerOrHoveredTamedCreature(Player? player, ItemDrop.ItemData? item)
+    {
+        if (!ShouldBlockConfiguredItemUse(player, item) &&
+            !ShouldBlockConfiguredItemUseAgainstHoveredTamedCreature(player, item))
+        {
+            return true;
+        }
+
+        ShowBlockedItemMessage(player);
+        return false;
+    }
+
     internal static bool TryForceUnequipBlockedItems(Player? player)
     {
         if (player == null || player != Player.m_localPlayer)
@@ -883,32 +895,35 @@ internal static class WardAccess
             return false;
         }
 
-        return IsDirectWardOwner(ward, player.GetPlayerID()) || WardAdminDebugAccess.CanLocallyControlAnyWard(ward.Area, player);
+        return HasManagedWardTrust(ward, player.GetPlayerID());
     }
 
-    internal static bool CanControlManagedWard(PrivateArea? area, long playerId)
+    internal static bool HasManagedWardTrust(PrivateArea? area, long playerId)
     {
-        return CanControlManagedWard(ManagedWardRef.FromArea(area), playerId);
+        return HasManagedWardTrust(ManagedWardRef.FromArea(area), playerId);
     }
 
-    internal static bool CanControlManagedWard(ManagedWardRef ward, long playerId)
+    internal static bool HasManagedWardTrust(ManagedWardRef ward, long playerId)
     {
         if (ward.Area == null || playerId == 0L || !IsManagedWard(ward, false))
         {
             return false;
         }
 
-        return IsDirectWardOwner(ward, playerId) || WardAdminDebugAccess.IsPlayerAdminDebugController(playerId);
+        return ManagedWardAccessEvaluator.HasPlayerAccess(
+            ward.Area,
+            ManagedWardAccessEvaluator.CreateActor(playerId));
     }
 
-    internal static bool CanControlManagedWard(ZDO? zdo, long playerId)
+    internal static bool HasManagedWardTrust(ZDO? zdo, long playerId)
     {
         return zdo != null &&
                zdo.IsValid() &&
                playerId != 0L &&
                WardOwnership.IsManagedWardZdo(zdo) &&
-               (zdo.GetLong(ZDOVars.s_creator, 0L) == playerId ||
-                WardAdminDebugAccess.IsPlayerAdminDebugController(playerId));
+               ManagedWardAccessEvaluator.HasPlayerAccess(
+                   zdo,
+                   ManagedWardAccessEvaluator.CreateActor(playerId));
     }
 
     internal static bool IsDirectWardOwner(ManagedWardRef ward, long playerId)
@@ -919,18 +934,6 @@ internal static class WardAccess
         }
 
         return GetCanonicalCreatorPlayerId(ward.Area) == playerId;
-    }
-
-    internal static bool IsPlayerInWardGuild(Player? player, PrivateArea? area)
-    {
-        return IsPlayerGuildMatchingWardGuild(
-            GuildsCompat.GetPlayerGuildIdentity(player),
-            GuildsCompat.GetWardGuildIdentity(area));
-    }
-
-    internal static bool IsPlayerGuildMatchingWardGuild(WardGuildIdentity playerGuild, WardGuildIdentity wardGuild)
-    {
-        return ManagedWardAccessEvaluator.HasMatchingGuild(playerGuild, wardGuild);
     }
 
     internal static bool ShouldBlockHostileCreatureDamageToBuilding(Vector3 point)
@@ -997,6 +1000,25 @@ internal static class WardAccess
             fallbackRadius,
             CreateWardOverlapQuery(point, fallbackRadius, ownerCreatorPlayerId, guildId, ignoredWard),
             BuildWardOverlapAreas(allAreas, guildId));
+    }
+
+    internal static bool TryGetAutomaticPlacementRadius(Player? player, Vector3 point, out float radius)
+    {
+        if (player == null)
+        {
+            radius = WardSettings.MinRadius;
+            return false;
+        }
+
+        var ownerPlayerId = player.GetPlayerID();
+        var guildId = GuildsCompat.GetPlayerGuildId(player);
+        var allAreas = GetCandidateManagedWards(point, WardSettings.MaxRadius, requireEnabled: false);
+        return WardOverlapPolicy.TryGetPlacementRadius(
+            WardSettings.MinRadius,
+            WardSettings.MaxRadius,
+            CreateWardOverlapQuery(point, WardSettings.MaxRadius, ownerPlayerId, guildId, ignoredWard: null),
+            BuildWardOverlapAreas(allAreas, guildId),
+            out radius);
     }
 
     internal static long GetCanonicalCreatorPlayerId(PrivateArea? area)
@@ -1094,6 +1116,11 @@ internal static class WardAccess
 
     private static bool ShouldBlockConfiguredItemUseAgainstHoveredTamedCreature(Player? player, ItemDrop.ItemData? item)
     {
+        if (player == null || item == null || !HasEnabledManagedWards() || !IsConfiguredBlockedItem(item))
+        {
+            return false;
+        }
+
         return TryGetHoveredTamedCreaturePoint(player, out var targetPoint) && ShouldBlockConfiguredItemUse(player, item, targetPoint);
     }
 
@@ -1156,8 +1183,8 @@ internal static class WardAccess
             return false;
         }
 
-        // Placement overlap is evaluated against the minimum legal ward size.
-        // The actual configured radius is still clamped later when the ward is edited.
+        // A position is placeable if at least the minimum ward radius fits. The server
+        // separately persists the largest radius that fits when placement is finalized.
         var radius = WardSettings.MinRadius;
         return OverlapsForeignManagedWard(
             point,
@@ -1205,12 +1232,6 @@ internal static class WardAccess
                 continue;
             }
 
-            var nview = WardPrivateAreaSafeAccess.GetNView(area);
-            if (nview == null || !nview.IsValid())
-            {
-                continue;
-            }
-
             var distance = Utils.DistanceXZ(area.transform.position, point);
             if (distance < closestOverlapDistance)
             {
@@ -1219,7 +1240,16 @@ internal static class WardAccess
             }
         }
 
-        closestOverlappingArea?.FlashShield(false);
+        if (closestOverlappingArea != null)
+        {
+            WardSettings.HighlightPlacementBlockingWard(closestOverlappingArea);
+            var nview = WardPrivateAreaSafeAccess.GetNView(closestOverlappingArea);
+            if (nview != null && nview.IsValid())
+            {
+                closestOverlappingArea.FlashShield(false);
+            }
+        }
+
         return overlaps;
     }
 

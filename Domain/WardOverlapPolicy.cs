@@ -75,6 +75,17 @@ internal static class WardOverlapPolicy
         return Clamp(maxRadius, 0f, fallbackRadius);
     }
 
+    internal static bool TryGetPlacementRadius(
+        float minimumRadius,
+        float maximumRadius,
+        WardOverlapQuery query,
+        IEnumerable<WardOverlapArea> areas,
+        out float radius)
+    {
+        radius = GetMaxNonOverlappingRadius(maximumRadius, query, areas);
+        return radius >= minimumRadius;
+    }
+
     internal static bool Overlaps(WardOverlapQuery query, WardOverlapArea area)
     {
         return DistanceXZ(query.X, query.Z, area.X, area.Z) < area.Radius + query.Radius;

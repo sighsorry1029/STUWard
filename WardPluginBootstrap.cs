@@ -14,7 +14,6 @@ internal static class WardPluginBootstrap
     {
         ManagedWardConfigFileService.Initialize();
         WardItemPrefabPolicy.Initialize();
-        WardOwnership.Initialize();
 
         PrefabManager.OnVanillaPrefabsAvailable += RegisterStuWardPiece;
         RegisterStuWardPiece();
@@ -26,6 +25,7 @@ internal static class WardPluginBootstrap
         DoorRpcUseDoorPatch.Reset();
         WardPluginConfigBindings.UnbindAll();
         WardItemPrefabPolicy.Shutdown();
+        WardRecentPlayers.Shutdown();
         ManagedWardConfigFileService.Shutdown();
         GuildsCompat.TryShutdownHooks();
         Localizer.Unload();

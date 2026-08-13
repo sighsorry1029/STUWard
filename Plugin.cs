@@ -19,7 +19,7 @@ internal sealed class ConfigurationManagerAttributes
 public sealed class Plugin : BaseUnityPlugin
 {
     internal const string ModName = "STUWard";
-    internal const string ModVersion = "1.2.8";
+    internal const string ModVersion = "1.3.1";
     internal const string Author = "sighsorry";
     internal const string ModGuid = $"{Author}.{ModName}";
 
@@ -34,7 +34,6 @@ public sealed class Plugin : BaseUnityPlugin
 
     internal static ManualLogSource Log = null!;
     internal static Plugin Instance = null!;
-    internal static WardGuiController WardGui = null!;
 
     internal static ConfigEntry<Toggle> ServerConfigLocked = null!;
     internal static ConfigEntry<int> MaxWardsPerSteamId = null!;
@@ -47,6 +46,7 @@ public sealed class Plugin : BaseUnityPlugin
     internal static ConfigEntry<KeyboardShortcut> WardSettingsShortcut = null!;
     internal static ConfigEntry<int> WardMinimapPinScale = null!;
     internal static ConfigEntry<Toggle> WardMinimapActiveRanges = null!;
+    internal static ConfigEntry<BoundaryBrightenMode> WardBoundaryBrightenMode = null!;
 
     internal enum Toggle
     {
@@ -73,6 +73,14 @@ public sealed class Plugin : BaseUnityPlugin
         ForcedOn = 1
     }
 
+    internal enum BoundaryBrightenMode
+    {
+        Off = 0,
+        TrustedOnly = 1,
+        UntrustedOnly = 2,
+        All = 3
+    }
+
     private void Awake()
     {
         Instance = this;
@@ -88,7 +96,7 @@ public sealed class Plugin : BaseUnityPlugin
 
             _harmony = new Harmony(ModGuid);
             WardPatchRegistry.ApplyAll(_harmony);
-            WardGui = CreateOrReuseWardGuiController();
+            CreateOrReuseWardGuiController();
 
             Config.Save();
         }

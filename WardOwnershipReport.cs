@@ -71,13 +71,13 @@ internal static partial class WardOwnership
 
         try
         {
-            ReloadOverrides(force: false);
             var zdoMan = ZDOMan.instance;
             if (zdoMan == null)
             {
                 return false;
             }
 
+            var wardLimitOverrides = ManagedWardConfigFileService.CurrentSnapshot.WardLimitOverrides;
             var scanEntries = BuildManagedWardScanEntries(zdoMan);
             var accounts = CollectReportWardCountsByAccount(scanEntries);
             accounts.Sort(static (left, right) =>
@@ -96,7 +96,7 @@ internal static partial class WardOwnership
                     account.Key,
                     account.Value,
                     GetEffectiveWardLimitForAccount(account.Key),
-                    WardLimitOverrides.ContainsKey(account.Key)));
+                    wardLimitOverrides.ContainsKey(account.Key)));
             }
 
             var unresolvedPlayerEntries = CollectUnresolvedWardOwnerCounts(scanEntries);

@@ -8,59 +8,19 @@ namespace STUWard;
 internal static partial class WardOwnership
 {
     // Stored Steam/platform account id used only for ward count/report/grouping.
-    // Direct owner/control semantics remain creator playerId-based.
+    // Creator playerId remains the ward-owner identity, not a higher control tier.
     private const string ManagedWardMarkerKey = "stuw_is_managed_ward";
     internal const string SteamAccountIdKey = "stuw_owner_account_id";
     private const string LimitRefundProcessedKey = "stuw_limit_refund_processed";
     private const string ReceiveWardPlacementRejectedRpc = "STUWard_ReceiveWardPlacementRejected";
     private const string NotifyManagedWardPlacedRpc = "STUWard_NotifyManagedWardPlaced";
     private const string NotifyManagedWardMapStateChangedRpc = "STUWard_NotifyManagedWardMapStateChanged";
-    private static readonly Dictionary<string, int> WardLimitOverrides = new(StringComparer.Ordinal);
     private static readonly List<ZDO> ManagedWardPrefabScanBuffer = new();
+    private static readonly HashSet<ZDOID> AcceptedManagedWardIds = new();
     private static readonly int ManagedWardPrefabHash = StringExtensionMethods.GetStableHashCode(StuWardArea.PrefabName);
     private static ZDOMan? _trackedZdoMan;
     private static bool _managedWardObservationInitialized;
     private static bool _rpcsRegistered;
-
-    internal static void Initialize()
-    {
-        ReloadOverrides(force: true);
-    }
-
-    private static bool ReloadOverrides(bool force)
-    {
-        if (ZNet.instance != null && !ZNet.instance.IsServer())
-        {
-            return false;
-        }
-
-        var snapshotOverrides = ManagedWardConfigFileService.CurrentSnapshot.WardLimitOverrides;
-        var changed = force || WardLimitOverrides.Count != snapshotOverrides.Count;
-        if (!changed)
-        {
-            foreach (var entry in snapshotOverrides)
-            {
-                if (!WardLimitOverrides.TryGetValue(entry.Key, out var currentValue) || currentValue != entry.Value)
-                {
-                    changed = true;
-                    break;
-                }
-            }
-        }
-
-        if (!changed)
-        {
-            return false;
-        }
-
-        WardLimitOverrides.Clear();
-        foreach (var entry in snapshotOverrides)
-        {
-            WardLimitOverrides[entry.Key] = entry.Value;
-        }
-
-        return true;
-    }
 
     internal static void Update()
     {
@@ -87,22 +47,13 @@ internal static partial class WardOwnership
         routedRpc.Register<ZPackage>(ReceiveWardPlacementRejectedRpc, HandleReceiveWardPlacementRejected);
         routedRpc.Register<ZPackage>(NotifyManagedWardPlacedRpc, HandleNotifyManagedWardPlaced);
         routedRpc.Register<ZPackage>(NotifyManagedWardMapStateChangedRpc, HandleNotifyManagedWardMapStateChanged);
-        ManagedWardInteractionRpc.RegisterRoutedRpcs(routedRpc);
-        WardSettings.RegisterRoutedRpcs(routedRpc);
-        ManagedWardReportService.RegisterRpcs();
         _rpcsRegistered = true;
     }
 
     internal static void ResetRuntimeState()
     {
         _rpcsRegistered = false;
-        ManagedWardReportService.ResetRuntimeState();
         ResetServerRuntimeState();
-    }
-
-    internal static void EnsureRuntimeBindings()
-    {
-        RegisterRpcs();
     }
 
     internal static void ObserveManagedWard(ManagedWardRef ward)
@@ -118,9 +69,17 @@ internal static partial class WardOwnership
             return;
         }
 
-        PromoteRuntimeManagedWardZdo(zdo);
-
         EnsureManagedWardObservationInitialized();
+        PromoteRuntimeManagedWardZdo(zdo);
+        if (_managedWardObservationInitialized && !AcceptedManagedWardIds.Contains(zdo.m_uid))
+        {
+            // Every persisted ward was accepted during the initial authoritative scan.
+            // A later unaccepted ZDO is therefore a new placement even if a modified
+            // client suppresses the normal IPlaced notification.
+            ObserveAuthoritativeManagedWardPlacement(zdo);
+            return;
+        }
+
         ObserveManagedWard(zdo);
     }
 
@@ -242,10 +201,7 @@ internal static partial class WardOwnership
         if (zdo != null && zdo.IsValid())
         {
             DropManagedWardPlacementRefundOnce(zdo);
-            ManagedWardRegistry.RemoveEntry(zdo.m_uid);
-            WardPrivateAreaSafeAccess.ForgetPermittedPlayerIds(zdo.m_uid);
-            WardPermittedSnapshots.Forget(zdo.m_uid);
-            ManagedWardMapStateService.NotifyWardRemoved(zdo.m_uid);
+            ForgetManagedWardRuntimeState(zdo.m_uid);
 
             _ = TryClaimManagedWardMutationOwnership(zdo);
             var instance = ZNetScene.instance?.FindInstance(zdo.m_uid);
@@ -349,11 +305,10 @@ internal static partial class WardOwnership
 
     private static int GetEffectiveWardLimitForAccount(string accountId)
     {
-        ReloadOverrides(force: false);
         var overrideAccountId = NormalizeAccountId(accountId);
         return WardLimitPolicy.GetEffectiveLimit(
             overrideAccountId,
-            WardLimitOverrides,
+            ManagedWardConfigFileService.CurrentSnapshot.WardLimitOverrides,
             Plugin.MaxWardsPerSteamId?.Value ?? 3);
     }
 
@@ -375,6 +330,7 @@ internal static partial class WardOwnership
         LastManagedWardPlacementObserveUtcByRequesterId.Clear();
         PendingManagedWardPlacementObserves.Clear();
         PendingManagedWardMapStateRefreshes.Clear();
+        AcceptedManagedWardIds.Clear();
         _managedWardObservationInitialized = false;
     }
 
@@ -422,13 +378,27 @@ internal static partial class WardOwnership
         EnsureTrackedZdoManHooked(zdoMan);
         _managedWardObservationInitialized = false;
         ManagedWardRegistry.Reset();
+        AcceptedManagedWardIds.Clear();
         var scannedZdoCount = PrepareManagedWardPrefabScan(zdoMan);
 
         for (var index = 0; index < scannedZdoCount; index++)
         {
-            ObserveManagedWard(ManagedWardPrefabScanBuffer[index]);
+            var existingWard = ManagedWardPrefabScanBuffer[index];
+            if (IsManagedWardZdo(existingWard) &&
+                !existingWard.GetBool(LimitRefundProcessedKey, false))
+            {
+                // The initial authoritative snapshot consists of wards that already
+                // existed in the world. Loading one later must not replay placement
+                // limits, refunds, or automatic-radius assignment.
+                AcceptedManagedWardIds.Add(existingWard.m_uid);
+            }
+
+            ObserveManagedWard(existingWard);
         }
         _managedWardObservationInitialized = true;
+        // Persist a lower configured maximum during world load as well as live config
+        // changes, so a later increase cannot silently re-expand an existing ward.
+        WardSettings.ClampStoredRadiiToServerMaximum();
     }
 
     internal static void OnAuthoritativeWorldZdosLoaded(ZDOMan zdoMan)
@@ -470,18 +440,6 @@ internal static partial class WardOwnership
             authoritativeMetadataChanged = TryCanonicalizeWardSteamAccountIdFromCreator(managedZdo, playerId);
         }
 
-        if (ZNet.instance != null &&
-            ZNet.instance.IsServer() &&
-            _managedWardObservationInitialized)
-        {
-            if (!TryFinalizeAuthoritativeManagedWardPlacement(managedZdo, out var finalizedMetadataChanged))
-            {
-                return;
-            }
-
-            authoritativeMetadataChanged |= finalizedMetadataChanged;
-        }
-
         var accountId = ResolveWardSteamAccountId(managedZdo, playerId);
         _ = ManagedWardProjectionService.ObserveAuthoritativeWard(
             managedZdo,
@@ -493,7 +451,61 @@ internal static partial class WardOwnership
     private static void ObserveAuthoritativeManagedWardPlacement(ZDO? zdo)
     {
         EnsureManagedWardObservationInitialized();
-        ObserveManagedWard(zdo);
+        if (!IsManagedWardZdo(zdo))
+        {
+            return;
+        }
+
+        var managedZdo = zdo!;
+        if (AcceptedManagedWardIds.Contains(managedZdo.m_uid))
+        {
+            // Placement notifications are idempotent and cannot be replayed against
+            // an existing ward to recalculate its radius or placement limit.
+            ObserveManagedWard(managedZdo);
+            return;
+        }
+
+        if (!TryFinalizeAuthoritativeManagedWardPlacement(managedZdo, out var metadataChanged))
+        {
+            return;
+        }
+
+        AcceptedManagedWardIds.Add(managedZdo.m_uid);
+
+        var ownerPlayerId = managedZdo.GetLong(ZDOVars.s_creator, 0L);
+        var accountId = ResolveWardSteamAccountId(managedZdo, ownerPlayerId);
+        _ = ManagedWardProjectionService.ObserveAuthoritativeWard(
+            managedZdo,
+            ownerPlayerId,
+            accountId,
+            metadataChanged);
+
+        RefreshFinalizedManagedWardRuntime(managedZdo);
+    }
+
+    internal static bool IsAcceptedManagedWard(ZDO? zdo)
+    {
+        return zdo != null &&
+               zdo.IsValid() &&
+               !zdo.GetBool(LimitRefundProcessedKey, false) &&
+               AcceptedManagedWardIds.Contains(zdo.m_uid);
+    }
+
+    private static void RefreshFinalizedManagedWardRuntime(ZDO zdo)
+    {
+        var instance = ZNetScene.instance?.FindInstance(zdo.m_uid);
+        var area = instance != null
+            ? instance.GetComponent<PrivateArea>() ?? instance.GetComponentInChildren<PrivateArea>()
+            : null;
+        if (area == null)
+        {
+            return;
+        }
+
+        var ward = ManagedWardRef.FromArea(area, zdo);
+        WardAccess.RegisterManagedWard(ward);
+        WardSettings.ApplyAreaState(ward);
+        area.UpdateStatus();
     }
 
     private static bool TryCanonicalizeWardSteamAccountIdFromCreator(ZDO zdo, long ownerPlayerId)
@@ -582,11 +594,47 @@ internal static partial class WardOwnership
             return false;
         }
 
+        if (!TryClaimManagedWardMutationOwnership(zdo))
+        {
+            RejectManagedWardPlacement(
+                zdo,
+                senderUid,
+                0,
+                showLimitMessage: false);
+            return false;
+        }
+
         if (!SameAccountId(storedAccountId, accountId))
         {
             zdo.Set(SteamAccountIdKey, accountId);
             metadataChanged = true;
         }
+
+        // Resolve the placement group from authoritative server state before the
+        // radius calculation. If guild state cannot be resolved, clear client-provided
+        // guild metadata instead of trusting it for an overlap exemption.
+        var projection = ManagedWardProjectionService.ResolveProjection(zdo, ownerPlayerId, accountId);
+        if (!projection.HasResolvedGuild)
+        {
+            projection = new ManagedWardProjection(accountId, hasResolvedGuild: true, default);
+        }
+
+        var projectionResult = ManagedWardProjectionService.ApplyProjection(zdo, projection);
+        metadataChanged |= projectionResult.AnyChanged;
+
+        if (!WardSettings.TryAssignAuthoritativePlacementRadius(zdo, out _))
+        {
+            RejectManagedWardPlacement(
+                zdo,
+                senderUid,
+                0,
+                showLimitMessage: false);
+            return false;
+        }
+
+        // A newly accepted placement always receives a server-generated radius,
+        // even if the creating client supplied a stuw_radius value.
+        metadataChanged = true;
 
         return true;
     }
@@ -614,6 +662,7 @@ internal static partial class WardOwnership
             var candidate = ManagedWardPrefabScanBuffer[index];
             if (!IsManagedWardZdo(candidate) ||
                 candidate!.m_uid == ignoredZdoId ||
+                !AcceptedManagedWardIds.Contains(candidate.m_uid) ||
                 candidate.GetBool(LimitRefundProcessedKey, false))
             {
                 continue;
@@ -642,10 +691,21 @@ internal static partial class WardOwnership
             return;
         }
 
-        ManagedWardRegistry.RemoveEntry(zdo.m_uid);
-        WardPrivateAreaSafeAccess.ForgetPermittedPlayerIds(zdo.m_uid);
-        WardPermittedSnapshots.Forget(zdo.m_uid);
-        ManagedWardMapStateService.NotifyWardRemoved(zdo.m_uid);
+        ForgetManagedWardRuntimeState(zdo.m_uid);
+    }
+
+    private static void ForgetManagedWardRuntimeState(ZDOID wardZdoId)
+    {
+        if (wardZdoId.IsNone())
+        {
+            return;
+        }
+
+        ManagedWardRegistry.RemoveEntry(wardZdoId);
+        AcceptedManagedWardIds.Remove(wardZdoId);
+        WardPrivateAreaSafeAccess.ForgetPermittedPlayerIds(wardZdoId);
+        WardPermittedSnapshots.Forget(wardZdoId);
+        ManagedWardMapStateService.NotifyWardRemoved(wardZdoId);
     }
 
     internal static bool IsManagedWardZdo(ZDO? zdo)
@@ -774,6 +834,7 @@ internal static class PlayerStartWardOwnershipPatch
     {
         WardGuiController.Instance?.CloseWardUi();
         WardOwnership.RefreshServerPlayerAccountIdForPlayer(__instance);
+        WardRecentPlayers.RememberLocalServerPlayer(__instance);
         WardAdminDebugAccess.UpdateLocalState(__instance, force: true);
         WardMinimapPinsManager.UpdateLocalState(__instance, force: true);
         GuildsCompat.OnLocalPlayerStarted(__instance);

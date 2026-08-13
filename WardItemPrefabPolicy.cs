@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 using ServerSync;
 using UnityEngine;
 using YamlDotNet.Serialization;
@@ -11,7 +12,7 @@ internal static class WardItemPrefabPolicy
     private static readonly CustomSyncedValue<string> ItemPrefabData = new(Plugin.ConfigSync, "itemPrefabData", string.Empty);
 
     private static readonly IDeserializer Deserializer = new DeserializerBuilder()
-        .IgnoreUnmatchedProperties()
+        .WithDuplicateKeyChecking()
         .Build();
 
     private static HashSet<string> _blockedItemPrefabNames = new(StringComparer.OrdinalIgnoreCase);
@@ -184,14 +185,22 @@ internal static class WardItemPrefabPolicy
         blockedItemPrefabNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         pickupWhitelistPrefabNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         pickupBlacklistPrefabNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        yaml ??= string.Empty;
 
         try
         {
+            if (Encoding.UTF8.GetByteCount(yaml) > ManagedWardConfigFileService.MaxItemPolicyYamlBytes)
+            {
+                throw new FormatException(
+                    $"The synchronized item prefab policy exceeds {ManagedWardConfigFileService.MaxItemPolicyYamlBytes} bytes.");
+            }
+
             var data = string.IsNullOrWhiteSpace(yaml)
                 ? new ManagedWardConfigFileService.ManagedWardItemPrefabPolicyYaml()
                 : Deserializer.Deserialize<ManagedWardConfigFileService.ManagedWardItemPrefabPolicyYaml>(yaml) ??
                   new ManagedWardConfigFileService.ManagedWardItemPrefabPolicyYaml();
 
+            ManagedWardConfigFileService.ValidateItemPrefabPolicy(data);
             AddEntries(blockedItemPrefabNames, data.BlockedItemPrefabs);
             AddEntries(pickupWhitelistPrefabNames, data.PickupWhitelist);
             AddEntries(pickupBlacklistPrefabNames, data.PickupBlacklist);

@@ -16,6 +16,7 @@ internal static partial class WardMinimapPinsManager
         internal DateTime LastSnapshotRequestUtc = DateTime.MinValue;
         internal int ViewerRevisionToken;
         internal bool HasSentFullSnapshot;
+        internal bool SnapshotTooLarge;
     }
 
     private static bool _pendingServerViewerRefreshForAll;
@@ -184,7 +185,7 @@ internal static partial class WardMinimapPinsManager
     {
         if (!TryBuildServerViewerSyncUpdate(
                 receiverUid,
-                out var fullSnapshot,
+                out var pushKind,
                 out var viewerRevisionToken,
                 out var playerId,
                 out var canSeeAllWards,
@@ -200,7 +201,7 @@ internal static partial class WardMinimapPinsManager
 
         SendWardPinsPush(
             receiverUid,
-            fullSnapshot,
+            pushKind,
             viewerRevisionToken,
             playerId,
             canSeeAllWards,
@@ -214,7 +215,7 @@ internal static partial class WardMinimapPinsManager
 
     private static bool TryBuildServerViewerSyncUpdate(
         long receiverUid,
-        out bool fullSnapshot,
+        out WardPinsPushKind pushKind,
         out int viewerRevisionToken,
         out long playerId,
         out bool canSeeAllWards,
@@ -225,7 +226,7 @@ internal static partial class WardMinimapPinsManager
         out IReadOnlyList<WardMinimapSnapshotEntry> snapshotEntries,
         out IReadOnlyList<ZDOID> removedWardIds)
     {
-        fullSnapshot = false;
+        pushKind = WardPinsPushKind.Delta;
         viewerRevisionToken = 0;
         playerId = 0L;
         canSeeAllWards = false;
@@ -258,9 +259,17 @@ internal static partial class WardMinimapPinsManager
         enabledWardCount = snapshot.EnabledWardCount;
 
         var syncState = GetOrCreateServerViewerSyncState(receiverUid);
-        if (syncState.HasSentFullSnapshot && syncState.ViewerRevisionToken == viewerRevisionToken)
+        if ((syncState.HasSentFullSnapshot || syncState.SnapshotTooLarge) &&
+            syncState.ViewerRevisionToken == viewerRevisionToken)
         {
             return false;
+        }
+
+        if (snapshot.VisibleWardCount > WardMinimapSnapshotProtocol.MaxEntryCount)
+        {
+            pushKind = WardPinsPushKind.TooLarge;
+            TrackServerViewerSnapshotTooLarge(receiverUid, viewerRevisionToken);
+            return true;
         }
 
         List<WardMinimapSnapshotEntry>? changedEntries = null;
@@ -296,11 +305,12 @@ internal static partial class WardMinimapPinsManager
 
         var changedEntryCount = changedEntries?.Count ?? 0;
         var removedEntryCount = removedIds?.Count ?? 0;
-        fullSnapshot = !syncState.HasSentFullSnapshot ||
-                       ShouldSendFullSnapshot(
-                           changedEntryCount,
-                           removedEntryCount,
-                           snapshot.VisibleWardCount);
+        var fullSnapshot = !syncState.HasSentFullSnapshot ||
+                           ShouldSendFullSnapshot(
+                               changedEntryCount,
+                               removedEntryCount,
+                               snapshot.VisibleWardCount) ||
+                           changedEntryCount + removedEntryCount > WardMinimapSnapshotProtocol.MaxEntryCount;
         if (!fullSnapshot && changedEntryCount == 0 && removedEntryCount == 0)
         {
             UpdateServerViewerSyncState(syncState, viewerRevisionToken, snapshot.VisibleWardDataRevisions);
@@ -315,6 +325,7 @@ internal static partial class WardMinimapPinsManager
         removedWardIds = fullSnapshot || removedIds == null || removedIds.Count == 0
             ? Array.Empty<ZDOID>()
             : removedIds;
+        pushKind = fullSnapshot ? WardPinsPushKind.FullSnapshot : WardPinsPushKind.Delta;
 
         UpdateServerViewerSyncState(syncState, viewerRevisionToken, snapshot.VisibleWardDataRevisions);
         return true;
@@ -359,6 +370,7 @@ internal static partial class WardMinimapPinsManager
 
         syncState.ViewerRevisionToken = viewerRevisionToken;
         syncState.HasSentFullSnapshot = true;
+        syncState.SnapshotTooLarge = false;
     }
 
     private static bool ShouldSendFullSnapshot(int changedEntryCount, int removedEntryCount, int visibleWardCount)
@@ -382,5 +394,19 @@ internal static partial class WardMinimapPinsManager
             GetOrCreateServerViewerSyncState(receiverUid),
             snapshot.ViewerRevisionToken,
             snapshot.VisibleWardDataRevisions);
+    }
+
+    private static void TrackServerViewerSnapshotTooLarge(long receiverUid, int viewerRevisionToken)
+    {
+        if (receiverUid == 0L)
+        {
+            return;
+        }
+
+        var syncState = GetOrCreateServerViewerSyncState(receiverUid);
+        syncState.VisibleWardDataRevisions.Clear();
+        syncState.ViewerRevisionToken = viewerRevisionToken;
+        syncState.HasSentFullSnapshot = false;
+        syncState.SnapshotTooLarge = true;
     }
 }

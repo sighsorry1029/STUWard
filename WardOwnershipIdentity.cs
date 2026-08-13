@@ -156,11 +156,6 @@ internal static partial class WardOwnership
         return NormalizeAccountId(rawAccountId);
     }
 
-    internal static string NormalizeOverrideAccountIdValue(string? rawAccountId)
-    {
-        return NormalizeAccountId(rawAccountId);
-    }
-
     internal static long ResolvePlayerIdFromSender(long sender)
     {
         if (sender == 0L)
@@ -288,12 +283,14 @@ internal static partial class WardOwnership
             accountId = ResolveServerPeerAccountId(peer);
         }
         var playerName = ResolveServerSessionPlayerName(peer, characterId, playerId);
-        ServerSessionIdentitiesBySender[peer.m_uid] = new ServerSessionIdentity(
+        var sessionIdentity = new ServerSessionIdentity(
             peer.m_uid,
             characterId,
             playerId,
             accountId,
             playerName);
+        ServerSessionIdentitiesBySender[peer.m_uid] = sessionIdentity;
+        WardRecentPlayers.RememberAuthenticatedIdentity(sessionIdentity);
     }
 
     internal static void ForgetServerSessionIdentity(ZNetPeer? peer)
@@ -303,8 +300,11 @@ internal static partial class WardOwnership
             return;
         }
 
+        ManagedWardReportService.ForgetSender(peer.m_uid);
+
         if (ServerSessionIdentitiesBySender.TryGetValue(peer.m_uid, out var sessionIdentity))
         {
+            WardRecentPlayers.ForgetAuthenticatedIdentity(sessionIdentity);
             GuildsCompat.ForgetServerPlayerGuildIdentity(
                 sessionIdentity.PlayerId,
                 sessionIdentity.AccountId,

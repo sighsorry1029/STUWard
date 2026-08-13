@@ -6,19 +6,17 @@ using Xunit;
 public sealed class ManagedWardAccessPolicyTests
 {
     [Theory]
-    [InlineData(42L, 42L, false, 0, 0, false, true)]
-    [InlineData(100L, 42L, true, 0, 0, false, true)]
-    [InlineData(100L, 42L, false, 7, 7, false, true)]
-    [InlineData(100L, 42L, false, 0, 0, true, true)]
-    [InlineData(100L, 42L, false, 2, 3, false, false)]
-    public void CanAccess_returns_expected_decision(
+    [InlineData(42L, 42L, false, 0, 0, false)]
+    [InlineData(100L, 42L, true, 0, 0, false)]
+    [InlineData(100L, 42L, false, 7, 7, false)]
+    [InlineData(100L, 42L, false, 0, 0, true)]
+    public void CanAccess_grants_full_trust_for_every_supported_trust_source(
         long actorPlayerId,
         long ownerPlayerId,
         bool isAdminDebug,
         int playerGuildId,
         int wardGuildId,
-        bool permitted,
-        bool expectedAllowed)
+        bool permitted)
     {
         var actor = new ManagedWardAccessActor(
             actorPlayerId,
@@ -29,7 +27,24 @@ public sealed class ManagedWardAccessPolicyTests
             new WardGuildIdentity(wardGuildId, string.Empty),
             permitted);
 
-        Assert.Equal(expectedAllowed, ManagedWardAccessPolicy.CanAccess(actor, subject));
+        Assert.True(ManagedWardAccessPolicy.CanAccess(actor, subject));
+    }
+
+    [Theory]
+    [InlineData(2, 3)]
+    [InlineData(0, 0)]
+    public void CanAccess_denies_players_without_a_trust_source(int playerGuildId, int wardGuildId)
+    {
+        var actor = new ManagedWardAccessActor(
+            playerId: 100L,
+            playerGuild: new WardGuildIdentity(playerGuildId, string.Empty),
+            isAdminDebug: false);
+        var subject = new ManagedWardAccessSubject(
+            ownerPlayerId: 42L,
+            wardGuild: new WardGuildIdentity(wardGuildId, string.Empty),
+            permitted: false);
+
+        Assert.False(ManagedWardAccessPolicy.CanAccess(actor, subject));
     }
 
     [Fact]

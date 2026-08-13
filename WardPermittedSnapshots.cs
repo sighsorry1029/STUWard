@@ -39,26 +39,22 @@ internal static class WardPermittedSnapshots
 
     internal static void Refresh(ZDO? zdo)
     {
-        if (zdo == null || !zdo.IsValid() || !zdo.IsOwner() || ZNet.instance == null || !ZNet.instance.IsServer())
-        {
-            return;
-        }
-
-        WriteSnapshot(zdo, BuildEntries(zdo));
+        _ = RefreshSnapshot(zdo);
     }
 
     internal static void Backfill(ManagedWardRef ward)
     {
         if (!TryGetOwnedSnapshotZdo(ward, out var zdo, out _))
         {
+            Remember(ward);
             return;
         }
 
-        if (HasCurrentSnapshot(zdo))
-        {
-            return;
-        }
+        _ = TryGetSnapshot(zdo, out _);
 
+        // Reconcile both missing and existing snapshots in small batches. Existing
+        // snapshots may have been unloaded when an authoritative guild change was
+        // observed, so materializing them alone would preserve stale display data.
         EnqueueBackfill(ward.Area!);
     }
 
@@ -79,13 +75,12 @@ internal static class WardPermittedSnapshots
             processed++;
 
             if (request.Area == null ||
-                !TryGetOwnedSnapshotZdo(request.Area, out var zdo, out _) ||
-                HasCurrentSnapshot(zdo))
+                !TryGetOwnedSnapshotZdo(request.Area, out var zdo, out _))
             {
                 continue;
             }
 
-            Refresh(request.Area);
+            Refresh(zdo);
         }
     }
 
@@ -136,7 +131,70 @@ internal static class WardPermittedSnapshots
         return zdo?.GetInt(SnapshotRevisionKey, 0) ?? 0;
     }
 
-    private static void WriteSnapshot(ZDO zdo, List<SnapshotEntry> entries)
+    internal static void Remember(ManagedWardRef ward)
+    {
+        var zdo = ward.Zdo;
+        if (zdo == null || !zdo.IsValid())
+        {
+            return;
+        }
+
+        _ = TryGetSnapshot(zdo, out _);
+    }
+
+    internal static void RefreshKnownSnapshotsForGuildIdentityChanges(
+        HashSet<long>? targetPlayerIds,
+        HashSet<string>? targetCharacterKeys,
+        HashSet<int>? affectedGuildIds,
+        bool fullRefresh)
+    {
+        if (SnapshotCache.Count == 0 || ZNet.instance == null || !ZNet.instance.IsServer())
+        {
+            return;
+        }
+
+        var targetAccountIds = CollectTargetAccountIds(targetCharacterKeys);
+        // Snapshot entries intentionally store a display guild name rather than an
+        // internal guild id. If a guild-wide save has no complete member identity
+        // list, refresh the already-materialized snapshots rather than scanning the
+        // world or guessing membership from a mutable name.
+        var refreshAllKnown = fullRefresh || affectedGuildIds != null && affectedGuildIds.Count > 0;
+        var candidateWardIds = new List<ZDOID>();
+        foreach (var cachedSnapshot in SnapshotCache)
+        {
+            if (refreshAllKnown ||
+                ContainsTargetIdentity(cachedSnapshot.Value.Entries, targetPlayerIds, targetAccountIds))
+            {
+                candidateWardIds.Add(cachedSnapshot.Key);
+            }
+        }
+
+        for (var index = 0; index < candidateWardIds.Count; index++)
+        {
+            var wardZdoId = candidateWardIds[index];
+            var zdo = ZDOMan.instance?.GetZDO(wardZdoId);
+            if (zdo == null || !WardOwnership.IsManagedWardZdo(zdo))
+            {
+                Forget(wardZdoId);
+                continue;
+            }
+
+            _ = RefreshSnapshot(zdo);
+        }
+    }
+
+    private static bool RefreshSnapshot(ZDO? zdo)
+    {
+        if (zdo == null || !zdo.IsValid() || !zdo.IsOwner() || ZNet.instance == null || !ZNet.instance.IsServer())
+        {
+            return false;
+        }
+
+        _ = TryGetSnapshot(zdo, out var previousEntries);
+        return WriteSnapshot(zdo, BuildEntries(zdo, previousEntries));
+    }
+
+    private static bool WriteSnapshot(ZDO zdo, List<SnapshotEntry> entries)
     {
         var package = new ZPackage();
         package.Write(SnapshotFormatVersion);
@@ -154,16 +212,18 @@ internal static class WardPermittedSnapshots
         var previousVersion = zdo.GetInt(SnapshotVersionKey, 0);
         var previousData = zdo.GetByteArray(SnapshotDataKey, null);
         var previousRevision = zdo.GetInt(SnapshotRevisionKey, 0);
-        if (previousVersion != SnapshotFormatVersion ||
-            previousRevision <= 0 ||
-            !ByteArraysEqual(previousData, snapshotData))
+        var changed = previousVersion != SnapshotFormatVersion ||
+                      previousRevision <= 0 ||
+                      !ByteArraysEqual(previousData, snapshotData);
+        if (changed)
         {
             zdo.Set(SnapshotVersionKey, SnapshotFormatVersion);
             zdo.Set(SnapshotDataKey, snapshotData);
             zdo.Set(SnapshotRevisionKey, previousRevision == int.MaxValue ? 1 : previousRevision + 1);
         }
 
-        SnapshotCache[zdo.m_uid] = new CachedSnapshot(zdo.DataRevision, ToLookup(entries));
+        CacheSnapshot(zdo, ToLookup(entries));
+        return changed;
     }
 
     internal static void ClearCache()
@@ -179,12 +239,6 @@ internal static class WardPermittedSnapshots
         {
             SnapshotCache.Remove(zdoId);
         }
-    }
-
-    private static bool HasCurrentSnapshot(ZDO zdo)
-    {
-        return zdo.GetInt(SnapshotRevisionKey, 0) > 0 &&
-               TryDeserialize(zdo, out _);
     }
 
     private static void EnqueueBackfill(PrivateArea area)
@@ -229,9 +283,13 @@ internal static class WardPermittedSnapshots
 
     private static bool TryGetSnapshot(ZNetView nview, out Dictionary<long, SnapshotEntry> entries)
     {
-        entries = null!;
-
         var zdo = WardPrivateAreaSafeAccess.GetZdo(nview);
+        return TryGetSnapshot(zdo, out entries);
+    }
+
+    private static bool TryGetSnapshot(ZDO? zdo, out Dictionary<long, SnapshotEntry> entries)
+    {
+        entries = null!;
         if (zdo == null)
         {
             return false;
@@ -248,11 +306,13 @@ internal static class WardPermittedSnapshots
             return false;
         }
 
-        SnapshotCache[zdo.m_uid] = new CachedSnapshot(zdo.DataRevision, entries);
+        CacheSnapshot(zdo, entries);
         return true;
     }
 
-    private static List<SnapshotEntry> BuildEntries(ZDO? zdo)
+    private static List<SnapshotEntry> BuildEntries(
+        ZDO? zdo,
+        IReadOnlyDictionary<long, SnapshotEntry>? previousEntries)
     {
         var permittedPlayerIds = WardPrivateAreaSafeAccess.GetPermittedPlayerIds(zdo);
         var entries = new List<SnapshotEntry>(permittedPlayerIds.Count);
@@ -265,13 +325,87 @@ internal static class WardPermittedSnapshots
                 continue;
             }
 
+            var previousEntry = default(SnapshotEntry);
+            _ = previousEntries?.TryGetValue(playerId, out previousEntry);
+            var accountId = WardOwnership.NormalizeAccountIdValue(
+                WardOwnership.GetPlayerAccountId(playerId));
+            if (string.IsNullOrWhiteSpace(accountId))
+            {
+                accountId = previousEntry.PlatformId;
+            }
+
+            var playerName = WardOwnership.GetPlayerName(playerId);
+            var guildName = previousEntry.GuildName;
+            if (GuildsCompat.TryResolveCachedAuthoritativeGuildIdentity(
+                    playerId,
+                    accountId,
+                    playerName,
+                    out var guild))
+            {
+                guildName = guild.Id == 0 ? string.Empty : guild.Name;
+            }
+
             entries.Add(new SnapshotEntry(
                 playerId,
-                GuildsCompat.GetPlayerGuildName(playerId) ?? string.Empty,
-                WardOwnership.GetPlayerSteamIdDisplay(playerId) ?? string.Empty));
+                guildName ?? string.Empty,
+                accountId ?? string.Empty));
         }
 
         return entries;
+    }
+
+    private static HashSet<string>? CollectTargetAccountIds(HashSet<string>? targetCharacterKeys)
+    {
+        if (targetCharacterKeys == null || targetCharacterKeys.Count == 0)
+        {
+            return null;
+        }
+
+        var accountIds = new HashSet<string>(System.StringComparer.Ordinal);
+        foreach (var characterKey in targetCharacterKeys)
+        {
+            if (string.IsNullOrWhiteSpace(characterKey))
+            {
+                continue;
+            }
+
+            var separatorIndex = characterKey.IndexOf('\n');
+            var accountId = WardOwnership.NormalizeAccountIdValue(
+                separatorIndex >= 0 ? characterKey.Substring(0, separatorIndex) : characterKey);
+            if (!string.IsNullOrWhiteSpace(accountId))
+            {
+                accountIds.Add(accountId);
+            }
+        }
+
+        return accountIds.Count == 0 ? null : accountIds;
+    }
+
+    private static bool ContainsTargetIdentity(
+        IReadOnlyDictionary<long, SnapshotEntry> entries,
+        HashSet<long>? targetPlayerIds,
+        HashSet<string>? targetAccountIds)
+    {
+        foreach (var entry in entries)
+        {
+            if (targetPlayerIds != null && targetPlayerIds.Contains(entry.Key))
+            {
+                return true;
+            }
+
+            var accountId = WardOwnership.NormalizeAccountIdValue(entry.Value.PlatformId);
+            if (targetAccountIds != null && targetAccountIds.Contains(accountId))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static void CacheSnapshot(ZDO zdo, Dictionary<long, SnapshotEntry> entries)
+    {
+        SnapshotCache[zdo.m_uid] = new CachedSnapshot(zdo.DataRevision, entries);
     }
 
     private static bool TryDeserialize(ZDO zdo, out Dictionary<long, SnapshotEntry> entries)

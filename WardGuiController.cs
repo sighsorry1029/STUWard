@@ -2,7 +2,6 @@ using System.Collections.Generic;
 using Jotunn.Managers;
 using LocalizationManager;
 using UnityEngine;
-using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 namespace STUWard;
@@ -11,52 +10,59 @@ internal sealed class WardGuiController : MonoBehaviour
 {
     private const float ConfigurationPushDebounceSeconds = 0.15f;
     private const float ConfigurationRequestTimeoutSeconds = 5f;
+    private const float RecentPlayersRequestTimeoutSeconds = 5f;
 
     internal static WardGuiController? Instance { get; private set; }
 
     private readonly Dictionary<long, PermittedRowView> _permittedRows = new();
+    private readonly Dictionary<long, RecentPlayerRowView> _recentPlayerRows = new();
+    private readonly Dictionary<long, WardPlayerActivityEntry> _registeredPlayerActivity = new();
     private readonly Dictionary<WardRestrictionOptions, RestrictionRowView> _restrictionRows = new();
     private readonly List<long> _permittedRowsToRemove = new();
+    private readonly List<long> _recentPlayerRowsToRemove = new();
 
     private PrivateArea? _currentWard;
     private WardConfiguration _currentConfiguration;
     private WardConfiguration _authoritativeConfiguration;
     private WardConfiguration _pendingConfiguration;
     private GameObject? _root;
-    private GameObject? _hintRoot;
     private GameObject? _panel;
     private GameObject? _generalPageRoot;
     private GameObject? _restrictionsPageRoot;
     private RectTransform? _permittedContent;
+    private RectTransform? _recentPlayersContent;
     private RectTransform? _restrictionsContent;
     private Text? _ownerValueText;
     private Text? _guildValueText;
-    private Text? _shortcutHintText;
-    private Text? _areaMarkerSpeedValueText;
-    private Text? _areaMarkerAlphaValueText;
-    private Text? _radiusValueText;
-    private Text? _delayValueText;
-    private Slider? _areaMarkerSpeedSlider;
-    private Slider? _areaMarkerAlphaSlider;
-    private Slider? _autoCloseDelaySlider;
-    private Slider? _radiusSlider;
+    private Toggle? _autoCloseToggle;
     private Toggle? _warningSoundToggle;
     private Toggle? _warningFlashToggle;
+    private Toggle? _areaMarkerRotationToggle;
     private Button? _previousPageButton;
     private Button? _nextPageButton;
-    private Image? _radiusLimitMarker;
     private Transform? _buildParent;
     private WardSettingsPage _currentPage = WardSettingsPage.General;
     private bool _visible;
     private bool _suppressUiEvents;
-    private bool _configurationCommitPending;
     private bool _configurationPushPending;
+    private bool _closeRequested;
     private float _nextConfigurationPushTime;
     private float _pendingConfigurationRequestedAt;
     private int _lastPermittedRevision = int.MinValue;
     private int _permittedRefreshGeneration;
+    private int _recentPlayersRefreshGeneration;
     private long _pendingConfigurationRequestId;
-    private PermittedRowView? _emptyPermittedRow;
+    private long _pendingRecentPlayersRequestId;
+    private float _recentPlayersRequestedAt;
+    private bool _recentPlayersRequestInProgress;
+    private bool _hasDeferredRecentPlayersSnapshot;
+    private WardRecentPlayersSnapshot _deferredRecentPlayersSnapshot;
+    private StatusRowView? _emptyPermittedRow;
+    private StatusRowView? _recentPlayersStatusRow;
+    private string _registeredPlayersSearchQuery = string.Empty;
+    private string _recentPlayersSearchQuery = string.Empty;
+    private ZDOID _searchQueryWardZdoId = ZDOID.None;
+    private RecentPlayersListState _recentPlayersListState;
 
     private void Awake()
     {
@@ -70,12 +76,14 @@ internal sealed class WardGuiController : MonoBehaviour
         DontDestroyOnLoad(gameObject);
 
         GUIManager.OnCustomGUIAvailable += BuildGui;
+        WardRecentPlayers.SnapshotReceived += HandleRecentPlayersSnapshot;
         BuildGui();
     }
 
     private void OnDestroy()
     {
         GUIManager.OnCustomGUIAvailable -= BuildGui;
+        WardRecentPlayers.SnapshotReceived -= HandleRecentPlayersSnapshot;
         GUIManager.BlockInput(false);
 
         if (Instance == this)
@@ -88,12 +96,33 @@ internal sealed class WardGuiController : MonoBehaviour
     {
         if (!_visible)
         {
-            SetShortcutHintVisible(false);
             TryOpenHoveredWardUi();
             return;
         }
 
-        SetShortcutHintVisible(false);
+        if (_closeRequested)
+        {
+            if (_currentWard == null ||
+                !WardAccess.IsManagedWard(ManagedWardRef.FromArea(_currentWard), false))
+            {
+                CompleteCloseWardUi();
+                return;
+            }
+
+            if (HasPendingConfigurationRequest() &&
+                Time.unscaledTime - _pendingConfigurationRequestedAt >= ConfigurationRequestTimeoutSeconds)
+            {
+                HandlePendingConfigurationRequestTimeout();
+            }
+
+            TryFlushDeferredConfigurationAfterRequestResolution();
+            return;
+        }
+
+        if (_root != null && !_root.activeSelf)
+        {
+            _root.SetActive(true);
+        }
 
         if (Input.GetKeyDown(KeyCode.Escape))
         {
@@ -102,6 +131,14 @@ internal sealed class WardGuiController : MonoBehaviour
         }
 
         if (_currentWard == null || !WardAccess.IsManagedWard(ManagedWardRef.FromArea(_currentWard), false))
+        {
+            CloseWardUi();
+            return;
+        }
+
+        var localPlayer = Player.m_localPlayer;
+        if (!WardAccess.CanConfigureWard(_currentWard, localPlayer) &&
+            !WardAdminDebugAccess.CanLocallyAttemptAnyWardControl(_currentWard, localPlayer))
         {
             CloseWardUi();
             return;
@@ -119,15 +156,27 @@ internal sealed class WardGuiController : MonoBehaviour
         }
 
         if (!HasPendingConfigurationRequest() &&
-            (_configurationCommitPending || _configurationPushPending) &&
+            _configurationPushPending &&
             Time.unscaledTime >= _nextConfigurationPushTime)
         {
-            CommitPendingConfiguration();
+            PushPendingConfiguration();
         }
 
         if (WardPermittedSnapshots.GetRevision(_currentWard) != _lastPermittedRevision)
         {
             RefreshPermittedPlayers(force: false);
+            RequestRecentPlayersSnapshot();
+        }
+
+        if (_pendingRecentPlayersRequestId != 0L &&
+            Time.unscaledTime - _recentPlayersRequestedAt >= RecentPlayersRequestTimeoutSeconds)
+        {
+            _pendingRecentPlayersRequestId = 0L;
+            SetRecentPlayerRowsInteractable(true);
+            ShowRecentPlayersStatus(
+                WardLocalization.Localize(WardLocalization.UiRecentPlayersErrorToken, WardLocalization.UiRecentPlayersErrorFallback),
+                isError: true,
+                RecentPlayersListState.Error);
         }
     }
 
@@ -158,6 +207,13 @@ internal sealed class WardGuiController : MonoBehaviour
 
     internal void OpenWardUi(PrivateArea ward)
     {
+        if (!TryGetWardZdoId(ward, out var wardZdoId) || wardZdoId != _searchQueryWardZdoId)
+        {
+            _registeredPlayersSearchQuery = string.Empty;
+            _recentPlayersSearchQuery = string.Empty;
+            _searchQueryWardZdoId = wardZdoId;
+        }
+
         BuildGui();
         if (_root == null)
         {
@@ -165,26 +221,59 @@ internal sealed class WardGuiController : MonoBehaviour
         }
 
         _currentWard = ward;
-        _configurationCommitPending = false;
+        _closeRequested = false;
         _configurationPushPending = false;
         _lastPermittedRevision = int.MinValue;
         _currentPage = WardSettingsPage.General;
+        _pendingRecentPlayersRequestId = 0L;
+        _recentPlayersRequestInProgress = false;
+        _hasDeferredRecentPlayersSnapshot = false;
+        _registeredPlayerActivity.Clear();
         ClearPendingConfigurationRequest();
         _authoritativeConfiguration = WardSettings.GetConfiguration(ward);
         _currentConfiguration = _authoritativeConfiguration;
         RefreshStaticTexts();
         RefreshControls();
         RefreshPermittedPlayers(force: true);
+        SetActivePage(WardSettingsPage.General);
+        RequestRecentPlayersSnapshot();
         SetVisible(true);
     }
 
     internal void CloseWardUi()
     {
+        _closeRequested = true;
         FlushPendingConfigurationPush();
+        TryFlushDeferredConfigurationAfterRequestResolution();
+        if (!_closeRequested)
+        {
+            return;
+        }
+
+        if (HasPendingConfigurationRequest() || _configurationPushPending)
+        {
+            if (_root != null)
+            {
+                _root.SetActive(false);
+            }
+
+            GUIManager.BlockInput(false);
+            return;
+        }
+
+        CompleteCloseWardUi();
+    }
+
+    private void CompleteCloseWardUi()
+    {
         _currentWard = null;
-        _configurationCommitPending = false;
+        _closeRequested = false;
         _configurationPushPending = false;
         _lastPermittedRevision = int.MinValue;
+        _pendingRecentPlayersRequestId = 0L;
+        _recentPlayersRequestInProgress = false;
+        _hasDeferredRecentPlayersSnapshot = false;
+        _registeredPlayerActivity.Clear();
         ClearPendingConfigurationRequest();
         SetVisible(false);
     }
@@ -203,18 +292,16 @@ internal sealed class WardGuiController : MonoBehaviour
             Destroy(_root);
         }
 
-        if (_hintRoot != null)
-        {
-            Destroy(_hintRoot);
-        }
-
         ClearPermittedRows();
+        ClearRecentPlayerRows();
         _emptyPermittedRow = null;
+        _recentPlayersStatusRow = null;
         _lastPermittedRevision = int.MinValue;
         _restrictionRows.Clear();
-        _restrictionsContent = null;
         _generalPageRoot = null;
         _restrictionsPageRoot = null;
+        _restrictionsContent = null;
+        _recentPlayersContent = null;
         _previousPageButton = null;
         _nextPageButton = null;
         _buildParent = null;
@@ -248,40 +335,18 @@ internal sealed class WardGuiController : MonoBehaviour
         _generalPageRoot = CreatePageRoot("STUWardGeneralPage", panelSize);
         _restrictionsPageRoot = CreatePageRoot("STUWardRestrictionsPage", panelSize);
 
-        var hintObject = gui.CreateText(
-            string.Empty,
-            GUIManager.CustomGUIFront.transform,
-            new Vector2(0.5f, 0.5f),
-            new Vector2(0.5f, 0.5f),
-            new Vector2(0f, -150f),
-            gui.AveriaSerifBold,
-            18,
-            gui.ValheimBeige,
-            true,
-            Color.black,
-            460f,
-            84f,
-            false);
-        hintObject.name = "STUWardShortcutHint";
-        _hintRoot = hintObject;
-        _shortcutHintText = hintObject.GetComponent<Text>();
-        if (_shortcutHintText != null)
-        {
-            _shortcutHintText.alignment = TextAnchor.MiddleCenter;
-        }
-        SetShortcutHintVisible(false);
-
         CreateLabel(
             WardLocalization.Localize(WardLocalization.UiTitleToken, WardLocalization.UiTitleFallback),
             WardGuiLayoutSettings.GetTitlePosition(),
             34,
-            560f,
-            56f,
+            WardGuiLayoutSettings.GetTitleSize().x,
+            WardGuiLayoutSettings.GetTitleSize().y,
             TextAnchor.MiddleCenter,
             gui.AveriaSerifBold,
             gui.ValheimOrange);
-        _ownerValueText = CreateLabel(string.Empty, WardGuiLayoutSettings.GetOwnerPosition(), 22, 800f, 36f, TextAnchor.MiddleLeft, gui.AveriaSerifBold, gui.ValheimBeige);
-        _guildValueText = CreateLabel(string.Empty, WardGuiLayoutSettings.GetGuildPosition(), 20, 800f, 32f, TextAnchor.MiddleLeft, gui.AveriaSerif, gui.ValheimBeige);
+        var ownerGuildLabelSize = WardGuiLayoutSettings.GetOwnerGuildLabelSize();
+        _ownerValueText = CreateLabel(string.Empty, WardGuiLayoutSettings.GetOwnerPosition(), 22, ownerGuildLabelSize.x, ownerGuildLabelSize.y, TextAnchor.MiddleLeft, gui.AveriaSerifBold, gui.ValheimBeige);
+        _guildValueText = CreateLabel(string.Empty, WardGuiLayoutSettings.GetGuildPosition(), 20, ownerGuildLabelSize.x, ownerGuildLabelSize.y, TextAnchor.MiddleLeft, gui.AveriaSerif, gui.ValheimBeige);
 
         var closeButton = CreateButton(
             WardLocalization.Localize(WardLocalization.UiCloseToken, WardLocalization.UiCloseFallback),
@@ -297,9 +362,12 @@ internal sealed class WardGuiController : MonoBehaviour
         _nextPageButton.onClick.AddListener(() => SetActivePage(WardSettingsPage.Restrictions));
         StylePageArrowButton(_nextPageButton);
 
-        BuildGeneralPage(gui);
+        _buildParent = _generalPageRoot.transform;
+        BuildTrustedPlayers(gui);
+        BuildRecentPlayers(gui);
         _buildParent = _restrictionsPageRoot.transform;
-        BuildRestrictionsPage();
+        BuildTopControls(gui);
+        BuildRestrictions();
         _buildParent = null;
         SetActivePage(_currentPage);
         SetVisible(_visible);
@@ -308,123 +376,199 @@ internal sealed class WardGuiController : MonoBehaviour
             RefreshStaticTexts();
             RefreshControls();
             RefreshPermittedPlayers(force: true);
+            if (_currentPage == WardSettingsPage.General)
+            {
+                RequestRecentPlayersSnapshot();
+            }
         }
     }
 
-    private void BuildGeneralPage(GUIManager gui)
+    private void BuildTopControls(GUIManager gui)
     {
-        if (_generalPageRoot == null)
-        {
-            return;
-        }
+        var gridRoot = new GameObject("STUWardBehaviorControls", typeof(RectTransform), typeof(GridLayoutGroup));
+        gridRoot.transform.SetParent(GetBuildParent(), false);
+        var gridSize = WardGuiLayoutSettings.GetBehaviorControlsGridSize();
+        ConfigureRect(
+            gridRoot.GetComponent<RectTransform>(),
+            WardGuiLayoutSettings.GetBehaviorControlsGridPosition(),
+            gridSize.x,
+            gridSize.y);
 
+        var layout = gridRoot.GetComponent<GridLayoutGroup>();
+        layout.startCorner = GridLayoutGroup.Corner.UpperLeft;
+        layout.startAxis = GridLayoutGroup.Axis.Horizontal;
+        layout.childAlignment = TextAnchor.UpperLeft;
+        layout.cellSize = WardGuiLayoutSettings.GetRestrictionCellSize();
+        layout.spacing = WardGuiLayoutSettings.GetRestrictionCellSpacing();
+        layout.padding = new RectOffset(8, 8, 8, 8);
+        layout.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
+        layout.constraintCount = 2;
+
+        _warningSoundToggle = CreateBehaviorToggleRow(
+            gridRoot.transform,
+            "WardAlertSound",
+            WardLocalization.Localize(WardLocalization.UiWarningSoundToken, WardLocalization.UiWarningSoundFallback),
+            gui);
+        _warningSoundToggle.onValueChanged.AddListener(OnWarningSoundToggleChanged);
+
+        _warningFlashToggle = CreateBehaviorToggleRow(
+            gridRoot.transform,
+            "WardAlertVisualEffect",
+            WardLocalization.Localize(WardLocalization.UiWarningFlashToken, WardLocalization.UiWarningFlashFallback),
+            gui);
+        _warningFlashToggle.onValueChanged.AddListener(OnWarningFlashToggleChanged);
+
+        _areaMarkerRotationToggle = CreateBehaviorToggleRow(
+            gridRoot.transform,
+            "WardRangeRotation",
+            WardLocalization.Localize(WardLocalization.UiAreaMarkerRotationToken, WardLocalization.UiAreaMarkerRotationFallback),
+            gui);
+        _areaMarkerRotationToggle.onValueChanged.AddListener(OnAreaMarkerRotationToggleChanged);
+
+        _autoCloseToggle = CreateBehaviorToggleRow(
+            gridRoot.transform,
+            "DoorAutoClose",
+            WardLocalization.Localize(WardLocalization.UiAutoCloseToken, WardLocalization.UiAutoCloseFallback),
+            gui);
+        _autoCloseToggle.onValueChanged.AddListener(OnAutoCloseToggleChanged);
+    }
+
+    private Toggle CreateBehaviorToggleRow(Transform parent, string name, string labelText, GUIManager gui)
+    {
+        var cellSize = WardGuiLayoutSettings.GetRestrictionCellSize();
+        var row = new GameObject(name, typeof(RectTransform), typeof(Image));
+        row.transform.SetParent(parent, false);
+
+        var rowRect = row.GetComponent<RectTransform>();
+        rowRect.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, cellSize.x);
+        rowRect.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, cellSize.y);
+
+        var image = row.GetComponent<Image>();
+        image.color = new Color(0f, 0f, 0f, 0.18f);
+
+        var toggle = CreateCenteredToggle(
+            row.transform,
+            new Vector2(-cellSize.x * 0.5f + 28f, 0f),
+            WardGuiLayoutSettings.GetBehaviorToggleSize());
+
+        var labelObject = new GameObject("BehaviorName", typeof(RectTransform), typeof(Text));
+        labelObject.transform.SetParent(row.transform, false);
+        var labelRect = labelObject.GetComponent<RectTransform>();
+        labelRect.anchorMin = new Vector2(0.5f, 0.5f);
+        labelRect.anchorMax = new Vector2(0.5f, 0.5f);
+        labelRect.pivot = new Vector2(0f, 0.5f);
+        labelRect.anchoredPosition = new Vector2(-cellSize.x * 0.5f + 58f, 0f);
+        labelRect.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, cellSize.x - 72f);
+        labelRect.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, cellSize.y - 8f);
+
+        var label = labelObject.GetComponent<Text>();
+        gui.ApplyTextStyle(label, gui.AveriaSerifBold, gui.ValheimBeige, 20, false);
+        label.text = labelText;
+        label.alignment = TextAnchor.MiddleLeft;
+        label.horizontalOverflow = HorizontalWrapMode.Wrap;
+        label.verticalOverflow = VerticalWrapMode.Truncate;
+        return toggle;
+    }
+
+    private void BuildTrustedPlayers(GUIManager gui)
+    {
         var permittedListSize = WardGuiLayoutSettings.GetPermittedListSize();
         var permittedListPosition = WardGuiLayoutSettings.GetPermittedListPosition();
         var registeredPlayersHeaderPosition = WardGuiLayoutSettings.GetRegisteredPlayersHeaderPosition();
+        var headerLabelSize = WardGuiLayoutSettings.GetPlayerListHeaderLabelSize();
 
-        _buildParent = _generalPageRoot.transform;
-        CreateLabel(WardLocalization.Localize(WardLocalization.UiRadiusToken, WardLocalization.UiRadiusFallback), WardGuiLayoutSettings.GetRadiusLabelPosition(), 21, 240f, 36f, TextAnchor.MiddleLeft, gui.AveriaSerifBold, gui.ValheimBeige);
-        _radiusSlider = CreateSlider(
-            WardGuiLayoutSettings.GetRadiusSliderPosition(),
-            520f,
-            WardSettings.MinRadius,
-            WardSettings.MaxRadius,
-            true,
-            commitOnRelease: true);
-        _radiusSlider.onValueChanged.AddListener(OnRadiusSliderChanged);
-        _radiusLimitMarker = CreateSliderLimitMarker(_radiusSlider, new Color(0.82f, 0.22f, 0.18f, 0.95f));
-        _radiusValueText = CreateLabel(string.Empty, WardGuiLayoutSettings.GetRadiusValuePosition(), 21, 120f, 36f, TextAnchor.MiddleCenter, gui.AveriaSerifBold, gui.ValheimYellow);
-
-        CreateLabel(WardLocalization.Localize(WardLocalization.UiRangeSpeedToken, WardLocalization.UiRangeSpeedFallback), WardGuiLayoutSettings.GetAreaMarkerSpeedLabelPosition(), 21, 240f, 36f, TextAnchor.MiddleLeft, gui.AveriaSerifBold, gui.ValheimBeige);
-        _areaMarkerSpeedSlider = CreateSlider(
-            WardGuiLayoutSettings.GetAreaMarkerSpeedSliderPosition(),
-            520f,
-            WardSettings.MinAreaMarkerSpeedMultiplier,
-            WardSettings.MaxAreaMarkerSpeedMultiplier,
-            false,
-            commitOnRelease: true);
-        _areaMarkerSpeedSlider.onValueChanged.AddListener(OnAreaMarkerSpeedSliderChanged);
-        _areaMarkerSpeedValueText = CreateLabel(string.Empty, WardGuiLayoutSettings.GetAreaMarkerSpeedValuePosition(), 21, 120f, 36f, TextAnchor.MiddleCenter, gui.AveriaSerifBold, gui.ValheimYellow);
-
-        CreateLabel(WardLocalization.Localize(WardLocalization.UiRangeBrightnessToken, WardLocalization.UiRangeBrightnessFallback), WardGuiLayoutSettings.GetAreaMarkerAlphaLabelPosition(), 21, 240f, 36f, TextAnchor.MiddleLeft, gui.AveriaSerifBold, gui.ValheimBeige);
-        _areaMarkerAlphaSlider = CreateSlider(
-            WardGuiLayoutSettings.GetAreaMarkerAlphaSliderPosition(),
-            520f,
-            WardSettings.MinAreaMarkerAlpha,
-            WardSettings.MaxAreaMarkerAlpha,
-            false,
-            commitOnRelease: true);
-        _areaMarkerAlphaSlider.onValueChanged.AddListener(OnAreaMarkerAlphaSliderChanged);
-        _areaMarkerAlphaValueText = CreateLabel(string.Empty, WardGuiLayoutSettings.GetAreaMarkerAlphaValuePosition(), 21, 120f, 36f, TextAnchor.MiddleCenter, gui.AveriaSerifBold, gui.ValheimYellow);
-
-        CreateLabel(WardLocalization.Localize(WardLocalization.UiDoorCloseDelayToken, WardLocalization.UiDoorCloseDelayFallback), WardGuiLayoutSettings.GetAutoCloseDelayLabelPosition(), 21, 240f, 36f, TextAnchor.MiddleLeft, gui.AveriaSerifBold, gui.ValheimBeige);
-        _autoCloseDelaySlider = CreateSlider(
-            WardGuiLayoutSettings.GetAutoCloseDelaySliderPosition(),
-            520f,
-            WardSettings.MinAutoCloseDelay,
-            WardSettings.MaxAutoCloseDelay,
-            true,
-            commitOnRelease: true);
-        _autoCloseDelaySlider.onValueChanged.AddListener(OnAutoCloseDelaySliderChanged);
-        _delayValueText = CreateLabel(string.Empty, WardGuiLayoutSettings.GetAutoCloseDelayValuePosition(), 21, 120f, 36f, TextAnchor.MiddleCenter, gui.AveriaSerifBold, gui.ValheimYellow);
-
-        CreateLabel(WardLocalization.Localize(WardLocalization.UiWarningEffectsToken, WardLocalization.UiWarningEffectsFallback), WardGuiLayoutSettings.GetWarningEffectsLabelPosition(), 21, 240f, 36f, TextAnchor.MiddleLeft, gui.AveriaSerifBold, gui.ValheimBeige);
-        var warningToggleSize = GetSliderHandleHeight(_radiusSlider);
         CreateLabel(
-            WardLocalization.Localize(WardLocalization.UiWarningSoundToken, WardLocalization.UiWarningSoundFallback),
-            WardGuiLayoutSettings.GetWarningSoundLabelPosition(warningToggleSize),
-            21,
-            120f,
-            36f,
+            WardLocalization.Localize(WardLocalization.UiRegisteredPlayersToken, WardLocalization.UiRegisteredPlayersFallback),
+            registeredPlayersHeaderPosition,
+            24,
+            headerLabelSize.x,
+            headerLabelSize.y,
             TextAnchor.MiddleLeft,
             gui.AveriaSerifBold,
-            gui.ValheimBeige);
-        _warningSoundToggle = CreateCenteredToggle(
-            GetBuildParent(),
-            WardGuiLayoutSettings.GetWarningSoundTogglePosition(warningToggleSize),
-            warningToggleSize);
-        _warningSoundToggle.onValueChanged.AddListener(OnWarningSoundToggleChanged);
+            gui.ValheimOrange);
+        CreatePlayerSearchInput(
+            WardGuiLayoutSettings.GetRegisteredPlayersSearchPosition(),
+            _registeredPlayersSearchQuery,
+            OnRegisteredPlayersSearchChanged,
+            "STUWardRegisteredPlayersSearch");
+
+        _permittedContent = CreatePlayerListContent(
+            gui,
+            "STUWardPermittedPlayers",
+            permittedListPosition,
+            permittedListSize);
+        if (_permittedContent == null)
+        {
+            return;
+        }
+    }
+
+    private void BuildRecentPlayers(GUIManager gui)
+    {
+        var listSize = WardGuiLayoutSettings.GetRecentPlayersListSize();
+        var headerLabelSize = WardGuiLayoutSettings.GetPlayerListHeaderLabelSize();
         CreateLabel(
-            WardLocalization.Localize(WardLocalization.UiWarningFlashToken, WardLocalization.UiWarningFlashFallback),
-            WardGuiLayoutSettings.GetWarningFlashLabelPosition(warningToggleSize),
-            21,
-            120f,
-            36f,
+            WardLocalization.Localize(WardLocalization.UiUnregisteredPlayersToken, WardLocalization.UiUnregisteredPlayersFallback),
+            WardGuiLayoutSettings.GetRecentPlayersHeaderPosition(),
+            24,
+            headerLabelSize.x,
+            headerLabelSize.y,
             TextAnchor.MiddleLeft,
             gui.AveriaSerifBold,
-            gui.ValheimBeige);
-        _warningFlashToggle = CreateCenteredToggle(
-            GetBuildParent(),
-            WardGuiLayoutSettings.GetWarningFlashTogglePosition(warningToggleSize),
-            warningToggleSize);
-        _warningFlashToggle.onValueChanged.AddListener(OnWarningFlashToggleChanged);
+            gui.ValheimOrange);
+        CreatePlayerSearchInput(
+            WardGuiLayoutSettings.GetRecentPlayersSearchPosition(),
+            _recentPlayersSearchQuery,
+            OnRecentPlayersSearchChanged,
+            "STUWardRecentPlayersSearch");
 
-        CreateLabel(WardLocalization.Localize(WardLocalization.UiRegisteredPlayersToken, WardLocalization.UiRegisteredPlayersFallback), registeredPlayersHeaderPosition, 24, permittedListSize.x, 40f, TextAnchor.MiddleCenter, gui.AveriaSerifBold, gui.ValheimOrange);
+        _recentPlayersContent = CreatePlayerListContent(
+            gui,
+            "STUWardRecentPlayers",
+            WardGuiLayoutSettings.GetRecentPlayersListPosition(),
+            listSize);
+        if (_recentPlayersContent == null)
+        {
+            return;
+        }
+        ShowRecentPlayersStatus(
+            WardLocalization.Localize(WardLocalization.UiRecentPlayersLoadingToken, WardLocalization.UiRecentPlayersLoadingFallback),
+            isError: false,
+            RecentPlayersListState.Loading);
+    }
 
+    private RectTransform? CreatePlayerListContent(
+        GUIManager gui,
+        string objectName,
+        Vector2 position,
+        Vector2 size)
+    {
         var scrollRoot = gui.CreateScrollView(
-            _generalPageRoot.transform,
+            _generalPageRoot!.transform,
             false,
             true,
             20f,
             6f,
             gui.ValheimScrollbarHandleColorBlock,
             new Color(0f, 0f, 0f, 0.35f),
-            permittedListSize.x,
-            permittedListSize.y);
+            size.x,
+            size.y);
 
-        ConfigureRect(scrollRoot.GetComponent<RectTransform>(), permittedListPosition, permittedListSize.x, permittedListSize.y);
-        scrollRoot.name = "STUWardPermittedPlayers";
+        ConfigureRect(scrollRoot.GetComponent<RectTransform>(), position, size.x, size.y);
+        scrollRoot.name = objectName;
 
-        _permittedContent = scrollRoot.transform.Find("Scroll View/Viewport/Content") as RectTransform;
-        if (_permittedContent == null)
+        var content = scrollRoot.transform.Find("Scroll View/Viewport/Content") as RectTransform;
+        if (content == null)
         {
-            return;
+            Plugin.Log.LogError($"Failed to find the Content object for {objectName}.");
+            return null;
         }
 
-        var layout = _permittedContent.GetComponent<VerticalLayoutGroup>();
+        var layout = content.GetComponent<VerticalLayoutGroup>();
         if (layout == null)
         {
-            return;
+            Plugin.Log.LogError($"Failed to find the VerticalLayoutGroup for {objectName}.");
+            return null;
         }
 
         layout.childAlignment = TextAnchor.UpperLeft;
@@ -433,6 +577,447 @@ internal sealed class WardGuiController : MonoBehaviour
         layout.childForceExpandHeight = false;
         layout.spacing = 6f;
         layout.padding = new RectOffset(8, 8, 8, 8);
+        return content;
+    }
+
+    private void RequestRecentPlayersSnapshot()
+    {
+        if (_currentWard == null || _recentPlayersContent == null)
+        {
+            return;
+        }
+
+        if (_recentPlayersListState != RecentPlayersListState.Loaded)
+        {
+            ShowRecentPlayersStatus(
+                WardLocalization.Localize(WardLocalization.UiRecentPlayersLoadingToken, WardLocalization.UiRecentPlayersLoadingFallback),
+                isError: false,
+                RecentPlayersListState.Loading);
+        }
+
+        BeginRecentPlayersRequest();
+        var requestId = WardRecentPlayers.RequestSnapshot(_currentWard);
+        EndRecentPlayersRequest(requestId);
+        if (requestId == 0L)
+        {
+            _pendingRecentPlayersRequestId = 0L;
+            SetRecentPlayerRowsInteractable(true);
+            ShowRecentPlayersStatus(
+                WardLocalization.Localize(WardLocalization.UiRecentPlayersErrorToken, WardLocalization.UiRecentPlayersErrorFallback),
+                isError: true,
+                RecentPlayersListState.Error);
+            return;
+        }
+
+        _pendingRecentPlayersRequestId = requestId;
+        _recentPlayersRequestedAt = Time.unscaledTime;
+        ApplyDeferredRecentPlayersSnapshot(requestId);
+    }
+
+    private void HandleRecentPlayersSnapshot(WardRecentPlayersSnapshot snapshot)
+    {
+        if (_recentPlayersRequestInProgress)
+        {
+            if (IsSnapshotForCurrentWard(snapshot))
+            {
+                _deferredRecentPlayersSnapshot = snapshot;
+                _hasDeferredRecentPlayersSnapshot = true;
+            }
+
+            return;
+        }
+
+        ApplyRecentPlayersSnapshot(snapshot);
+    }
+
+    private void ApplyRecentPlayersSnapshot(WardRecentPlayersSnapshot snapshot)
+    {
+        if (_currentWard == null ||
+            _recentPlayersContent == null ||
+            snapshot.RequestId == 0L ||
+            snapshot.RequestId != _pendingRecentPlayersRequestId ||
+            !IsSnapshotForCurrentWard(snapshot))
+        {
+            return;
+        }
+
+        _pendingRecentPlayersRequestId = 0L;
+        RefreshRegisteredPlayerActivity(snapshot.RegisteredActivity);
+        RefreshRecentPlayers(snapshot.Players);
+        SetRecentPlayerRowsInteractable(true);
+        RefreshPermittedPlayers(force: true);
+    }
+
+    private void RefreshRegisteredPlayerActivity(IReadOnlyList<WardPlayerActivityEntry> activity)
+    {
+        _registeredPlayerActivity.Clear();
+        for (var index = 0; index < activity.Count; index++)
+        {
+            var entry = activity[index];
+            if (entry.PlayerId != 0L)
+            {
+                _registeredPlayerActivity[entry.PlayerId] = entry;
+            }
+        }
+    }
+
+    private bool IsSnapshotForCurrentWard(WardRecentPlayersSnapshot snapshot)
+    {
+        return _currentWard != null &&
+               TryGetWardZdoId(_currentWard, out var currentWardZdoId) &&
+               snapshot.WardZdoId == currentWardZdoId;
+    }
+
+    private void BeginRecentPlayersRequest()
+    {
+        _recentPlayersRequestInProgress = true;
+        _hasDeferredRecentPlayersSnapshot = false;
+        _deferredRecentPlayersSnapshot = default;
+    }
+
+    private void EndRecentPlayersRequest(long requestId)
+    {
+        _recentPlayersRequestInProgress = false;
+        if (requestId == 0L)
+        {
+            _hasDeferredRecentPlayersSnapshot = false;
+            _deferredRecentPlayersSnapshot = default;
+        }
+    }
+
+    private void ApplyDeferredRecentPlayersSnapshot(long requestId)
+    {
+        if (!_hasDeferredRecentPlayersSnapshot)
+        {
+            return;
+        }
+
+        var snapshot = _deferredRecentPlayersSnapshot;
+        _hasDeferredRecentPlayersSnapshot = false;
+        _deferredRecentPlayersSnapshot = default;
+        if (snapshot.RequestId == requestId)
+        {
+            ApplyRecentPlayersSnapshot(snapshot);
+        }
+    }
+
+    private void RefreshRecentPlayers(IReadOnlyList<WardRecentPlayerEntry> players)
+    {
+        if (_recentPlayersContent == null)
+        {
+            return;
+        }
+
+        if (players.Count == 0)
+        {
+            foreach (var row in _recentPlayerRows.Values)
+            {
+                row.Root.SetActive(false);
+            }
+
+            ShowRecentPlayersStatus(
+                WardLocalization.Localize(WardLocalization.UiNoUnregisteredPlayersToken, WardLocalization.UiNoUnregisteredPlayersFallback),
+                isError: false,
+                RecentPlayersListState.Empty);
+            return;
+        }
+
+        if (_recentPlayersStatusRow != null)
+        {
+            _recentPlayersStatusRow.Root.SetActive(false);
+        }
+
+        _recentPlayersRefreshGeneration++;
+        for (var index = 0; index < players.Count; index++)
+        {
+            var entry = players[index];
+            if (!_recentPlayerRows.TryGetValue(entry.PlayerId, out var row))
+            {
+                row = CreateRecentPlayerRow(entry.PlayerId);
+                _recentPlayerRows[entry.PlayerId] = row;
+            }
+
+            row.LastSeenGeneration = _recentPlayersRefreshGeneration;
+            var displayName = string.IsNullOrWhiteSpace(entry.Name) ? entry.PlayerId.ToString() : entry.Name;
+            row.NameText.text = BuildPlayerDisplayText(displayName, entry.GuildName, entry.AccountId);
+            row.SearchText = BuildPlayerSearchText(entry.Name, entry.GuildName, entry.AccountId, entry.PlayerId);
+            row.StatusText.text = BuildPlayerActivityStatus(entry.IsOnline, entry.LastSeenUtcTicks);
+            row.Root.transform.SetSiblingIndex(index);
+        }
+
+        _recentPlayerRowsToRemove.Clear();
+        foreach (var pair in _recentPlayerRows)
+        {
+            if (pair.Value.LastSeenGeneration != _recentPlayersRefreshGeneration)
+            {
+                _recentPlayerRowsToRemove.Add(pair.Key);
+            }
+        }
+
+        for (var index = 0; index < _recentPlayerRowsToRemove.Count; index++)
+        {
+            var playerId = _recentPlayerRowsToRemove[index];
+            if (_recentPlayerRows.TryGetValue(playerId, out var row))
+            {
+                Destroy(row.Root);
+                _recentPlayerRows.Remove(playerId);
+            }
+        }
+
+        _recentPlayersListState = RecentPlayersListState.Loaded;
+        ApplyRecentPlayersFilter();
+    }
+
+    private void OnRecentPlayersSearchChanged(string query)
+    {
+        _recentPlayersSearchQuery = query ?? string.Empty;
+        ApplyRecentPlayersFilter();
+    }
+
+    private void ApplyRecentPlayersFilter()
+    {
+        if (_recentPlayersContent == null || _recentPlayersListState != RecentPlayersListState.Loaded)
+        {
+            return;
+        }
+
+        if (_recentPlayersStatusRow != null)
+        {
+            _recentPlayersStatusRow.Root.SetActive(false);
+        }
+
+        var query = _recentPlayersSearchQuery.Trim();
+        var visibleCount = 0;
+        foreach (var row in _recentPlayerRows.Values)
+        {
+            var matches = MatchesPlayerSearch(row.SearchText, query);
+            row.Root.SetActive(matches);
+            if (matches)
+            {
+                visibleCount++;
+            }
+        }
+
+        if (visibleCount == 0 && query.Length > 0)
+        {
+            ShowRecentPlayersStatus(
+                WardLocalization.Localize(WardLocalization.UiNoMatchingPlayersToken, WardLocalization.UiNoMatchingPlayersFallback),
+                isError: false,
+                RecentPlayersListState.Loaded);
+        }
+    }
+
+    private RecentPlayerRowView CreateRecentPlayerRow(long playerId)
+    {
+        var listSize = WardGuiLayoutSettings.GetRecentPlayersListSize();
+        var rowWidth = Mathf.Max(560f, listSize.x - 72f);
+        const float buttonWidth = 120f;
+
+        var row = CreatePlayerRowRoot(_recentPlayersContent!, "RecentPlayerRow", rowWidth);
+
+        var nameText = CreatePlayerRowText(
+            row.transform,
+            "PlayerName",
+            new Vector2(-rowWidth * 0.5f + 10f, 0f),
+            rowWidth - 318f,
+            TextAnchor.MiddleLeft,
+            GUIManager.Instance.ValheimBeige);
+        nameText.horizontalOverflow = HorizontalWrapMode.Wrap;
+        var statusText = CreatePlayerRowText(
+            row.transform,
+            "PlayerStatus",
+            new Vector2(rowWidth * 0.5f - buttonWidth - 164f, 0f),
+            150f,
+            TextAnchor.MiddleRight,
+            GUIManager.Instance.ValheimYellow);
+
+        var addButton = CreateAnchoredButton(
+            row.transform,
+            WardLocalization.Localize(WardLocalization.UiAddToken, WardLocalization.UiAddFallback),
+            new Vector2(rowWidth * 0.5f - buttonWidth * 0.5f - 4f, 0f),
+            buttonWidth,
+            32f);
+        addButton.onClick.AddListener(() => RequestAddRecentPlayer(playerId));
+
+        return new RecentPlayerRowView(row, nameText, statusText, addButton);
+    }
+
+    private static GameObject CreatePlayerRowRoot(Transform parent, string name, float rowWidth)
+    {
+        const float rowHeight = 46f;
+        var row = new GameObject(name, typeof(RectTransform), typeof(Image), typeof(LayoutElement));
+        row.transform.SetParent(parent, false);
+
+        var rowRect = row.GetComponent<RectTransform>();
+        rowRect.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, rowWidth);
+        rowRect.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, rowHeight);
+        row.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0.18f);
+
+        var rowLayout = row.GetComponent<LayoutElement>();
+        rowLayout.preferredHeight = rowHeight;
+        rowLayout.preferredWidth = rowWidth;
+        return row;
+    }
+
+    private static Text CreatePlayerRowText(
+        Transform parent,
+        string name,
+        Vector2 position,
+        float width,
+        TextAnchor alignment,
+        Color color)
+    {
+        var textObject = new GameObject(name, typeof(RectTransform), typeof(Text));
+        textObject.transform.SetParent(parent, false);
+        var rect = textObject.GetComponent<RectTransform>();
+        rect.anchorMin = new Vector2(0.5f, 0.5f);
+        rect.anchorMax = new Vector2(0.5f, 0.5f);
+        rect.pivot = new Vector2(0f, 0.5f);
+        rect.anchoredPosition = position;
+        rect.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, width);
+        rect.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, 38f);
+
+        var text = textObject.GetComponent<Text>();
+        var gui = GUIManager.Instance;
+        gui.ApplyTextStyle(text, gui.AveriaSerifBold, color, 18, false);
+        text.alignment = alignment;
+        text.horizontalOverflow = HorizontalWrapMode.Overflow;
+        text.verticalOverflow = VerticalWrapMode.Truncate;
+        return text;
+    }
+
+    private void RequestAddRecentPlayer(long playerId)
+    {
+        if (_currentWard == null)
+        {
+            return;
+        }
+
+        SetRecentPlayerRowsInteractable(false);
+        BeginRecentPlayersRequest();
+        var requestId = WardRecentPlayers.RequestAdd(_currentWard, playerId);
+        EndRecentPlayersRequest(requestId);
+        if (requestId == 0L)
+        {
+            _pendingRecentPlayersRequestId = 0L;
+            SetRecentPlayerRowsInteractable(true);
+            ShowRecentPlayersStatus(
+                WardLocalization.Localize(WardLocalization.UiRecentPlayersErrorToken, WardLocalization.UiRecentPlayersErrorFallback),
+                isError: true,
+                RecentPlayersListState.Error);
+            return;
+        }
+
+        _pendingRecentPlayersRequestId = requestId;
+        _recentPlayersRequestedAt = Time.unscaledTime;
+        ApplyDeferredRecentPlayersSnapshot(requestId);
+    }
+
+    private void ShowRecentPlayersStatus(string text, bool isError, RecentPlayersListState state)
+    {
+        if (_recentPlayersContent == null)
+        {
+            return;
+        }
+
+        foreach (var row in _recentPlayerRows.Values)
+        {
+            row.Root.SetActive(false);
+        }
+
+        EnsureRecentPlayersStatusRow();
+        _recentPlayersStatusRow!.Text.text = text;
+        _recentPlayersStatusRow.Text.color = isError
+            ? new Color(0.85f, 0.35f, 0.25f)
+            : GUIManager.Instance.ValheimBeige;
+        _recentPlayersStatusRow.Root.transform.SetSiblingIndex(0);
+        _recentPlayersStatusRow.Root.SetActive(true);
+        _recentPlayersListState = state;
+    }
+
+    private void SetRecentPlayerRowsInteractable(bool interactable)
+    {
+        foreach (var row in _recentPlayerRows.Values)
+        {
+            row.AddButton.interactable = interactable;
+        }
+    }
+
+    private void EnsureRecentPlayersStatusRow()
+    {
+        if (_recentPlayersStatusRow != null || _recentPlayersContent == null)
+        {
+            return;
+        }
+
+        var listSize = WardGuiLayoutSettings.GetRecentPlayersListSize();
+        var rowWidth = Mathf.Max(560f, listSize.x - 72f);
+        var root = CreatePlayerRowRoot(_recentPlayersContent!, "RecentPlayersStatusRow", rowWidth);
+
+        var text = CreatePlayerRowText(
+            root.transform,
+            "Status",
+            new Vector2(-rowWidth * 0.5f + 10f, 0f),
+            rowWidth - 24f,
+            TextAnchor.MiddleLeft,
+            GUIManager.Instance.ValheimBeige);
+        _recentPlayersStatusRow = new StatusRowView(root, text);
+    }
+
+    private static string BuildPlayerActivityStatus(bool isOnline, long lastSeenUtcTicks)
+    {
+        if (isOnline)
+        {
+            return WardLocalization.Localize(WardLocalization.UiOnlineToken, WardLocalization.UiOnlineFallback);
+        }
+
+        if (lastSeenUtcTicks <= 0L || lastSeenUtcTicks > System.DateTime.MaxValue.Ticks)
+        {
+            return WardLocalization.Localize(
+                WardLocalization.UiLastSeenUnavailableToken,
+                WardLocalization.UiLastSeenUnavailableFallback);
+        }
+
+        var lastSeenUtc = new System.DateTime(lastSeenUtcTicks, System.DateTimeKind.Utc);
+        var elapsed = System.DateTime.UtcNow - lastSeenUtc;
+        if (elapsed < System.TimeSpan.Zero || elapsed.TotalMinutes < 1d)
+        {
+            return WardLocalization.Localize(WardLocalization.UiLastSeenJustNowToken, WardLocalization.UiLastSeenJustNowFallback);
+        }
+
+        if (elapsed.TotalHours < 1d)
+        {
+            return WardLocalization.LocalizeFormat(
+                WardLocalization.UiLastSeenMinutesAgoToken,
+                WardLocalization.UiLastSeenMinutesAgoFallback,
+                Mathf.Max(1, Mathf.FloorToInt((float)elapsed.TotalMinutes)));
+        }
+
+        if (elapsed.TotalDays < 1d)
+        {
+            return WardLocalization.LocalizeFormat(
+                WardLocalization.UiLastSeenHoursAgoToken,
+                WardLocalization.UiLastSeenHoursAgoFallback,
+                Mathf.Max(1, Mathf.FloorToInt((float)elapsed.TotalHours)));
+        }
+
+        return WardLocalization.LocalizeFormat(
+            WardLocalization.UiLastSeenDaysAgoToken,
+            WardLocalization.UiLastSeenDaysAgoFallback,
+            Mathf.Max(1, Mathf.FloorToInt((float)elapsed.TotalDays)));
+    }
+
+    private static bool TryGetWardZdoId(PrivateArea ward, out ZDOID wardZdoId)
+    {
+        wardZdoId = ZDOID.None;
+        var zdo = ward.m_nview != null && ward.m_nview.IsValid() ? ward.m_nview.GetZDO() : null;
+        if (zdo == null)
+        {
+            return false;
+        }
+
+        wardZdoId = zdo.m_uid;
+        return wardZdoId != ZDOID.None;
     }
 
     private void SetVisible(bool visible)
@@ -443,20 +1028,7 @@ internal sealed class WardGuiController : MonoBehaviour
             _root.SetActive(visible);
         }
 
-        if (visible)
-        {
-            SetShortcutHintVisible(false);
-        }
-
         GUIManager.BlockInput(visible);
-    }
-
-    private void SetShortcutHintVisible(bool visible)
-    {
-        if (_hintRoot != null)
-        {
-            _hintRoot.SetActive(visible);
-        }
     }
 
     private void RefreshStaticTexts()
@@ -479,40 +1051,21 @@ internal sealed class WardGuiController : MonoBehaviour
 
     private void RefreshControls()
     {
-        if (_areaMarkerSpeedSlider == null || _areaMarkerSpeedValueText == null || _areaMarkerAlphaSlider == null || _areaMarkerAlphaValueText == null || _autoCloseDelaySlider == null || _radiusSlider == null || _radiusValueText == null || _delayValueText == null || _warningSoundToggle == null || _warningFlashToggle == null)
+        if (_autoCloseToggle == null ||
+            _warningSoundToggle == null ||
+            _warningFlashToggle == null ||
+            _areaMarkerRotationToggle == null)
         {
             return;
         }
 
-        var maxRadius = _currentWard != null
-            ? WardSettings.GetMaxNonOverlappingRadius(_currentWard)
-            : WardSettings.MaxRadius;
-        var displayedRadius = Mathf.Clamp(_currentConfiguration.Radius, WardSettings.MinRadius, WardSettings.MaxRadius);
-
         _suppressUiEvents = true;
-        _areaMarkerSpeedSlider.value = _currentConfiguration.AreaMarkerSpeedMultiplier;
-        _areaMarkerAlphaSlider.value = _currentConfiguration.AreaMarkerAlpha;
-        _autoCloseDelaySlider.value = _currentConfiguration.AutoCloseDelay;
+        _autoCloseToggle.isOn = _currentConfiguration.AutoCloseEnabled;
         _warningSoundToggle.isOn = _currentConfiguration.WarningSoundEnabled;
         _warningFlashToggle.isOn = _currentConfiguration.WarningFlashEnabled;
-        _radiusSlider.maxValue = WardSettings.MaxRadius;
-        _radiusSlider.value = displayedRadius;
-        _areaMarkerSpeedValueText.text = $"{Mathf.RoundToInt(_currentConfiguration.AreaMarkerSpeedMultiplier * 100f)}%";
-        _areaMarkerAlphaValueText.text = $"{Mathf.RoundToInt(_currentConfiguration.AreaMarkerAlpha * 100f)}%";
-        _radiusValueText.text = WardLocalization.LocalizeFormat(
-            WardLocalization.UiRadiusValueToken,
-            WardLocalization.UiRadiusValueFallback,
-            Mathf.RoundToInt(displayedRadius));
-        _delayValueText.text = Mathf.Approximately(_currentConfiguration.AutoCloseDelay, 0f)
-            ? WardLocalization.Localize(WardLocalization.UiOffToken, WardLocalization.UiOffFallback)
-            : WardLocalization.LocalizeFormat(
-                WardLocalization.UiDelayValueToken,
-                WardLocalization.UiDelayValueFallback,
-                Mathf.RoundToInt(_currentConfiguration.AutoCloseDelay));
+        _areaMarkerRotationToggle.isOn = _currentConfiguration.AreaMarkerRotationEnabled;
         RefreshRestrictionRows();
         _suppressUiEvents = false;
-        UpdateRadiusLimitMarker(maxRadius);
-        UpdateRadiusValueVisuals(maxRadius);
     }
 
     private void RefreshPermittedPlayers(bool force)
@@ -534,8 +1087,8 @@ internal sealed class WardGuiController : MonoBehaviour
         {
             ClearPermittedRows();
             EnsureEmptyPermittedRow();
-            UpdatePermittedRowText(
-                _emptyPermittedRow!,
+            UpdateText(
+                _emptyPermittedRow!.Text,
                 WardLocalization.Localize(WardLocalization.UiNoRegisteredPlayersToken, WardLocalization.UiNoRegisteredPlayersFallback));
             _emptyPermittedRow!.Root.SetActive(true);
             _emptyPermittedRow.Root.transform.SetSiblingIndex(0);
@@ -559,9 +1112,14 @@ internal sealed class WardGuiController : MonoBehaviour
             }
 
             row.LastSeenGeneration = _permittedRefreshGeneration;
-            UpdatePermittedRowText(row, BuildPermittedPlayerDisplayText(_currentWard, entry.Key, entry.Value));
+            GetPermittedPlayerIdentity(_currentWard, entry.Key, out var guildName, out var accountId);
+            var displayName = string.IsNullOrWhiteSpace(entry.Value) ? entry.Key.ToString() : entry.Value;
+            UpdateText(row.NameText, BuildPlayerDisplayText(displayName, guildName, accountId));
+            row.StatusText.text = _registeredPlayerActivity.TryGetValue(entry.Key, out var activity)
+                ? BuildPlayerActivityStatus(activity.IsOnline, activity.LastSeenUtcTicks)
+                : BuildPlayerActivityStatus(isOnline: false, lastSeenUtcTicks: 0L);
+            row.SearchText = BuildPlayerSearchText(entry.Value, guildName, accountId, entry.Key);
             row.Root.transform.SetSiblingIndex(index);
-            row.Root.SetActive(true);
         }
 
         _permittedRowsToRemove.Clear();
@@ -584,55 +1142,93 @@ internal sealed class WardGuiController : MonoBehaviour
             Destroy(row.Root);
             _permittedRows.Remove(playerId);
         }
+
+        ApplyRegisteredPlayersFilter();
+    }
+
+    private void OnRegisteredPlayersSearchChanged(string query)
+    {
+        _registeredPlayersSearchQuery = query ?? string.Empty;
+        ApplyRegisteredPlayersFilter();
+    }
+
+    private void ApplyRegisteredPlayersFilter()
+    {
+        if (_permittedContent == null || _permittedRows.Count == 0)
+        {
+            return;
+        }
+
+        var query = _registeredPlayersSearchQuery.Trim();
+        var visibleCount = 0;
+        foreach (var row in _permittedRows.Values)
+        {
+            var matches = MatchesPlayerSearch(row.SearchText, query);
+            row.Root.SetActive(matches);
+            if (matches)
+            {
+                visibleCount++;
+            }
+        }
+
+        if (_emptyPermittedRow == null)
+        {
+            EnsureEmptyPermittedRow();
+        }
+
+        if (visibleCount == 0 && query.Length > 0)
+        {
+            UpdateText(
+                _emptyPermittedRow!.Text,
+                WardLocalization.Localize(WardLocalization.UiNoMatchingPlayersToken, WardLocalization.UiNoMatchingPlayersFallback));
+            _emptyPermittedRow!.Root.transform.SetSiblingIndex(_permittedRows.Count);
+            _emptyPermittedRow.Root.SetActive(true);
+        }
+        else if (_emptyPermittedRow != null)
+        {
+            _emptyPermittedRow.Root.SetActive(false);
+        }
     }
 
     private PermittedRowView CreatePermittedRow(long playerId)
     {
         var permittedListSize = WardGuiLayoutSettings.GetPermittedListSize();
         var rowWidth = Mathf.Max(560f, permittedListSize.x - 72f);
-        var rowHeight = 46f;
-        var buttonWidth = 130f;
+        const float buttonWidth = 130f;
+        const float statusWidth = 150f;
+        const float columnSpacing = 12f;
+        const float statusButtonSpacing = 10f;
 
-        var row = new GameObject("PermittedPlayerRow", typeof(RectTransform), typeof(Image), typeof(LayoutElement));
-        row.transform.SetParent(_permittedContent, false);
+        var row = CreatePlayerRowRoot(_permittedContent!, "PermittedPlayerRow", rowWidth);
 
-        var rowRect = row.GetComponent<RectTransform>();
-        rowRect.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, rowWidth);
-        rowRect.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, rowHeight);
-
-        var image = row.GetComponent<Image>();
-        image.color = new Color(0f, 0f, 0f, 0.18f);
-
-        var layoutElement = row.GetComponent<LayoutElement>();
-        layoutElement.preferredHeight = rowHeight;
-        layoutElement.preferredWidth = rowWidth;
-
-        var nameObject = new GameObject("PlayerName", typeof(RectTransform), typeof(Text), typeof(LayoutElement));
-        nameObject.transform.SetParent(row.transform, false);
-        var nameRect = nameObject.GetComponent<RectTransform>();
-        nameRect.anchorMin = new Vector2(0.5f, 0.5f);
-        nameRect.anchorMax = new Vector2(0.5f, 0.5f);
-        nameRect.pivot = new Vector2(0f, 0.5f);
-
-        var leftPadding = 10f;
+        const float leftPadding = 10f;
         var removeButtonPosition = WardGuiLayoutSettings.GetRegisteredPlayersRemoveButtonPosition();
         var clampedButtonX = Mathf.Clamp(
             removeButtonPosition.x,
             -rowWidth * 0.5f + buttonWidth * 0.5f + 10f,
             rowWidth * 0.5f - buttonWidth * 0.5f - 4f);
-        var nameRightEdge = clampedButtonX - buttonWidth * 0.5f - 12f;
-        var nameWidth = Mathf.Max(340f, nameRightEdge - (-rowWidth * 0.5f + leftPadding));
-        nameRect.anchoredPosition = new Vector2(-rowWidth * 0.5f + leftPadding, 0f);
-        nameRect.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, nameWidth);
-        nameRect.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, rowHeight - 8f);
-
-        var nameText = nameObject.GetComponent<Text>();
-        var gui = GUIManager.Instance;
-        gui.ApplyTextStyle(nameText, gui.AveriaSerifBold, gui.ValheimBeige, 18, false);
-        nameText.text = string.Empty;
-        nameText.alignment = TextAnchor.MiddleLeft;
-        nameText.horizontalOverflow = HorizontalWrapMode.Overflow;
-        nameText.verticalOverflow = VerticalWrapMode.Truncate;
+        var nameLeftEdge = -rowWidth * 0.5f + leftPadding;
+        var statusRightEdge = clampedButtonX - buttonWidth * 0.5f - statusButtonSpacing;
+        var statusLeftEdge = statusRightEdge - statusWidth;
+        var nameWidth = Mathf.Max(220f, statusLeftEdge - columnSpacing - nameLeftEdge);
+        var nameText = CreatePlayerRowText(
+            row.transform,
+            "PlayerName",
+            new Vector2(nameLeftEdge, 0f),
+            nameWidth,
+            TextAnchor.MiddleLeft,
+            GUIManager.Instance.ValheimBeige);
+        nameText.horizontalOverflow = HorizontalWrapMode.Wrap;
+        var statusText = CreatePlayerRowText(
+            row.transform,
+            "PlayerStatus",
+            new Vector2(statusLeftEdge, 0f),
+            statusWidth,
+            TextAnchor.MiddleRight,
+            GUIManager.Instance.ValheimYellow);
+        statusText.resizeTextForBestFit = true;
+        statusText.resizeTextMinSize = 13;
+        statusText.resizeTextMaxSize = 18;
 
         var removeButton = CreateAnchoredButton(
             row.transform,
@@ -648,9 +1244,10 @@ internal sealed class WardGuiController : MonoBehaviour
             }
 
             WardSettings.RequestRemovePermitted(_currentWard, playerId);
+            RequestRecentPlayersSnapshot();
         });
 
-        return new PermittedRowView(row, nameText);
+        return new PermittedRowView(row, nameText, statusText);
     }
 
     private void EnsureEmptyPermittedRow()
@@ -660,49 +1257,26 @@ internal sealed class WardGuiController : MonoBehaviour
             return;
         }
 
-        var row = new GameObject("PermittedPlayerRowEmpty", typeof(RectTransform), typeof(Image), typeof(LayoutElement));
-        row.transform.SetParent(_permittedContent, false);
-
-        var rowRect = row.GetComponent<RectTransform>();
         var permittedListSize = WardGuiLayoutSettings.GetPermittedListSize();
         var rowWidth = Mathf.Max(560f, permittedListSize.x - 72f);
-        var rowHeight = 46f;
-        rowRect.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, rowWidth);
-        rowRect.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, rowHeight);
+        var row = CreatePlayerRowRoot(_permittedContent!, "PermittedPlayerRowEmpty", rowWidth);
 
-        var image = row.GetComponent<Image>();
-        image.color = new Color(0f, 0f, 0f, 0.18f);
+        var nameText = CreatePlayerRowText(
+            row.transform,
+            "PlayerName",
+            new Vector2(-rowWidth * 0.5f + 10f, 0f),
+            rowWidth - 24f,
+            TextAnchor.MiddleLeft,
+            GUIManager.Instance.ValheimBeige);
 
-        var layoutElement = row.GetComponent<LayoutElement>();
-        layoutElement.preferredHeight = rowHeight;
-        layoutElement.preferredWidth = rowWidth;
-
-        var nameObject = new GameObject("PlayerName", typeof(RectTransform), typeof(Text), typeof(LayoutElement));
-        nameObject.transform.SetParent(row.transform, false);
-
-        var nameRect = nameObject.GetComponent<RectTransform>();
-        nameRect.anchorMin = new Vector2(0.5f, 0.5f);
-        nameRect.anchorMax = new Vector2(0.5f, 0.5f);
-        nameRect.pivot = new Vector2(0f, 0.5f);
-        nameRect.anchoredPosition = new Vector2(-rowWidth * 0.5f + 10f, 0f);
-        nameRect.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, rowWidth - 24f);
-        nameRect.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, rowHeight - 8f);
-
-        var nameText = nameObject.GetComponent<Text>();
-        var gui = GUIManager.Instance;
-        gui.ApplyTextStyle(nameText, gui.AveriaSerifBold, gui.ValheimBeige, 18, false);
-        nameText.alignment = TextAnchor.MiddleLeft;
-        nameText.horizontalOverflow = HorizontalWrapMode.Overflow;
-        nameText.verticalOverflow = VerticalWrapMode.Truncate;
-
-        _emptyPermittedRow = new PermittedRowView(row, nameText);
+        _emptyPermittedRow = new StatusRowView(row, nameText);
     }
 
-    private void UpdatePermittedRowText(PermittedRowView row, string text)
+    private static void UpdateText(Text target, string text)
     {
-        if (!string.Equals(row.NameText.text, text, System.StringComparison.Ordinal))
+        if (!string.Equals(target.text, text, System.StringComparison.Ordinal))
         {
-            row.NameText.text = text;
+            target.text = text;
         }
     }
 
@@ -724,13 +1298,31 @@ internal sealed class WardGuiController : MonoBehaviour
         }
     }
 
-    private void BuildRestrictionsPage()
+    private void ClearRecentPlayerRows()
     {
-        if (_restrictionsPageRoot == null)
+        foreach (var row in _recentPlayerRows.Values)
         {
-            return;
+            Destroy(row.Root);
         }
 
+        _recentPlayerRows.Clear();
+        _recentPlayerRowsToRemove.Clear();
+        _recentPlayersRefreshGeneration = 0;
+        _pendingRecentPlayersRequestId = 0L;
+        _recentPlayersRequestInProgress = false;
+        _hasDeferredRecentPlayersSnapshot = false;
+        _deferredRecentPlayersSnapshot = default;
+        _recentPlayersListState = RecentPlayersListState.None;
+
+        if (_recentPlayersStatusRow != null)
+        {
+            Destroy(_recentPlayersStatusRow.Root);
+            _recentPlayersStatusRow = null;
+        }
+    }
+
+    private void BuildRestrictions()
+    {
         var gui = GUIManager.Instance;
         var listSize = WardGuiLayoutSettings.GetRestrictionListSize();
         CreateLabel(
@@ -744,7 +1336,7 @@ internal sealed class WardGuiController : MonoBehaviour
             gui.ValheimOrange);
 
         var scrollRoot = gui.CreateScrollView(
-            _restrictionsPageRoot.transform,
+            _restrictionsPageRoot!.transform,
             false,
             true,
             20f,
@@ -763,16 +1355,31 @@ internal sealed class WardGuiController : MonoBehaviour
             return;
         }
 
-        var layout = _restrictionsContent.GetComponent<VerticalLayoutGroup>();
-        if (layout != null)
+        var verticalLayout = _restrictionsContent.GetComponent<VerticalLayoutGroup>();
+        if (verticalLayout != null)
         {
-            layout.childAlignment = TextAnchor.UpperLeft;
-            layout.childControlWidth = true;
-            layout.childForceExpandWidth = true;
-            layout.childForceExpandHeight = false;
-            layout.spacing = 6f;
-            layout.padding = new RectOffset(8, 8, 8, 8);
+            verticalLayout.enabled = false;
+            // Unity delays Destroy until the end of the frame, but only one
+            // LayoutGroup may exist on this object. Remove Jotunn's generated
+            // layout immediately before replacing it with the grid.
+            DestroyImmediate(verticalLayout);
         }
+
+        var layout = _restrictionsContent.gameObject.AddComponent<GridLayoutGroup>();
+        if (layout == null)
+        {
+            Plugin.Log.LogError("Failed to create the ward restrictions grid layout.");
+            return;
+        }
+
+        layout.startCorner = GridLayoutGroup.Corner.UpperLeft;
+        layout.startAxis = GridLayoutGroup.Axis.Vertical;
+        layout.childAlignment = TextAnchor.UpperLeft;
+        layout.cellSize = WardGuiLayoutSettings.GetRestrictionCellSize();
+        layout.spacing = WardGuiLayoutSettings.GetRestrictionCellSpacing();
+        layout.padding = new RectOffset(8, 8, 8, 8);
+        layout.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
+        layout.constraintCount = 2;
 
         var definitions = WardSettings.RestrictionDefinitions;
         for (var index = 0; index < definitions.Count; index++)
@@ -784,11 +1391,11 @@ internal sealed class WardGuiController : MonoBehaviour
 
     private RestrictionRowView CreateRestrictionRow(WardRestrictionDefinition definition)
     {
-        var listSize = WardGuiLayoutSettings.GetRestrictionListSize();
-        var rowWidth = Mathf.Max(560f, listSize.x - 72f);
-        var rowHeight = 48f;
+        var cellSize = WardGuiLayoutSettings.GetRestrictionCellSize();
+        var rowWidth = cellSize.x;
+        var rowHeight = cellSize.y;
 
-        var row = new GameObject("RestrictionRow", typeof(RectTransform), typeof(Image), typeof(LayoutElement));
+        var row = new GameObject("RestrictionRow", typeof(RectTransform), typeof(Image));
         row.transform.SetParent(_restrictionsContent, false);
 
         var rowRect = row.GetComponent<RectTransform>();
@@ -798,15 +1405,11 @@ internal sealed class WardGuiController : MonoBehaviour
         var image = row.GetComponent<Image>();
         image.color = new Color(0f, 0f, 0f, 0.18f);
 
-        var layoutElement = row.GetComponent<LayoutElement>();
-        layoutElement.preferredHeight = rowHeight;
-        layoutElement.preferredWidth = rowWidth;
-
         var toggle = CreateCenteredToggle(row.transform, new Vector2(-rowWidth * 0.5f + 28f, 0f), 30f);
         var restriction = definition.Restriction;
         toggle.onValueChanged.AddListener(enabled => OnRestrictionToggleChanged(restriction, enabled));
 
-        var labelObject = new GameObject("RestrictionName", typeof(RectTransform), typeof(Text), typeof(LayoutElement));
+        var labelObject = new GameObject("RestrictionName", typeof(RectTransform), typeof(Text));
         labelObject.transform.SetParent(row.transform, false);
         var labelRect = labelObject.GetComponent<RectTransform>();
         labelRect.anchorMin = new Vector2(0.5f, 0.5f);
@@ -824,7 +1427,7 @@ internal sealed class WardGuiController : MonoBehaviour
         label.horizontalOverflow = HorizontalWrapMode.Wrap;
         label.verticalOverflow = VerticalWrapMode.Truncate;
 
-        var stateObject = new GameObject("RestrictionState", typeof(RectTransform), typeof(Text), typeof(LayoutElement));
+        var stateObject = new GameObject("RestrictionState", typeof(RectTransform), typeof(Text));
         stateObject.transform.SetParent(row.transform, false);
         var stateRect = stateObject.GetComponent<RectTransform>();
         stateRect.anchorMin = new Vector2(0.5f, 0.5f);
@@ -878,79 +1481,37 @@ internal sealed class WardGuiController : MonoBehaviour
             return;
         }
 
-        _currentConfiguration = WardSettings.WithRestriction(_currentConfiguration, restriction, enabled);
-        RefreshControls();
-        ScheduleConfigurationPush();
+        ApplyConfigurationDraft(WardSettings.WithRestriction(_currentConfiguration, restriction, enabled));
     }
 
-    private void OnAreaMarkerSpeedSliderChanged(float value)
+    private void OnAutoCloseToggleChanged(bool enabled)
     {
-        if (_suppressUiEvents)
-        {
-            return;
-        }
-
-        _currentConfiguration = WardSettings.WithAreaMarkerSpeedMultiplier(_currentConfiguration, value);
-        RefreshControls();
-        ScheduleConfigurationCommit();
-    }
-
-    private void OnAreaMarkerAlphaSliderChanged(float value)
-    {
-        if (_suppressUiEvents)
-        {
-            return;
-        }
-
-        _currentConfiguration = WardSettings.WithAreaMarkerAlpha(_currentConfiguration, value);
-        RefreshControls();
-        ScheduleConfigurationCommit();
-    }
-
-    private void OnRadiusSliderChanged(float value)
-    {
-        if (_suppressUiEvents)
-        {
-            return;
-        }
-
-        _currentConfiguration = WardSettings.WithRadius(_currentConfiguration, value);
-        ScheduleConfigurationCommit();
-        UpdateRadiusTexts();
-    }
-
-    private void OnAutoCloseDelaySliderChanged(float value)
-    {
-        if (_suppressUiEvents)
-        {
-            return;
-        }
-
-        _currentConfiguration = WardSettings.WithAutoCloseDelay(_currentConfiguration, value);
-        RefreshControls();
-        ScheduleConfigurationCommit();
+        ApplyConfigurationDraft(WardSettings.WithAutoCloseEnabled(_currentConfiguration, enabled));
     }
 
     private void OnWarningSoundToggleChanged(bool enabled)
     {
-        if (_suppressUiEvents)
-        {
-            return;
-        }
-
-        _currentConfiguration = WardSettings.WithWarningSoundEnabled(_currentConfiguration, enabled);
-        RefreshControls();
-        ScheduleConfigurationPush();
+        ApplyConfigurationDraft(WardSettings.WithWarningSoundEnabled(_currentConfiguration, enabled));
     }
 
     private void OnWarningFlashToggleChanged(bool enabled)
+    {
+        ApplyConfigurationDraft(WardSettings.WithWarningFlashEnabled(_currentConfiguration, enabled));
+    }
+
+    private void OnAreaMarkerRotationToggleChanged(bool enabled)
+    {
+        ApplyConfigurationDraft(WardSettings.WithAreaMarkerRotationEnabled(_currentConfiguration, enabled));
+    }
+
+    private void ApplyConfigurationDraft(WardConfiguration configuration)
     {
         if (_suppressUiEvents)
         {
             return;
         }
 
-        _currentConfiguration = WardSettings.WithWarningFlashEnabled(_currentConfiguration, enabled);
+        _currentConfiguration = configuration;
         RefreshControls();
         ScheduleConfigurationPush();
     }
@@ -963,7 +1524,6 @@ internal sealed class WardGuiController : MonoBehaviour
         }
 
         var submittedConfiguration = _currentConfiguration;
-        _configurationCommitPending = false;
         _configurationPushPending = false;
         var submission = WardSettings.RequestUpdateConfiguration(_currentWard, submittedConfiguration);
         if (submission.IsPending)
@@ -972,20 +1532,8 @@ internal sealed class WardGuiController : MonoBehaviour
             return;
         }
 
-        WardSettings.ShowConfigurationRequestFeedback(submission.ResultCode, submission.ShowOverlapMessage);
+        WardSettings.ShowConfigurationRequestFeedback(submission.ResultCode);
         ApplyConfigurationResponse(0L, submission.ResultCode, submission.Configuration);
-    }
-
-    private void ScheduleConfigurationCommit()
-    {
-        if (_suppressUiEvents || _currentWard == null)
-        {
-            return;
-        }
-
-        _configurationCommitPending = true;
-        _configurationPushPending = false;
-        _nextConfigurationPushTime = float.PositiveInfinity;
     }
 
     private void ScheduleConfigurationPush()
@@ -1001,19 +1549,19 @@ internal sealed class WardGuiController : MonoBehaviour
 
     private void FlushPendingConfigurationPush()
     {
-        if (!_configurationCommitPending && !_configurationPushPending)
+        if (!_configurationPushPending)
         {
             return;
         }
 
-        CommitPendingConfiguration();
+        PushPendingConfiguration();
     }
 
-    private void CommitPendingConfiguration()
+    private void PushPendingConfiguration()
     {
         if (_suppressUiEvents ||
             _currentWard == null ||
-            (!_configurationCommitPending && !_configurationPushPending) ||
+            !_configurationPushPending ||
             HasPendingConfigurationRequest())
         {
             return;
@@ -1082,7 +1630,6 @@ internal sealed class WardGuiController : MonoBehaviour
 
         if (failed)
         {
-            _configurationCommitPending = false;
             _configurationPushPending = false;
         }
 
@@ -1104,7 +1651,7 @@ internal sealed class WardGuiController : MonoBehaviour
         }
 
         _authoritativeConfiguration = authoritativeConfiguration;
-        if (_configurationCommitPending || _configurationPushPending)
+        if (_configurationPushPending)
         {
             return;
         }
@@ -1143,34 +1690,19 @@ internal sealed class WardGuiController : MonoBehaviour
             return;
         }
 
-        if (_configurationCommitPending)
+        if (_configurationPushPending &&
+            (_closeRequested || Time.unscaledTime >= _nextConfigurationPushTime))
         {
-            CommitPendingConfiguration();
-            return;
+            PushPendingConfiguration();
         }
 
-        if (_configurationPushPending && Time.unscaledTime >= _nextConfigurationPushTime)
-        {
-            CommitPendingConfiguration();
-        }
-    }
 
-    private void UpdateRadiusTexts()
-    {
-        if (_radiusValueText == null)
+        if (_closeRequested &&
+            !HasPendingConfigurationRequest() &&
+            !_configurationPushPending)
         {
-            return;
+            CompleteCloseWardUi();
         }
-
-        var maxRadius = _currentWard != null
-            ? WardSettings.GetMaxNonOverlappingRadius(_currentWard)
-            : WardSettings.MaxRadius;
-        _radiusValueText.text = WardLocalization.LocalizeFormat(
-            WardLocalization.UiRadiusValueToken,
-            WardLocalization.UiRadiusValueFallback,
-            Mathf.RoundToInt(_currentConfiguration.Radius));
-        UpdateRadiusLimitMarker(maxRadius);
-        UpdateRadiusValueVisuals(maxRadius);
     }
 
     private GameObject CreatePageRoot(string name, Vector2 panelSize)
@@ -1210,38 +1742,6 @@ internal sealed class WardGuiController : MonoBehaviour
             width,
             height);
         return buttonObject.GetComponent<Button>();
-    }
-
-    private Slider CreateSlider(Vector2 position, float width, float minValue, float maxValue, bool wholeNumbers, bool commitOnRelease = false)
-    {
-        var sliderObject = DefaultControls.CreateSlider(new DefaultControls.Resources());
-        sliderObject.transform.SetParent(GetBuildParent(), false);
-        sliderObject.name = "STUWardSlider";
-
-        var sliderRect = sliderObject.GetComponent<RectTransform>();
-        ConfigureRect(sliderRect, position, width, 34f);
-
-        var slider = sliderObject.GetComponent<Slider>();
-        slider.direction = Slider.Direction.LeftToRight;
-        slider.minValue = minValue;
-        slider.maxValue = maxValue;
-        slider.wholeNumbers = wholeNumbers;
-
-        GUIManager.Instance.ApplySliderStyle(slider);
-        ShrinkSliderHandle(sliderObject.transform);
-
-        if (commitOnRelease)
-        {
-            var commitHandler = sliderObject.AddComponent<SliderCommitHandler>();
-            commitHandler.OnCommit = CommitPendingConfiguration;
-        }
-
-        return slider;
-    }
-
-    private Toggle CreateToggle(Vector2 position, float boxSize)
-    {
-        return CreateAnchoredToggle(GetBuildParent(), position, boxSize);
     }
 
     private Toggle CreateCenteredToggle(Transform parent, Vector2 position, float boxSize)
@@ -1307,76 +1807,6 @@ internal sealed class WardGuiController : MonoBehaviour
         return toggle;
     }
 
-    private static Image? CreateSliderLimitMarker(Slider slider, Color color)
-    {
-        var sliderRect = slider.transform as RectTransform;
-        if (sliderRect == null)
-        {
-            return null;
-        }
-
-        var markerObject = new GameObject("STUWardLimitMarker", typeof(RectTransform), typeof(Image));
-        markerObject.transform.SetParent(sliderRect, false);
-        markerObject.transform.SetAsLastSibling();
-
-        var markerRect = markerObject.GetComponent<RectTransform>();
-        markerRect.anchorMin = new Vector2(1f, 0.5f);
-        markerRect.anchorMax = new Vector2(1f, 0.5f);
-        markerRect.pivot = new Vector2(0.5f, 0.5f);
-        markerRect.anchoredPosition = Vector2.zero;
-        markerRect.sizeDelta = new Vector2(4f, GetSliderTrackHeight(slider));
-
-        var handleSlideArea = sliderRect.Find("Handle Slide Area");
-        if (handleSlideArea != null)
-        {
-            markerObject.transform.SetSiblingIndex(handleSlideArea.GetSiblingIndex());
-        }
-        else
-        {
-            markerObject.transform.SetAsLastSibling();
-        }
-
-        var markerImage = markerObject.GetComponent<Image>();
-        markerImage.color = color;
-        markerImage.raycastTarget = false;
-        return markerImage;
-    }
-
-    private void UpdateRadiusLimitMarker(float maxRadius)
-    {
-        if (_radiusSlider == null || _radiusLimitMarker == null)
-        {
-            return;
-        }
-
-        var clampedRadius = Mathf.Clamp(maxRadius, _radiusSlider.minValue, _radiusSlider.maxValue);
-        var shouldShowMarker = clampedRadius < _radiusSlider.maxValue - 0.01f;
-        _radiusLimitMarker.gameObject.SetActive(shouldShowMarker);
-        if (!shouldShowMarker)
-        {
-            return;
-        }
-
-        var normalized = Mathf.InverseLerp(_radiusSlider.minValue, _radiusSlider.maxValue, clampedRadius);
-        var markerRect = _radiusLimitMarker.rectTransform;
-        markerRect.anchorMin = new Vector2(normalized, 0.5f);
-        markerRect.anchorMax = new Vector2(normalized, 0.5f);
-        markerRect.anchoredPosition = Vector2.zero;
-        markerRect.sizeDelta = new Vector2(markerRect.sizeDelta.x, GetSliderTrackHeight(_radiusSlider));
-    }
-
-    private void UpdateRadiusValueVisuals(float maxRadius)
-    {
-        if (_radiusValueText == null)
-        {
-            return;
-        }
-
-        _radiusValueText.color = _currentConfiguration.Radius > maxRadius + 0.01f
-            ? new Color(0.85f, 0.2f, 0.2f)
-            : GUIManager.Instance.ValheimYellow;
-    }
-
     private Text CreateLabel(
         string text,
         Vector2 position,
@@ -1407,8 +1837,33 @@ internal sealed class WardGuiController : MonoBehaviour
         return label;
     }
 
+    private void CreatePlayerSearchInput(
+        Vector2 position,
+        string query,
+        System.Action<string> onValueChanged,
+        string objectName)
+    {
+        var size = WardGuiLayoutSettings.GetPlayerSearchSize();
+        var inputObject = GUIManager.Instance.CreateInputField(
+            _generalPageRoot!.transform,
+            new Vector2(0.5f, 0.5f),
+            new Vector2(0.5f, 0.5f),
+            position,
+            InputField.ContentType.Standard,
+            WardLocalization.Localize(WardLocalization.UiSearchPlayersToken, WardLocalization.UiSearchPlayersFallback),
+            18,
+            size.x,
+            size.y);
+        inputObject.name = objectName;
+        var input = inputObject.GetComponent<InputField>();
+        input.lineType = InputField.LineType.SingleLine;
+        input.text = query;
+        input.onValueChanged.AddListener(value => onValueChanged(value));
+    }
+
     private void SetActivePage(WardSettingsPage page)
     {
+        var returnedToGeneralPage = page == WardSettingsPage.General && _currentPage != WardSettingsPage.General;
         _currentPage = page;
         if (_generalPageRoot != null)
         {
@@ -1420,33 +1875,35 @@ internal sealed class WardGuiController : MonoBehaviour
             _restrictionsPageRoot.SetActive(page == WardSettingsPage.Restrictions);
         }
 
-        UpdatePageButtonVisuals();
-    }
-
-    private void UpdatePageButtonVisuals()
-    {
         if (_previousPageButton != null)
         {
-            _previousPageButton.gameObject.SetActive(_currentPage == WardSettingsPage.Restrictions);
+            _previousPageButton.gameObject.SetActive(page == WardSettingsPage.Restrictions);
         }
 
         if (_nextPageButton != null)
         {
-            _nextPageButton.gameObject.SetActive(_currentPage == WardSettingsPage.General);
+            _nextPageButton.gameObject.SetActive(page == WardSettingsPage.General);
+        }
+
+        if (returnedToGeneralPage && _visible && _currentWard != null)
+        {
+            RequestRecentPlayersSnapshot();
         }
     }
 
     private static void StylePageArrowButton(Button? button)
     {
         var text = button != null ? button.GetComponentInChildren<Text>() : null;
-        if (text != null)
+        if (text == null)
         {
-            text.text = text.text.Trim();
-            text.fontSize = 34;
-            text.color = GUIManager.Instance.ValheimYellow;
-            text.alignment = TextAnchor.MiddleCenter;
-            text.rectTransform.anchoredPosition += new Vector2(0f, 1f);
+            return;
         }
+
+        text.text = text.text.Trim();
+        text.fontSize = 34;
+        text.color = GUIManager.Instance.ValheimYellow;
+        text.alignment = TextAnchor.MiddleCenter;
+        text.rectTransform.anchoredPosition += new Vector2(0f, 1f);
     }
 
     private static void ConfigureRect(RectTransform? rectTransform, Vector2 position, float width, float height)
@@ -1464,109 +1921,107 @@ internal sealed class WardGuiController : MonoBehaviour
         rectTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, height);
     }
 
-    private static void ShrinkSliderHandle(Transform sliderTransform)
+    private static string BuildPlayerDisplayText(string playerName, string guildName, string accountId)
     {
-        var handle = sliderTransform.Find("Handle Slide Area/Handle") as RectTransform;
-        if (handle == null)
-        {
-            return;
-        }
-
-        handle.localScale = new Vector3(0.5f, 0.8f, 1f);
-    }
-
-    private static float GetSliderTrackHeight(Slider slider)
-    {
-        var background = slider.transform.Find("Background") as RectTransform;
-        if (background == null)
-        {
-            return 14f;
-        }
-
-        if (background.rect.height > 0.01f)
-        {
-            return background.rect.height;
-        }
-
-        return background.sizeDelta.y > 0.01f ? background.sizeDelta.y : 14f;
-    }
-
-    private static float GetSliderHandleHeight(Slider? slider)
-    {
-        if (slider == null)
-        {
-            return 18f;
-        }
-
-        var handle = slider.transform.Find("Handle Slide Area/Handle") as RectTransform;
-        if (handle == null)
-        {
-            return 18f;
-        }
-
-        var baseHeight = handle.rect.height > 0.01f ? handle.rect.height : handle.sizeDelta.y;
-        if (baseHeight <= 0.01f)
-        {
-            baseHeight = 18f;
-        }
-
-        var scaledHeight = baseHeight * Mathf.Abs(handle.localScale.y);
-        return Mathf.Max(12f, scaledHeight);
-    }
-
-    private static string BuildPermittedPlayerDisplayText(PrivateArea? area, long playerId, string playerName)
-    {
-        var guildName = GetPermittedPlayerGuildName(area, playerId);
-        var platformId = GetPermittedPlayerPlatformId(area, playerId);
         var guildDisplay = string.IsNullOrWhiteSpace(guildName) ? "-" : guildName;
-        var platformDisplay = string.IsNullOrWhiteSpace(platformId) ? "-" : platformId;
+        var accountDisplay = string.IsNullOrWhiteSpace(accountId) ? "-" : accountId;
         return WardLocalization.LocalizeFormat(
             WardLocalization.UiRegisteredPlayerFormatToken,
             WardLocalization.UiRegisteredPlayerFormatFallback,
             playerName,
             guildDisplay,
-            platformDisplay);
+            accountDisplay);
     }
 
-    private static string GetPermittedPlayerGuildName(PrivateArea? area, long playerId)
+    private static string BuildPlayerSearchText(string playerName, string guildName, string accountId, long playerId)
     {
-        if (WardPermittedSnapshots.TryGet(area, playerId, out var guildName, out _))
-        {
-            return guildName;
-        }
-
-        return GuildsCompat.GetPlayerGuildName(playerId);
+        return $"{playerName}\n{guildName}\n{accountId}\n{playerId}";
     }
 
-    private static string GetPermittedPlayerPlatformId(PrivateArea? area, long playerId)
+    private static bool MatchesPlayerSearch(string searchText, string query)
     {
-        if (WardPermittedSnapshots.TryGet(area, playerId, out _, out var platformId))
+        return query.Length == 0 ||
+               searchText.IndexOf(query, System.StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    private static void GetPermittedPlayerIdentity(
+        PrivateArea? area,
+        long playerId,
+        out string guildName,
+        out string accountId)
+    {
+        if (WardPermittedSnapshots.TryGet(area, playerId, out guildName, out accountId))
         {
-            return platformId;
+            return;
         }
 
-        return WardOwnership.GetPlayerSteamIdDisplay(playerId);
+        guildName = GuildsCompat.GetPlayerGuildName(playerId);
+        accountId = WardOwnership.GetPlayerSteamIdDisplay(playerId);
     }
 
     private sealed class PermittedRowView
     {
-        internal PermittedRowView(GameObject root, Text nameText)
+        internal PermittedRowView(GameObject root, Text nameText, Text statusText)
         {
             Root = root;
             NameText = nameText;
+            StatusText = statusText;
         }
 
         internal GameObject Root { get; }
 
         internal Text NameText { get; }
 
+        internal Text StatusText { get; }
+
+        internal string SearchText { get; set; } = string.Empty;
+
         internal int LastSeenGeneration { get; set; }
+    }
+
+    private sealed class RecentPlayerRowView
+    {
+        internal RecentPlayerRowView(GameObject root, Text nameText, Text statusText, Button addButton)
+        {
+            Root = root;
+            NameText = nameText;
+            StatusText = statusText;
+            AddButton = addButton;
+        }
+
+        internal GameObject Root { get; }
+        internal Text NameText { get; }
+        internal Text StatusText { get; }
+        internal Button AddButton { get; }
+        internal string SearchText { get; set; } = string.Empty;
+        internal int LastSeenGeneration { get; set; }
+    }
+
+    private sealed class StatusRowView
+    {
+        internal StatusRowView(GameObject root, Text text)
+        {
+            Root = root;
+            Text = text;
+        }
+
+        internal GameObject Root { get; }
+        internal Text Text { get; }
     }
 
     private enum WardSettingsPage
     {
         General,
         Restrictions
+    }
+
+    private enum RecentPlayersListState
+    {
+        None,
+        Loading,
+        Loaded,
+        Empty,
+        Error
     }
 
     private sealed class RestrictionRowView
@@ -1583,20 +2038,5 @@ internal sealed class WardGuiController : MonoBehaviour
         internal Toggle Toggle { get; }
         internal Text Label { get; }
         internal Text StateText { get; }
-    }
-
-    private sealed class SliderCommitHandler : MonoBehaviour, IEndDragHandler, IPointerUpHandler
-    {
-        internal System.Action? OnCommit { get; set; }
-
-        public void OnEndDrag(PointerEventData eventData)
-        {
-            OnCommit?.Invoke();
-        }
-
-        public void OnPointerUp(PointerEventData eventData)
-        {
-            OnCommit?.Invoke();
-        }
     }
 }

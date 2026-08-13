@@ -4,6 +4,27 @@ using UnityEngine;
 
 namespace STUWard;
 
+internal static class WardMinimapSnapshotProtocol
+{
+    internal const int MaxEntryCount = 16384;
+
+    internal static bool IsValidEntry(WardMinimapSnapshotEntry entry)
+    {
+        return !entry.ZdoId.IsNone() &&
+               IsFinite(entry.Position.x) &&
+               IsFinite(entry.Position.y) &&
+               IsFinite(entry.Position.z) &&
+               IsFinite(entry.Radius) &&
+               entry.Radius >= WardSettings.MinRadius &&
+               entry.Radius <= WardSettings.MaxRadiusLimit;
+    }
+
+    private static bool IsFinite(float value)
+    {
+        return !float.IsNaN(value) && !float.IsInfinity(value);
+    }
+}
+
 internal readonly struct WardMinimapSnapshotEntry
 {
     internal WardMinimapSnapshotEntry(ZDOID zdoId, Vector3 position, float radius, bool isEnabled)
@@ -99,6 +120,11 @@ internal static class WardMinimapViewerSnapshotBuilder
                 entry.Position,
                 entry.Radius,
                 entry.IsEnabled);
+            if (!WardMinimapSnapshotProtocol.IsValidEntry(snapshotEntry))
+            {
+                continue;
+            }
+
             visibleWardCount++;
             if (snapshotEntry.IsEnabled)
             {

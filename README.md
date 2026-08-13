@@ -4,7 +4,7 @@ Simple, Tidy, and Unique Ward for Valheim servers. <br>
 It adds a clone of vanilla ward but with more server-side features such as diverse protections, permission control, guild integration, ward count limits, and compatibility handling for common utility mods.
 <br>
 ![](https://i.ibb.co/Q7GkMgvB/Screenshot-2026-03-31-031730.png)<br>
-Registration is same with vanilla ward. <br>
+Trusted players manage individual ward registration from Ward Settings. <br>
 There is blacklist config to block certain items inside ward area.
 
 ![](https://i.ibb.co/HLH084PV/Screenshot-2026-03-31-024031.png)<br>
@@ -19,21 +19,20 @@ Good old auto closing door inside ward area. <br>
 ## What It Does
 
 - Adds a placeable `Ward` with server-controlled protection rules
-- Lets ward owners configure radius, marker visibility, warning effects, and door auto-close
+- Lets trusted players configure ward alerts, ward-range rotation, door auto-close, and protected-action restrictions
 - Blocks unauthorized interaction, building, terrain edits, pickup, item use, and damage inside enabled foreign wards
-- Prevents foreign ward overlap while allowing trusted shared ward groups
+- Prevents foreign ward overlap while allowing same-owner and same-guild ward groups
 - Tracks per-account ward limits
 - Shows ward pins and active ranges on the map when allowed
 
 ## How To Use
 
 1. Select `Ward` with the hammer and place it.
-2. A new ward starts at `8m` radius.
+2. The server assigns the largest legal radius up to its configured maximum.
 3. Look at your ward and press `Alt+E` to open `Ward Settings`.
-4. Adjust radius, marker display, warning effects, and auto-close delay.
-5. To register a player, turn the ward off and have that player interact with it.
-
-While placing a ward, the placement preview shows the maximum configurable radius.
+4. On the first page, manage individually trusted and recent unregistered players.
+5. Add a character from the server's recent unregistered-player list.
+6. Open the second page to configure ward alerts, ward-range rotation, door auto-close, and protected actions.
 
 ## Protection
 
@@ -50,33 +49,29 @@ Building pieces inside an enabled STU Ward receive extra damage protection. Play
 
 ## Permissions
 
-STU Ward separates access from control.
-
-Players with access can use protected areas without being blocked. Players with control can change the ward itself.
-
-Access is granted to:
+STU Ward uses one trusted-player permission level for existing wards. Trust is granted to:
 
 - The ward owner
-- Registered players
+- Individually registered players
 - Players matching the ward's stored guild identity
 - Server admins using effective debug control
 
-Control is limited to:
+All trusted players can use the protected area, open and change ward settings, toggle the ward, add or remove players from its individually trusted-player list, and dismantle the ward. Authorized changes apply immediately without confirmation popups.
 
-- The ward owner
-- Server admins using effective debug control
-
-Registered players and guild members can use the protected area, but they cannot change settings, toggle the ward, remove other registered players, or remove the ward itself.
+The owner identity is still retained for ward limits, reporting, and guild metadata; it does not grant a higher permission tier on an existing ward.
 
 ## Registration
 
-Registration works like a vanilla ward:
+Individual registration is managed by trusted players in Ward Settings:
 
-- The ward must be disabled.
-- A player interacts with the ward to add or remove themselves.
-- Players with control rights use interaction to toggle the ward instead.
+- The server keeps a separate recent-player history for each world.
+- The list includes authenticated characters currently online or seen within the last fourteen days, with online characters first and older activity lower in the list.
+- Registered and recent-player rows show the character name, resolved guild, public platform account ID, and online/last-seen status. Registered characters without retained activity show that their last-seen time is unavailable.
+- Trusted players can add a recent character to the ward or remove an individually trusted character.
+- Registration is character-specific because ward permissions use Valheim player IDs.
+- Disabled wards do not allow outsiders to register themselves.
 
-This means a disabled ward is intentionally open for self-registration.
+Recent-player history begins when STUWard 1.3.0 is installed. Earlier visits are not imported, and a character last seen more than fourteen days ago must reconnect before appearing again. Records already pruned under an earlier, shorter retention policy cannot be recovered retroactively.
 
 ## Ward Overlap
 
@@ -87,20 +82,25 @@ Ward overlap is strict.
 - Wards with the same stored guild identity can overlap.
 - Registered-player access does not bypass overlap rules.
 
+When placing a new ward, older foreign wards keep their radius and the new ward automatically yields to the largest non-overlapping radius. The assigned radius is stored once; removing a neighboring ward or increasing the server maximum does not silently expand it later. Lowering the server maximum clamps existing wards.
+
 In overlapping coverage, access is additive: if any enabled foreign ward denies the player, the action is denied.
 
 ## Ward Settings
 
 Each ward can store its own behavior:
 
-- Radius
-- Area marker visibility
-- Area marker brightness
-- Warning sound
-- Warning flash
-- Door auto-close delay
+- Ward alert sound
+- Ward alert visual effect
+- Ward range rotation (enabled by default at 50% of the native rotation speed; stationary when disabled)
+- Door auto-close
+- Protected-action restrictions
 
-Door auto-close uses the shortest active delay from the wards covering the door.
+When auto-close is enabled, doors opened inside the active ward area close after a shared fixed delay of 5 seconds.
+
+Ward rings are visible for placement previews and enabled wards. Disabled wards remain hidden unless a placement conflict highlights the closest blocking ward ring for 1.5 seconds on the client that attempted placement. Crossing an enabled ward boundary locally raises that ward ring from its minimum brightness to full brightness for 0.5 seconds, and it remains at full brightness while the player stays within 0.75m of the boundary. The client-only `Ward Boundary Brighten Mode` selects trusted wards, untrusted wards, all wards (the default), or disables this boundary cue.
+
+The first settings page is dedicated to player management, with separate scrolling lists for individually trusted and recent unregistered players. Each list has its own local search field for character name, guild, account ID, or character player ID. The second page contains a two-column behavior grid and an independently scrolling restrictions grid.
 
 ## Item Policy
 
@@ -116,11 +116,11 @@ Players normally see wards they are allowed to see. Admin debug control can show
 
 ## Important Details
 
-- Ownership is based on the ward creator player id.
-- Account identity is used for limits and reporting, not direct ward control.
-- A ward's guild identity is stored on the ward when metadata is captured.
-- Changing guild later does not automatically rewrite old wards.
-- To move a ward to a different shared group, remove it and place a new one.
+- Ownership metadata is based on the ward creator player id.
+- Account identity is used for limits and reporting, not as a separate permission tier.
+- A ward's guild identity is stored on the ward and refreshed from authoritative Guilds data when membership changes can be resolved.
+- If Guilds data is temporarily unavailable, the last resolved ward and registered-player guild metadata is retained instead of being erased.
+- Servers and clients must run the same STUWard version.
 
 ## Github
 https://github.com/sighsorry1029/STUWard

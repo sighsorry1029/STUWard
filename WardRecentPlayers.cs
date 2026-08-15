@@ -82,7 +82,7 @@ internal static class WardRecentPlayers
     private const int MaxYamlBytes = 2 * 1024 * 1024;
     private const int MaxResponseBytes = 256 * 1024;
     private const int MaxRequestsPerWindow = 12;
-    private static readonly TimeSpan RecentLifetime = TimeSpan.FromDays(14);
+    private static readonly TimeSpan RecentLifetime = TimeSpan.FromDays(28);
     private static readonly TimeSpan SaveDebounce = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan SaveRetryDelay = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan PruneInterval = TimeSpan.FromMinutes(5);
@@ -127,6 +127,7 @@ internal static class WardRecentPlayers
             return;
         }
 
+        WardOwnership.ReconcileReadyServerSessionIdentities();
         EnsureServerStoreLoaded();
         var now = DateTime.UtcNow;
         if (now >= _nextPruneUtc)
@@ -170,8 +171,13 @@ internal static class WardRecentPlayers
             return;
         }
 
-        if (AuthenticatedIdentitiesBySender.TryGetValue(identity.SenderUid, out var previousIdentity) &&
-            previousIdentity.PlayerId != identity.PlayerId)
+        var hadPreviousIdentity = AuthenticatedIdentitiesBySender.TryGetValue(
+            identity.SenderUid,
+            out var previousIdentity);
+        var isNewSessionIdentity = !hadPreviousIdentity ||
+                                   previousIdentity.PlayerId != identity.PlayerId ||
+                                   !previousIdentity.CharacterZdoId.Equals(identity.CharacterZdoId);
+        if (hadPreviousIdentity && previousIdentity.PlayerId != identity.PlayerId)
         {
             AuthenticatedIdentitiesBySender[identity.SenderUid] = identity;
             RefreshOnlineState(previousIdentity.PlayerId);
@@ -187,11 +193,27 @@ internal static class WardRecentPlayers
         var now = DateTime.UtcNow;
         var name = NormalizeText(identity.PlayerName, MaxPlayerNameLength);
         var accountId = NormalizeText(identity.AccountId, MaxAccountIdLength);
+        var changed = false;
         if (PlayersById.TryGetValue(identity.PlayerId, out var existing))
         {
-            existing.Name = !string.IsNullOrWhiteSpace(name) ? name : existing.Name;
-            existing.AccountId = !string.IsNullOrWhiteSpace(accountId) ? accountId : existing.AccountId;
-            existing.LastSeenUtcTicks = now.Ticks;
+            if (!string.IsNullOrWhiteSpace(name) && !string.Equals(existing.Name, name, StringComparison.Ordinal))
+            {
+                existing.Name = name;
+                changed = true;
+            }
+
+            if (!string.IsNullOrWhiteSpace(accountId) &&
+                !string.Equals(existing.AccountId, accountId, StringComparison.Ordinal))
+            {
+                existing.AccountId = accountId;
+                changed = true;
+            }
+
+            if (isNewSessionIdentity && existing.LastSeenUtcTicks != now.Ticks)
+            {
+                existing.LastSeenUtcTicks = now.Ticks;
+                changed = true;
+            }
         }
         else
         {
@@ -202,10 +224,14 @@ internal static class WardRecentPlayers
                 AccountId = accountId,
                 LastSeenUtcTicks = now.Ticks
             };
+            changed = true;
         }
 
         OnlinePlayerIds.Add(identity.PlayerId);
-        MarkDirty(now);
+        if (changed)
+        {
+            MarkDirty(now);
+        }
     }
 
     internal static void ForgetAuthenticatedIdentity(ServerSessionIdentity identity)
@@ -370,6 +396,10 @@ internal static class WardRecentPlayers
             return;
         }
 
+        // Character ZDO replication can finish after RPC_CharacterID on a dedicated
+        // server. Reconcile every currently ready peer before taking the snapshot so
+        // the UI does not have to wait for the background retry cadence.
+        WardOwnership.ReconcileReadyServerSessionIdentities(force: true);
         if (!EnsureServerStoreLoaded())
         {
             return;

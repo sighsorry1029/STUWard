@@ -59,7 +59,7 @@ internal static class WardLocalization
     internal const string UiWarningSoundFallback = "Ward alert sound";
     internal const string UiWarningFlashFallback = "Ward alert visual effect";
     internal const string UiAreaMarkerRotationFallback = "Ward range rotation";
-    internal const string UiRegisteredPlayersFallback = "Individually trusted players";
+    internal const string UiRegisteredPlayersFallback = "Registered players";
     internal const string UiUnregisteredPlayersFallback = "Unregistered players";
     internal const string UiRestrictionsFallback = "Restrictions";
     internal const string UiRestrictionForcedFallback = "Forced";
@@ -72,8 +72,8 @@ internal static class WardLocalization
     internal const string UiRestrictionContainersFallback = "Containers";
     internal const string UiRestrictionCraftingStationsFallback = "Crafting stations";
     internal const string UiRestrictionTameablesAndSaddlesFallback = "Tames";
-    internal const string UiNoRegisteredPlayersFallback = "No individually trusted players.";
-    internal const string UiNoUnregisteredPlayersFallback = "No unregistered players seen in the last 14 days.";
+    internal const string UiNoRegisteredPlayersFallback = "No registered players.";
+    internal const string UiNoUnregisteredPlayersFallback = "No unregistered players seen in the last 28 days.";
     internal const string UiRecentPlayersLoadingFallback = "Loading recent players...";
     internal const string UiRecentPlayersErrorFallback = "Could not load recent players.";
     internal const string UiSearchPlayersFallback = "Search players...";

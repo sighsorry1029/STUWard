@@ -30,7 +30,7 @@ Good old auto closing door inside ward area. <br>
 1. Select `Ward` with the hammer and place it.
 2. The server assigns the largest legal radius up to its configured maximum.
 3. Look at your ward and press `Alt+E` to open `Ward Settings`.
-4. On the first page, manage individually trusted and recent unregistered players.
+4. On the first page, manage registered and recent unregistered players.
 5. Add a character from the server's recent unregistered-player list.
 6. Open the second page to configure ward alerts, ward-range rotation, door auto-close, and protected actions.
 
@@ -56,7 +56,7 @@ STU Ward uses one trusted-player permission level for existing wards. Trust is g
 - Players matching the ward's stored guild identity
 - Server admins using effective debug control
 
-All trusted players can use the protected area, open and change ward settings, toggle the ward, add or remove players from its individually trusted-player list, and dismantle the ward. Authorized changes apply immediately without confirmation popups.
+All trusted players can use the protected area, open and change ward settings, toggle the ward, add or remove players from its individual registration list, and dismantle the ward. Authorized changes apply immediately without confirmation popups.
 
 The owner identity is still retained for ward limits, reporting, and guild metadata; it does not grant a higher permission tier on an existing ward.
 
@@ -65,13 +65,13 @@ The owner identity is still retained for ward limits, reporting, and guild metad
 Individual registration is managed by trusted players in Ward Settings:
 
 - The server keeps a separate recent-player history for each world.
-- The list includes authenticated characters currently online or seen within the last fourteen days, with online characters first and older activity lower in the list.
+- The list includes authenticated characters currently online or seen within the last twenty-eight days, with online characters first and older activity lower in the list.
 - Registered and recent-player rows show the character name, resolved guild, public platform account ID, and online/last-seen status. Registered characters without retained activity show that their last-seen time is unavailable.
-- Trusted players can add a recent character to the ward or remove an individually trusted character.
+- Trusted players can add a recent character to the ward or remove an individually registered character.
 - Registration is character-specific because ward permissions use Valheim player IDs.
 - Disabled wards do not allow outsiders to register themselves.
 
-Recent-player history begins when STUWard 1.3.0 is installed. Earlier visits are not imported, and a character last seen more than fourteen days ago must reconnect before appearing again. Records already pruned under an earlier, shorter retention policy cannot be recovered retroactively.
+Recent-player history begins when STUWard 1.3.0 is installed. Earlier visits are not imported, and extending retention from fourteen to twenty-eight days does not restore records that were already pruned. Those characters must reconnect before appearing again.
 
 ## Ward Overlap
 
@@ -100,7 +100,7 @@ When auto-close is enabled, doors opened inside the active ward area close after
 
 Ward rings are visible for placement previews and enabled wards. Disabled wards remain hidden unless a placement conflict highlights the closest blocking ward ring for 1.5 seconds on the client that attempted placement. Crossing an enabled ward boundary locally raises that ward ring from its minimum brightness to full brightness for 0.5 seconds, and it remains at full brightness while the player stays within 0.75m of the boundary. The client-only `Ward Boundary Brighten Mode` selects trusted wards, untrusted wards, all wards (the default), or disables this boundary cue.
 
-The first settings page is dedicated to player management, with separate scrolling lists for individually trusted and recent unregistered players. Each list has its own local search field for character name, guild, account ID, or character player ID. The second page contains a two-column behavior grid and an independently scrolling restrictions grid.
+The first settings page is dedicated to player management, with separate scrolling lists for registered and recent unregistered players. Each list has its own local search field for character name, guild, account ID, or character player ID. The second page contains a two-column behavior grid and an independently scrolling restrictions grid.
 
 ## Item Policy
 

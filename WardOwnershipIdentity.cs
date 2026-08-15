@@ -24,12 +24,15 @@ internal readonly struct ServerSessionIdentity
 
 internal static partial class WardOwnership
 {
+    private static readonly TimeSpan ServerSessionIdentityReconcileInterval = TimeSpan.FromSeconds(1);
+
     // Server-side identity/auth state:
     // sender -> session identity resolution and playerId -> accountId cache.
     private sealed class IdentityAuthState
     {
         internal readonly Dictionary<long, string> ServerPlayerAccountIdsByPlayerId = new();
         internal readonly Dictionary<long, ServerSessionIdentity> ServerSessionIdentitiesBySender = new();
+        internal DateTime NextSessionIdentityReconcileUtc = DateTime.MinValue;
     }
 
     private static readonly IdentityAuthState IdentityAuthData = new();
@@ -41,6 +44,7 @@ internal static partial class WardOwnership
     {
         ServerPlayerAccountIdsByPlayerId.Clear();
         ServerSessionIdentitiesBySender.Clear();
+        IdentityAuthData.NextSessionIdentityReconcileUtc = DateTime.MinValue;
     }
 
     internal static string GetWardSteamAccountId(PrivateArea? area)
@@ -172,13 +176,16 @@ internal static partial class WardOwnership
         {
             if (TryGetServerSessionIdentity(sender, out var sessionIdentity))
             {
-                if (sessionIdentity.PlayerId != 0L)
+                if (sessionIdentity.PlayerId != 0L &&
+                    IsServerSessionIdentityCurrent(sender, sessionIdentity))
                 {
                     return sessionIdentity.PlayerId;
                 }
 
                 RefreshServerSessionIdentity(ZNet.instance.GetPeer(sender));
-                if (TryGetServerSessionIdentity(sender, out sessionIdentity) && sessionIdentity.PlayerId != 0L)
+                if (TryGetServerSessionIdentity(sender, out sessionIdentity) &&
+                    sessionIdentity.PlayerId != 0L &&
+                    IsServerSessionIdentityCurrent(sender, sessionIdentity))
                 {
                     return sessionIdentity.PlayerId;
                 }
@@ -186,7 +193,9 @@ internal static partial class WardOwnership
             else
             {
                 RefreshServerSessionIdentity(ZNet.instance.GetPeer(sender));
-                if (TryGetServerSessionIdentity(sender, out sessionIdentity) && sessionIdentity.PlayerId != 0L)
+                if (TryGetServerSessionIdentity(sender, out sessionIdentity) &&
+                    sessionIdentity.PlayerId != 0L &&
+                    IsServerSessionIdentityCurrent(sender, sessionIdentity))
                 {
                     return sessionIdentity.PlayerId;
                 }
@@ -275,8 +284,21 @@ internal static partial class WardOwnership
             return;
         }
 
-        var characterId = !characterIdOverride.IsNone() ? characterIdOverride : peer.m_characterID;
+        var characterId = !characterIdOverride.IsNone()
+            ? characterIdOverride
+            : GetKnownServerSessionCharacterId(peer);
+        var hadPreviousIdentity = ServerSessionIdentitiesBySender.TryGetValue(
+            peer.m_uid,
+            out var previousIdentity);
         var playerId = GetPlayerId(characterId);
+        if (playerId == 0L && hadPreviousIdentity && previousIdentity.PlayerId != 0L)
+        {
+            // Character ZDO replication may briefly lag behind RPC_CharacterID.
+            // Keep the last resolved identity so disconnect cleanup can still mark
+            // that player offline; the periodic scan will replace it once ready.
+            return;
+        }
+
         var accountId = ResolveServerSessionAccountId(playerId, characterId);
         if (string.IsNullOrWhiteSpace(accountId))
         {
@@ -289,8 +311,57 @@ internal static partial class WardOwnership
             playerId,
             accountId,
             playerName);
+        if (hadPreviousIdentity && SameSessionIdentity(previousIdentity, sessionIdentity))
+        {
+            return;
+        }
+
         ServerSessionIdentitiesBySender[peer.m_uid] = sessionIdentity;
         WardRecentPlayers.RememberAuthenticatedIdentity(sessionIdentity);
+    }
+
+    internal static void ReconcileReadyServerSessionIdentities(bool force = false)
+    {
+        var znet = ZNet.instance;
+        if (znet == null || !znet.IsServer())
+        {
+            return;
+        }
+
+        var nowUtc = DateTime.UtcNow;
+        if (!force && nowUtc < IdentityAuthData.NextSessionIdentityReconcileUtc)
+        {
+            return;
+        }
+
+        IdentityAuthData.NextSessionIdentityReconcileUtc = nowUtc.Add(ServerSessionIdentityReconcileInterval);
+        var peers = znet.GetPeers();
+        if (peers == null)
+        {
+            return;
+        }
+
+        for (var index = 0; index < peers.Count; index++)
+        {
+            var peer = peers[index];
+            if (peer == null || !peer.IsReady())
+            {
+                continue;
+            }
+
+            var characterId = GetKnownServerSessionCharacterId(peer);
+            if (ServerSessionIdentitiesBySender.TryGetValue(peer.m_uid, out var existingIdentity) &&
+                existingIdentity.PlayerId != 0L &&
+                existingIdentity.CharacterZdoId.Equals(characterId))
+            {
+                continue;
+            }
+
+            if (GetPlayerId(characterId) != 0L)
+            {
+                RefreshServerSessionIdentity(peer, characterId);
+            }
+        }
     }
 
     internal static void ForgetServerSessionIdentity(ZNetPeer? peer)
@@ -316,6 +387,38 @@ internal static partial class WardOwnership
         }
 
         ServerSessionIdentitiesBySender.Remove(peer.m_uid);
+    }
+
+    private static ZDOID GetKnownServerSessionCharacterId(ZNetPeer peer)
+    {
+        if (!peer.m_characterID.IsNone())
+        {
+            return peer.m_characterID;
+        }
+
+        if (ServerSessionIdentitiesBySender.TryGetValue(peer.m_uid, out var identity) &&
+            !identity.CharacterZdoId.IsNone())
+        {
+            return identity.CharacterZdoId;
+        }
+
+        return ZDOID.None;
+    }
+
+    private static bool SameSessionIdentity(ServerSessionIdentity left, ServerSessionIdentity right)
+    {
+        return left.SenderUid == right.SenderUid &&
+               left.CharacterZdoId.Equals(right.CharacterZdoId) &&
+               left.PlayerId == right.PlayerId &&
+               string.Equals(left.AccountId, right.AccountId, StringComparison.Ordinal) &&
+               string.Equals(left.PlayerName, right.PlayerName, StringComparison.Ordinal);
+    }
+
+    private static bool IsServerSessionIdentityCurrent(long sender, ServerSessionIdentity identity)
+    {
+        var peer = ZNet.instance?.GetPeer(sender);
+        return peer != null &&
+               (peer.m_characterID.IsNone() || peer.m_characterID.Equals(identity.CharacterZdoId));
     }
 
     private static bool TryResolvePlayerIdFromSessionId(long sender, out long playerId)
@@ -619,12 +722,14 @@ internal static partial class WardOwnership
         {
             var sender = matchingSenders[index];
             var existingIdentity = ServerSessionIdentitiesBySender[sender];
-            ServerSessionIdentitiesBySender[sender] = new ServerSessionIdentity(
+            var updatedIdentity = new ServerSessionIdentity(
                 existingIdentity.SenderUid,
                 existingIdentity.CharacterZdoId,
                 existingIdentity.PlayerId,
                 canonicalAccountId,
                 existingIdentity.PlayerName);
+            ServerSessionIdentitiesBySender[sender] = updatedIdentity;
+            WardRecentPlayers.RememberAuthenticatedIdentity(updatedIdentity);
         }
     }
 

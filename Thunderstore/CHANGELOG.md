@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.2
+
+- Extended the per-world unregistered-player history from fourteen to twenty-eight days. The change is not retroactive: records already pruned under the fourteen-day policy return only after those characters reconnect.
+- Fixed dedicated-server player tracking by reconciling delayed character identities periodically and immediately before building the unregistered-player list.
+- Renamed the individual-registration list heading to `Registered players`.
+
 ## 1.3.1
 
 - Simplified ward-ring visibility: placement previews and enabled wards show their ring, while disabled wards remain hidden unless highlighted as the closest placement blocker.

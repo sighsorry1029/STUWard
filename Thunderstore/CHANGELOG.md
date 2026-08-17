@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.3
+
+- Fixed dedicated-server admin+debug ward access when another client owns the ward or container ZDO. Server-validated admin+debug state is now projected to every peer, including late-join snapshots and revocation when debug mode, admin access, or the session ends.
+- Made same-guild ward access recover quickly when Guilds or remote-player identity arrives after a client enters an already loaded zone, without turning a transient no-guild result into a thirty-second denial.
+- Removed legacy ward and Guilds recovery paths. STUWard now recognizes only the current `piece_stuward` prefab and current Guilds `Steam_<id>`/`name` schema, and no longer backfills missing permitted snapshots or repairs malformed stored radii.
+- Removed obsolete ServerSync template, old BepInEx binding redirect, and unstripped-corelib build fallbacks. Servers and all clients must update to STUWard 1.3.3 together.
+
 ## 1.3.2
 
 - Extended the per-world unregistered-player history from fourteen to twenty-eight days. The change is not retroactive: records already pruned under the fourteen-day policy return only after those characters reconnect.

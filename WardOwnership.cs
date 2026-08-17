@@ -9,7 +9,6 @@ internal static partial class WardOwnership
 {
     // Stored Steam/platform account id used only for ward count/report/grouping.
     // Creator playerId remains the ward-owner identity, not a higher control tier.
-    private const string ManagedWardMarkerKey = "stuw_is_managed_ward";
     internal const string SteamAccountIdKey = "stuw_owner_account_id";
     private const string LimitRefundProcessedKey = "stuw_limit_refund_processed";
     private const string ReceiveWardPlacementRejectedRpc = "STUWard_ReceiveWardPlacementRejected";
@@ -70,7 +69,6 @@ internal static partial class WardOwnership
         }
 
         EnsureManagedWardObservationInitialized();
-        PromoteRuntimeManagedWardZdo(zdo);
         if (_managedWardObservationInitialized && !AcceptedManagedWardIds.Contains(zdo.m_uid))
         {
             // Every persisted ward was accepted during the initial authoritative scan.
@@ -124,13 +122,6 @@ internal static partial class WardOwnership
             return false;
         }
 
-        var changed = false;
-        if (!zdo.GetBool(ManagedWardMarkerKey, false))
-        {
-            zdo.Set(ManagedWardMarkerKey, true);
-            changed = true;
-        }
-
         var projection = ManagedWardProjectionService.ResolveExplicitProjection(
             localPlayer.GetPlayerID(),
             accountId,
@@ -139,7 +130,7 @@ internal static partial class WardOwnership
             zdo,
             projection,
             forceSendWhenMetadataChanged: false);
-        changed |= projectionResult.AnyChanged;
+        var changed = projectionResult.AnyChanged;
 
         if (!changed)
         {
@@ -715,54 +706,7 @@ internal static partial class WardOwnership
             return false;
         }
 
-        if (zdo.GetPrefab() == ManagedWardPrefabHash)
-        {
-            return true;
-        }
-
-        if (zdo.GetBool(ManagedWardMarkerKey, false))
-        {
-            return true;
-        }
-
-        if (!string.IsNullOrWhiteSpace(NormalizeAccountId(zdo.GetString(SteamAccountIdKey, string.Empty))))
-        {
-            return true;
-        }
-
-        return false;
-    }
-
-    private static bool PromoteRuntimeManagedWardZdo(ZDO zdo)
-    {
-        if (zdo == null || !zdo.IsValid())
-        {
-            return false;
-        }
-
-        var changed = false;
-        if (!zdo.GetBool(ManagedWardMarkerKey, false))
-        {
-            zdo.Set(ManagedWardMarkerKey, true);
-            changed = true;
-        }
-
-        var ownerPlayerId = zdo.GetLong(ZDOVars.s_creator, 0L);
-        var ownerAccountId = GetPlayerAccountId(ownerPlayerId);
-        var storedAccountId = NormalizeAccountId(zdo.GetString(SteamAccountIdKey, string.Empty));
-        if (!string.IsNullOrWhiteSpace(ownerAccountId) && !SameAccountId(storedAccountId, ownerAccountId))
-        {
-            zdo.Set(SteamAccountIdKey, ownerAccountId);
-            changed = true;
-        }
-
-        if (!changed)
-        {
-            return false;
-        }
-
-        ZDOMan.instance?.ForceSendZDO(zdo.m_uid);
-        return true;
+        return zdo.GetPrefab() == ManagedWardPrefabHash;
     }
 
 }

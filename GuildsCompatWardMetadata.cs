@@ -1,7 +1,6 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using HarmonyLib;
 
 namespace STUWard;
 
@@ -481,28 +480,6 @@ internal static partial class GuildsCompat
             return new List<WardGuildCharacterIdentity>(memberIdentitiesByKey.Values);
         }
 
-        if (members is not IEnumerable enumerableMembers)
-        {
-            return new List<WardGuildCharacterIdentity>();
-        }
-
-        foreach (var entry in enumerableMembers)
-        {
-            if (entry == null)
-            {
-                continue;
-            }
-
-            var key = AccessTools.Property(entry.GetType(), "Key")?.GetValue(entry, null);
-            if (!TryCreateCharacterIdentityFromPlayerReference(key, out var identity))
-            {
-                hadUnresolvedMembers = true;
-                continue;
-            }
-
-            memberIdentitiesByKey[BuildCharacterIdentityKey(identity.AccountId, identity.PlayerName)] = identity;
-        }
-
         return new List<WardGuildCharacterIdentity>(memberIdentitiesByKey.Values);
     }
 
@@ -534,23 +511,12 @@ internal static partial class GuildsCompat
 
     private static string GetPlayerNameFromPlayerReference(object playerReference)
     {
-        if (PlayerReferenceNameField != null)
-        {
-            var playerName = PlayerReferenceNameField.GetValue(playerReference)?.ToString()?.Trim() ?? string.Empty;
-            if (!string.IsNullOrWhiteSpace(playerName))
-            {
-                return playerName;
-            }
-        }
-
-        var serialized = playerReference.ToString()?.Trim() ?? string.Empty;
-        var separatorIndex = serialized.IndexOf(':');
-        if (separatorIndex < 0 || separatorIndex >= serialized.Length - 1)
+        if (PlayerReferenceNameField == null)
         {
             return string.Empty;
         }
 
-        return serialized.Substring(separatorIndex + 1).Trim();
+        return PlayerReferenceNameField.GetValue(playerReference)?.ToString()?.Trim() ?? string.Empty;
     }
 
     private static void InvalidateGuildCacheForAccountId(string accountId)

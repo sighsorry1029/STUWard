@@ -56,7 +56,7 @@ internal static class ManagedWardLifecycle
         {
             WardOwnership.TryStampLocalManagedWardOwnerAccount(ward);
             WardAccess.RegisterManagedWard(ward);
-            WardPermittedSnapshots.Backfill(ward);
+            WardPermittedSnapshots.ReconcileExisting(ward);
             WardSettings.ApplyAreaState(ward);
             context.NetworkInitializationComplete = true;
         }

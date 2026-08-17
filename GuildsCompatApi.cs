@@ -61,7 +61,7 @@ internal static partial class GuildsCompat
     private static readonly FieldInfo? GuildMembersField = GuildType != null ? AccessTools.Field(GuildType, "Members") : null;
     private static readonly FieldInfo? PlayerReferenceIdField = PlayerReferenceType != null ? AccessTools.Field(PlayerReferenceType, "id") : null;
     private static readonly FieldInfo? PlayerReferenceNameField = PlayerReferenceType != null
-        ? AccessTools.Field(PlayerReferenceType, "name") ?? AccessTools.Field(PlayerReferenceType, "Name")
+        ? AccessTools.Field(PlayerReferenceType, "name")
         : null;
     private static readonly bool HasGuildsApiSurface = ApiType != null && IsLoadedMethod != null;
     private static AvailabilityState _availabilityState = AvailabilityState.Unknown;

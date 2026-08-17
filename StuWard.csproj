@@ -46,7 +46,6 @@
                 <GamePath Condition="!Exists('$(GamePath)')">$(HOME)/.steam/steam/steamapps/common/Valheim</GamePath>
                 <GamePath Condition="!Exists('$(GamePath)')">$(HOME)/Library/Application Support/Steam/steamapps/common/Valheim/Contents/MacOS</GamePath>
                 <CorlibPath Condition="!Exists('$(CorlibPath)') AND Exists('$(GamePath)')">$(GamePath)\valheim_Data\Managed</CorlibPath>
-                <CorlibPath Condition="!Exists('$(CorlibPath)')">$(GamePath)/unstripped_corelib</CorlibPath>
             </PropertyGroup>
         </When>
         <When Condition="($(OS) == 'Windows_NT') AND $(GamePath) == ''">
@@ -60,7 +59,6 @@
                 <GamePath Condition="!Exists('$(GamePath)')">D:\SteamLibrary\steamapps\common\Valheim</GamePath>
                 <BepInExPath Condition="!Exists('$(BepInExPath)')AND Exists('$(GamePath)')">$(GamePath)\BepInEx</BepInExPath>
                 <CorlibPath Condition="!Exists('$(CorlibPath)') AND Exists('$(GamePath)')">$(GamePath)\valheim_Data\Managed</CorlibPath>
-                <CorlibPath Condition="!Exists('$(CorlibPath)') AND Exists('$(GamePath)')">$(GamePath)\unstripped_corlib</CorlibPath>
                 <PublicizedAssembliesPath Condition="!Exists('$(PublicizedAssembliesPath)') AND Exists('$(GamePath)')">$(GamePath)\valheim_Data\Managed\publicized_assemblies</PublicizedAssembliesPath>
                 <AfterTargets Condition="'$(AfterTargets)' == ''">ILRepacker</AfterTargets>
             </PropertyGroup>
@@ -539,7 +537,6 @@
         <Content Include="UpdateManifest.ps1"/>
     </ItemGroup>
     <ItemGroup>
-        <None Include="App.config"/>
         <None Include="translations\English.yml">
           <Visible>true</Visible>
         </None>
@@ -616,10 +613,6 @@
         <Copy SourceFiles="$(TargetDir)$(AssemblyName).dll" DestinationFolder="$(CopyOutputDLLPath2)" OverwriteReadOnlyFiles="true" Condition="'$(CopyOutputDLLPath2)' != ''"/>
         <Copy SourceFiles="$(TargetDir)$(AssemblyName).dll" DestinationFolder="$(CopyOutputDLLPath3)" OverwriteReadOnlyFiles="true" Condition="'$(CopyOutputDLLPath3)' != ''"/>
         <Copy SourceFiles="$(TargetDir)$(AssemblyName).dll" DestinationFolder="$(CopyOutputDLLPath4)" OverwriteReadOnlyFiles="true" Condition="'$(CopyOutputDLLPath4)' != ''"/>
-        <Copy SourceFiles="$(TargetDir)$(AssemblyName).dll.config" DestinationFolder="$(CopyOutputDLLPath)" OverwriteReadOnlyFiles="true" Condition="Exists('$(TargetDir)$(AssemblyName).dll.config') AND '$(CopyOutputDLLPath)' != ''"/>
-        <Copy SourceFiles="$(TargetDir)$(AssemblyName).dll.config" DestinationFolder="$(CopyOutputDLLPath2)" OverwriteReadOnlyFiles="true" Condition="Exists('$(TargetDir)$(AssemblyName).dll.config') AND '$(CopyOutputDLLPath2)' != ''"/>
-        <Copy SourceFiles="$(TargetDir)$(AssemblyName).dll.config" DestinationFolder="$(CopyOutputDLLPath3)" OverwriteReadOnlyFiles="true" Condition="Exists('$(TargetDir)$(AssemblyName).dll.config') AND '$(CopyOutputDLLPath3)' != ''"/>
-        <Copy SourceFiles="$(TargetDir)$(AssemblyName).dll.config" DestinationFolder="$(CopyOutputDLLPath4)" OverwriteReadOnlyFiles="true" Condition="Exists('$(TargetDir)$(AssemblyName).dll.config') AND '$(CopyOutputDLLPath4)' != ''"/>
     </Target>
     <Target Name="CopyPluginRuntimeContent">
         <ItemGroup>

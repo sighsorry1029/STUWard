@@ -26,32 +26,23 @@ public sealed class GuildIdentityPolicyTests
     }
 
     [Theory]
-    [InlineData("76561198000000000", "Steam_76561198000000000", "76561198000000000")]
-    [InlineData("Steam_76561198000000000", "Steam_76561198000000000", "76561198000000000")]
-    [InlineData(" Steam_76561198000000000 ", "Steam_76561198000000000", "76561198000000000")]
-    [InlineData("PlayFab_ABC123", "PlayFab_ABC123", "")]
-    public void GetAccountLookupCandidates_preserves_the_guilds_platform_identity(
+    [InlineData("76561198000000000", "Steam_76561198000000000")]
+    [InlineData("Steam_76561198000000000", "Steam_76561198000000000")]
+    [InlineData(" Steam_76561198000000000 ", "Steam_76561198000000000")]
+    [InlineData("PlayFab_ABC123", "PlayFab_ABC123")]
+    public void GetGuildsAccountId_uses_the_current_platform_identity(
         string accountId,
-        string expectedPrimary,
-        string expectedFallback)
+        string expected)
     {
-        var candidates = GuildIdentityPolicy.GetAccountLookupCandidates(accountId);
-
-        Assert.Equal(expectedPrimary, candidates.PrimaryAccountId);
-        Assert.Equal(expectedFallback, candidates.FallbackAccountId);
-        Assert.Equal(expectedFallback.Length > 0, candidates.HasFallback);
+        Assert.Equal(expected, GuildIdentityPolicy.GetGuildsAccountId(accountId));
     }
 
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
-    public void GetAccountLookupCandidates_rejects_empty_account_ids(string accountId)
+    public void GetGuildsAccountId_rejects_empty_account_ids(string accountId)
     {
-        var candidates = GuildIdentityPolicy.GetAccountLookupCandidates(accountId);
-
-        Assert.Equal(string.Empty, candidates.PrimaryAccountId);
-        Assert.Equal(string.Empty, candidates.FallbackAccountId);
-        Assert.False(candidates.HasFallback);
+        Assert.Equal(string.Empty, GuildIdentityPolicy.GetGuildsAccountId(accountId));
     }
 
     [Theory]

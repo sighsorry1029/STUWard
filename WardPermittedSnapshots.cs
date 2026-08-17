@@ -5,19 +5,19 @@ namespace STUWard;
 
 internal static class WardPermittedSnapshots
 {
-    private const int BackfillBatchSize = 4;
+    private const int ReconcileBatchSize = 4;
     private const int SnapshotFormatVersion = 1;
     private const int MaxSnapshotDataBytes = 1024 * 1024;
     private static readonly int SnapshotVersionKey = "stuw_perm_snapshot_version".GetStableHashCode();
     private static readonly int SnapshotDataKey = "stuw_perm_snapshot".GetStableHashCode();
     private static readonly int SnapshotRevisionKey = "stuw_perm_snapshot_revision".GetStableHashCode();
     private static readonly Dictionary<ZDOID, CachedSnapshot> SnapshotCache = new();
-    private static readonly List<BackfillRequest> PendingBackfillRequests = new();
-    private static readonly HashSet<int> PendingBackfillAreaIds = new();
+    private static readonly List<ReconcileRequest> PendingReconcileRequests = new();
+    private static readonly HashSet<int> PendingReconcileAreaIds = new();
 
-    private readonly struct BackfillRequest
+    private readonly struct ReconcileRequest
     {
-        internal BackfillRequest(PrivateArea area)
+        internal ReconcileRequest(PrivateArea area)
         {
             Area = area;
             InstanceId = area.GetInstanceID();
@@ -42,7 +42,7 @@ internal static class WardPermittedSnapshots
         _ = RefreshSnapshot(zdo);
     }
 
-    internal static void Backfill(ManagedWardRef ward)
+    internal static void ReconcileExisting(ManagedWardRef ward)
     {
         if (!TryGetOwnedSnapshotZdo(ward, out var zdo, out _))
         {
@@ -50,28 +50,30 @@ internal static class WardPermittedSnapshots
             return;
         }
 
-        _ = TryGetSnapshot(zdo, out _);
+        if (!TryGetSnapshot(zdo, out _))
+        {
+            return;
+        }
 
-        // Reconcile both missing and existing snapshots in small batches. Existing
-        // snapshots may have been unloaded when an authoritative guild change was
-        // observed, so materializing them alone would preserve stale display data.
-        EnqueueBackfill(ward.Area!);
+        // Existing snapshots may have been unloaded when an authoritative guild
+        // change was observed, so refresh current-format display data in batches.
+        EnqueueReconcile(ward.Area!);
     }
 
     internal static void Update()
     {
-        if (PendingBackfillRequests.Count == 0 || ZNet.instance == null || !ZNet.instance.IsServer())
+        if (PendingReconcileRequests.Count == 0 || ZNet.instance == null || !ZNet.instance.IsServer())
         {
             return;
         }
 
         var processed = 0;
-        while (processed < BackfillBatchSize && PendingBackfillRequests.Count > 0)
+        while (processed < ReconcileBatchSize && PendingReconcileRequests.Count > 0)
         {
-            var lastIndex = PendingBackfillRequests.Count - 1;
-            var request = PendingBackfillRequests[lastIndex];
-            PendingBackfillRequests.RemoveAt(lastIndex);
-            PendingBackfillAreaIds.Remove(request.InstanceId);
+            var lastIndex = PendingReconcileRequests.Count - 1;
+            var request = PendingReconcileRequests[lastIndex];
+            PendingReconcileRequests.RemoveAt(lastIndex);
+            PendingReconcileAreaIds.Remove(request.InstanceId);
             processed++;
 
             if (request.Area == null ||
@@ -86,7 +88,7 @@ internal static class WardPermittedSnapshots
 
     internal static bool HasPendingRuntimeWork()
     {
-        return PendingBackfillRequests.Count > 0;
+        return PendingReconcileRequests.Count > 0;
     }
 
     internal static bool TryGet(PrivateArea? area, long playerId, out string guildName, out string platformId)
@@ -229,8 +231,8 @@ internal static class WardPermittedSnapshots
     internal static void ClearCache()
     {
         SnapshotCache.Clear();
-        PendingBackfillRequests.Clear();
-        PendingBackfillAreaIds.Clear();
+        PendingReconcileRequests.Clear();
+        PendingReconcileAreaIds.Clear();
     }
 
     internal static void Forget(ZDOID zdoId)
@@ -241,15 +243,15 @@ internal static class WardPermittedSnapshots
         }
     }
 
-    private static void EnqueueBackfill(PrivateArea area)
+    private static void EnqueueReconcile(PrivateArea area)
     {
         var instanceId = area.GetInstanceID();
-        if (!PendingBackfillAreaIds.Add(instanceId))
+        if (!PendingReconcileAreaIds.Add(instanceId))
         {
             return;
         }
 
-        PendingBackfillRequests.Add(new BackfillRequest(area));
+        PendingReconcileRequests.Add(new ReconcileRequest(area));
     }
 
     private static bool TryGetOwnedSnapshotZdo(PrivateArea? area, out ZDO zdo, out ZNetView nview)

@@ -46,6 +46,7 @@ internal static partial class GuildsCompat
     internal const string GuildIdKey = "stuw_guild_id";
     internal const string GuildNameKey = "stuw_guild_name";
     private static readonly TimeSpan GuildLookupCacheDuration = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan TransientNoGuildLookupCacheDuration = TimeSpan.FromSeconds(1);
 
     internal static void ResetRuntimeState()
     {

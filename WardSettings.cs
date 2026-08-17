@@ -445,19 +445,16 @@ internal static class WardSettings
                 continue;
             }
 
-            var storedRadius = GetStoredRadius(zdo);
-            var storedRadiusIsCanonical = zdo.GetFloat(RadiusKey, out var rawStoredRadius) &&
-                                          !float.IsNaN(rawStoredRadius) &&
-                                          !float.IsInfinity(rawStoredRadius) &&
-                                          Mathf.Approximately(rawStoredRadius, storedRadius);
-            var clampedRadius = Mathf.Min(storedRadius, maximumRadius);
-            if ((storedRadiusIsCanonical && storedRadius <= maximumRadius) ||
+            if (!zdo.GetFloat(RadiusKey, out var storedRadius) ||
+                float.IsNaN(storedRadius) ||
+                float.IsInfinity(storedRadius) ||
+                storedRadius <= maximumRadius ||
                 !WardOwnership.TryClaimManagedWardMutationOwnership(zdo))
             {
                 continue;
             }
 
-            zdo.Set(RadiusKey, clampedRadius);
+            zdo.Set(RadiusKey, maximumRadius);
             WardOwnership.CompleteAuthoritativeManagedWardMutation(zdo);
         }
     }

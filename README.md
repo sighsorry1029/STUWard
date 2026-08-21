@@ -96,7 +96,7 @@ Each ward can store its own behavior:
 - Door auto-close
 - Protected-action restrictions
 
-When auto-close is enabled, doors opened inside the active ward area close after a shared fixed delay of 5 seconds.
+When auto-close is enabled, doors opened inside the active ward area close after a shared minimum delay of 5 seconds. If a slow-opening door is still animating at that point, STUWard waits up to 60 seconds and closes it as soon as the door becomes interactable.
 
 Ward rings are visible for placement previews and enabled wards. Disabled wards remain hidden unless a placement conflict highlights the closest blocking ward ring for 1.5 seconds on the client that attempted placement. Crossing an enabled ward boundary locally raises that ward ring from its minimum brightness to full brightness for 0.5 seconds, and it remains at full brightness while the player stays within 0.75m of the boundary. The client-only `Ward Boundary Brighten Mode` selects trusted wards, untrusted wards, all wards (the default), or disables this boundary cue.
 

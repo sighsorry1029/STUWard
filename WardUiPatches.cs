@@ -920,6 +920,8 @@ internal static class PrivateAreaRpcFlashShieldVolumePatch
 internal static class DoorRpcUseDoorPatch
 {
     private const float AutoCloseDelaySeconds = 5f;
+    private const float AutoCloseRetryIntervalSeconds = 0.2f;
+    private const float AutoCloseRetryTimeoutSeconds = 60f;
 
     private sealed class ScheduledDoorClose
     {
@@ -1030,34 +1032,58 @@ internal static class DoorRpcUseDoorPatch
     {
         yield return new WaitForSeconds(AutoCloseDelaySeconds);
 
-        if (!DoorCloseCoroutines.TryGetValue(key, out var scheduledClose) ||
-            scheduledClose.Generation != generation)
+        var retryElapsed = 0f;
+        while (IsCurrentSchedule(key, generation))
         {
-            yield break;
+            if (!CanAutoClose(door))
+            {
+                break;
+            }
+
+            var nview = GetValidNView(door);
+            if (nview == null ||
+                !nview.IsOwner() ||
+                !WardSettings.IsDoorAutoCloseEnabledAt(door.transform.position))
+            {
+                break;
+            }
+
+            var state = nview.GetZDO()?.GetInt(ZDOVars.s_state, 0) ?? 0;
+            if (state == 0)
+            {
+                break;
+            }
+
+            if (door.CanInteract())
+            {
+                RemoveCurrentSchedule(key, generation);
+                nview.InvokeRPC("UseDoor", new object[] { true });
+                yield break;
+            }
+
+            if (retryElapsed >= AutoCloseRetryTimeoutSeconds)
+            {
+                break;
+            }
+
+            yield return new WaitForSeconds(AutoCloseRetryIntervalSeconds);
+            retryElapsed += AutoCloseRetryIntervalSeconds;
         }
 
-        DoorCloseCoroutines.Remove(key);
-        if (!CanAutoClose(door))
-        {
-            yield break;
-        }
+        RemoveCurrentSchedule(key, generation);
+    }
 
-        var nview = GetValidNView(door);
-        if (nview == null)
-        {
-            yield break;
-        }
+    private static bool IsCurrentSchedule(int key, int generation)
+    {
+        return DoorCloseCoroutines.TryGetValue(key, out var scheduledClose) &&
+               scheduledClose.Generation == generation;
+    }
 
-        if (!nview.IsOwner() ||
-            !WardSettings.IsDoorAutoCloseEnabledAt(door.transform.position))
+    private static void RemoveCurrentSchedule(int key, int generation)
+    {
+        if (IsCurrentSchedule(key, generation))
         {
-            yield break;
-        }
-
-        var state = nview.GetZDO()?.GetInt(ZDOVars.s_state, 0) ?? 0;
-        if (state != 0)
-        {
-            nview.InvokeRPC("UseDoor", new object[] { true });
+            DoorCloseCoroutines.Remove(key);
         }
     }
 

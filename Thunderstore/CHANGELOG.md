@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.4
+
+- Fixed door auto-close for slow-opening modded doors such as OdinsKingdom's `GB_Large_Portcullis`. After the shared five-second delay, STUWard now waits up to sixty seconds for the door to become interactable before issuing one close request.
+
 ## 1.3.3
 
 - Fixed dedicated-server admin+debug ward access when another client owns the ward or container ZDO. Server-validated admin+debug state is now projected to every peer, including late-join snapshots and revocation when debug mode, admin access, or the session ends.

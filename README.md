@@ -64,7 +64,7 @@ The owner identity is still retained for ward limits, reporting, and guild metad
 
 Individual registration is managed by trusted players in Ward Settings:
 
-- The server keeps a separate recent-player history for each world.
+- The server keeps one recent-player history for the BepInEx server profile in `BepInEx/config/STUWard.RecentPlayers.yml`.
 - The list includes authenticated characters currently online or seen within the last twenty-eight days, with online characters first and older activity lower in the list.
 - Registered and recent-player rows show the character name, resolved guild, public platform account ID, and online/last-seen status. Registered characters without retained activity show that their last-seen time is unavailable.
 - Trusted players can add a recent character to the ward or remove an individually registered character.

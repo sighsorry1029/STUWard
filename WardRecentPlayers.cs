@@ -71,8 +71,7 @@ internal static class WardRecentPlayers
     private const string RequestSnapshotRpc = "STUWard_RequestRecentPlayers";
     private const string RequestAddRpc = "STUWard_RequestAddRecentPlayer";
     private const string ReceiveSnapshotRpc = "STUWard_ReceiveRecentPlayers";
-    private const string FileNamePrefix = "STUWard.RecentPlayers.";
-    private const string FileNameSuffix = ".yml";
+    private const string FileName = "STUWard.RecentPlayers.yml";
     private const int FormatVersion = 1;
     private const int MaxStoredPlayers = 4096;
     private const int MaxSnapshotPlayers = 1024;
@@ -98,7 +97,6 @@ internal static class WardRecentPlayers
 
     private static bool _rpcsRegistered;
     private static long _nextRequestId;
-    private static long _loadedWorldUid;
     private static bool _serverStoreLoaded;
     private static bool _dirty;
     private static DateTime _saveAfterUtc = DateTime.MaxValue;
@@ -148,7 +146,6 @@ internal static class WardRecentPlayers
         FlushServerStore();
         _rpcsRegistered = false;
         _nextRequestId = 0L;
-        _loadedWorldUid = 0L;
         _serverStoreLoaded = false;
         _dirty = false;
         _saveAfterUtc = DateTime.MaxValue;
@@ -809,26 +806,14 @@ internal static class WardRecentPlayers
             return false;
         }
 
-        var worldUid = ZNet.instance.GetWorldUID();
-        if (worldUid == 0L)
-        {
-            return false;
-        }
-
-        if (_serverStoreLoaded && _loadedWorldUid == worldUid)
-        {
-            return true;
-        }
-
         if (_serverStoreLoaded)
         {
-            FlushServerStore();
+            return true;
         }
 
         PlayersById.Clear();
         OnlinePlayerIds.Clear();
         _dirty = false;
-        _loadedWorldUid = worldUid;
         _serverStoreLoaded = true;
         _nextPruneUtc = DateTime.UtcNow.Add(PruneInterval);
         LoadServerStore();
@@ -838,7 +823,7 @@ internal static class WardRecentPlayers
 
     private static void LoadServerStore()
     {
-        var path = GetFilePath(_loadedWorldUid);
+        var path = GetFilePath();
         if (!File.Exists(path))
         {
             return;
@@ -854,9 +839,9 @@ internal static class WardRecentPlayers
             }
 
             var data = Deserializer.Deserialize<RecentPlayersYaml>(File.ReadAllText(path));
-            if (data == null || data.FormatVersion != FormatVersion || data.WorldUid != _loadedWorldUid || data.Players == null)
+            if (data == null || data.FormatVersion != FormatVersion || data.Players == null)
             {
-                Plugin.Log.LogWarning($"Recent-player file '{path}' has an unsupported format or world id; starting empty.");
+                Plugin.Log.LogWarning($"Recent-player file '{path}' has an unsupported format; starting empty.");
                 return;
             }
 
@@ -903,7 +888,7 @@ internal static class WardRecentPlayers
 
     private static void SaveServerStore()
     {
-        if (!_serverStoreLoaded || _loadedWorldUid == 0L)
+        if (!_serverStoreLoaded)
         {
             return;
         }
@@ -912,7 +897,9 @@ internal static class WardRecentPlayers
         var data = new RecentPlayersYaml
         {
             FormatVersion = FormatVersion,
-            WorldUid = _loadedWorldUid,
+            // Keep the v1 field so an existing per-world file can be copied here verbatim.
+            // It no longer scopes or validates the server-profile-wide history.
+            WorldUid = 0L,
             Players = new List<StoredPlayer>(PlayersById.Values)
         };
         data.Players.Sort((left, right) => left.PlayerId.CompareTo(right.PlayerId));
@@ -927,7 +914,7 @@ internal static class WardRecentPlayers
                 return;
             }
 
-            var path = GetFilePath(_loadedWorldUid);
+            var path = GetFilePath();
             var temporaryPath = path + ".tmp";
             File.WriteAllText(temporaryPath, yaml);
             if (File.Exists(path))
@@ -1040,9 +1027,9 @@ internal static class WardRecentPlayers
         }
     }
 
-    private static string GetFilePath(long worldUid)
+    private static string GetFilePath()
     {
-        return Path.Combine(Paths.ConfigPath, FileNamePrefix + worldUid + FileNameSuffix);
+        return Path.Combine(Paths.ConfigPath, FileName);
     }
 
     private static string GetDisplayName(StoredPlayer player)
@@ -1190,6 +1177,7 @@ internal static class WardRecentPlayers
         public int FormatVersion { get; set; }
 
         [YamlMember(Alias = "world_uid")]
+        // Retained only to accept manually copied v1 per-world files.
         public long WorldUid { get; set; }
 
         [YamlMember(Alias = "players")]

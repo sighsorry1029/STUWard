@@ -19,7 +19,7 @@ Good old auto closing door inside ward area. <br>
 ## What It Does
 
 - Adds a placeable `Ward` with server-controlled protection rules
-- Lets trusted players configure ward alerts, ward-range rotation, door auto-close, and protected-action restrictions
+- Lets trusted players configure ward range, alerts, range rotation, door auto-close, and protected-action restrictions
 - Blocks unauthorized interaction, building, terrain edits, pickup, item use, and damage inside enabled foreign wards
 - Prevents foreign ward overlap while allowing same-owner and same-guild ward groups
 - Tracks per-account ward limits
@@ -32,7 +32,7 @@ Good old auto closing door inside ward area. <br>
 3. Look at your ward and press `Alt+E` to open `Ward Settings`.
 4. On the first page, manage registered and recent unregistered players.
 5. Add a character from the server's recent unregistered-player list.
-6. Open the second page to configure ward alerts, ward-range rotation, door auto-close, and protected actions.
+6. Open the second page to adjust ward range and configure ward alerts, range rotation, door auto-close, and protected actions.
 
 ## Protection
 
@@ -82,7 +82,7 @@ Ward overlap is strict.
 - Wards with the same stored guild identity can overlap.
 - Registered-player access does not bypass overlap rules.
 
-When placing a new ward, older foreign wards keep their radius and the new ward automatically yields to the largest non-overlapping radius. The assigned radius is stored once; removing a neighboring ward or increasing the server maximum does not silently expand it later. Lowering the server maximum clamps existing wards.
+When placing a new ward, older foreign wards keep their radius and the new ward automatically yields to the largest non-overlapping radius. Trusted players can explicitly shrink or re-expand it from Ward Settings, but the server clamps expansion to the currently available non-overlapping radius without changing neighboring wards. Removing a neighboring ward or increasing the server maximum does not silently expand it. Lowering the server maximum clamps existing wards.
 
 In overlapping coverage, access is additive: if any enabled foreign ward denies the player, the action is denied.
 
@@ -90,6 +90,7 @@ In overlapping coverage, access is additive: if any enabled foreign ward denies 
 
 Each ward can store its own behavior:
 
+- Ward range (from 8 m up to the server maximum and the currently available non-overlapping radius)
 - Ward alert sound
 - Ward alert visual effect
 - Ward range rotation (enabled by default at 50% of the native rotation speed; stationary when disabled)

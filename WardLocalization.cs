@@ -10,6 +10,8 @@ internal static class WardLocalization
     internal const string UiOwnerToken = "$stuw_ui_owner";
     internal const string UiGuildToken = "$stuw_ui_guild";
     internal const string UiCloseToken = "$stuw_ui_close";
+    internal const string UiRadiusToken = "$stuw_ui_radius";
+    internal const string UiRadiusValueToken = "$stuw_ui_radius_value";
     internal const string UiAutoCloseToken = "$stuw_ui_auto_close";
     internal const string UiWarningSoundToken = "$stuw_ui_warning_sound";
     internal const string UiWarningFlashToken = "$stuw_ui_warning_flash";
@@ -55,6 +57,8 @@ internal static class WardLocalization
     internal const string UiOwnerFallback = "Owner: {0}";
     internal const string UiGuildFallback = "Guild: {0}";
     internal const string UiCloseFallback = "Close";
+    internal const string UiRadiusFallback = "Ward range";
+    internal const string UiRadiusValueFallback = "{0} m";
     internal const string UiAutoCloseFallback = "Door auto-close";
     internal const string UiWarningSoundFallback = "Ward alert sound";
     internal const string UiWarningFlashFallback = "Ward alert visual effect";

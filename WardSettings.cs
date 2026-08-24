@@ -314,6 +314,13 @@ internal static class WardSettings
         return WithRestrictions(configuration, restrictions);
     }
 
+    internal static WardConfiguration WithRadius(WardConfiguration configuration, float radius)
+    {
+        return CopyConfiguration(
+            configuration,
+            radius: Mathf.Clamp(radius, MinRadius, MaxRadius));
+    }
+
     internal static WardConfiguration WithAutoCloseEnabled(WardConfiguration configuration, bool enabled)
     {
         return CopyConfiguration(
@@ -973,6 +980,16 @@ internal static class WardSettings
         return GetConfiguration(area).Radius;
     }
 
+    // This value explains the locally visible overlap limit in the UI only.
+    // The authoritative server recalculates the limit when applying a request.
+    internal static float GetAdvisoryMaxRadius(PrivateArea? area)
+    {
+        var zdo = area != null ? GetZdo(area) : null;
+        return zdo == null || !zdo.IsValid()
+            ? MaxRadius
+            : Mathf.Clamp(GetMaxNonOverlappingRadius(zdo), MinRadius, MaxRadius);
+    }
+
     internal static float GetStoredRadiusOrMin(PrivateArea area)
     {
         return area == null ? MinRadius : GetStoredRadius(GetZdo(area), MinRadius);
@@ -1459,8 +1476,7 @@ internal static class WardSettings
     private static WardConfiguration ClampConfiguration(ZDO zdo, WardConfiguration configuration)
     {
         var maxRadius = GetMaxNonOverlappingRadius(zdo);
-        var storedRadius = GetStoredRadius(zdo);
-        var clampedRadius = Mathf.Clamp(Mathf.Min(storedRadius, maxRadius), MinRadius, MaxRadius);
+        var clampedRadius = Mathf.Clamp(Mathf.Min(configuration.Radius, maxRadius), MinRadius, MaxRadius);
         return CopyConfiguration(
             configuration,
             radius: clampedRadius,

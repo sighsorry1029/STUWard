@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using Jotunn.Managers;
 using LocalizationManager;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 namespace STUWard;
@@ -11,6 +12,7 @@ internal sealed class WardGuiController : MonoBehaviour
     private const float ConfigurationPushDebounceSeconds = 0.15f;
     private const float ConfigurationRequestTimeoutSeconds = 5f;
     private const float RecentPlayersRequestTimeoutSeconds = 5f;
+    private const float RadiusAdvisoryRefreshSeconds = 1f;
 
     internal static WardGuiController? Instance { get; private set; }
 
@@ -34,6 +36,9 @@ internal sealed class WardGuiController : MonoBehaviour
     private RectTransform? _restrictionsContent;
     private Text? _ownerValueText;
     private Text? _guildValueText;
+    private Text? _radiusValueText;
+    private Slider? _radiusSlider;
+    private Image? _radiusLimitMarker;
     private Toggle? _autoCloseToggle;
     private Toggle? _warningSoundToggle;
     private Toggle? _warningFlashToggle;
@@ -54,6 +59,7 @@ internal sealed class WardGuiController : MonoBehaviour
     private long _pendingConfigurationRequestId;
     private long _pendingRecentPlayersRequestId;
     private float _recentPlayersRequestedAt;
+    private float _nextRadiusAdvisoryRefreshTime;
     private bool _recentPlayersRequestInProgress;
     private bool _hasDeferredRecentPlayersSnapshot;
     private WardRecentPlayersSnapshot _deferredRecentPlayersSnapshot;
@@ -160,6 +166,12 @@ internal sealed class WardGuiController : MonoBehaviour
             Time.unscaledTime >= _nextConfigurationPushTime)
         {
             PushPendingConfiguration();
+        }
+
+        if (_currentPage == WardSettingsPage.Restrictions &&
+            Time.unscaledTime >= _nextRadiusAdvisoryRefreshTime)
+        {
+            RefreshRadiusAdvisoryVisuals();
         }
 
         if (WardPermittedSnapshots.GetRevision(_currentWard) != _lastPermittedRevision)
@@ -366,6 +378,7 @@ internal sealed class WardGuiController : MonoBehaviour
         BuildTrustedPlayers(gui);
         BuildRecentPlayers(gui);
         _buildParent = _restrictionsPageRoot.transform;
+        BuildRadiusControl(gui);
         BuildTopControls(gui);
         BuildRestrictions();
         _buildParent = null;
@@ -381,6 +394,42 @@ internal sealed class WardGuiController : MonoBehaviour
                 RequestRecentPlayersSnapshot();
             }
         }
+    }
+
+    private void BuildRadiusControl(GUIManager gui)
+    {
+        CreateLabel(
+            WardLocalization.Localize(WardLocalization.UiRadiusToken, WardLocalization.UiRadiusFallback),
+            WardGuiLayoutSettings.GetRadiusLabelPosition(),
+            21,
+            240f,
+            36f,
+            TextAnchor.MiddleLeft,
+            gui.AveriaSerifBold,
+            gui.ValheimBeige);
+
+        _radiusSlider = CreateSlider(
+            WardGuiLayoutSettings.GetRadiusSliderPosition(),
+            WardGuiLayoutSettings.GetRadiusSliderWidth(),
+            WardSettings.MinRadius,
+            WardSettings.MaxRadius,
+            wholeNumbers: true);
+        _radiusSlider.onValueChanged.AddListener(OnRadiusSliderChanged);
+        var commitHandler = _radiusSlider.gameObject.AddComponent<SliderCommitHandler>();
+        commitHandler.OnCommit = ScheduleConfigurationPush;
+        _radiusLimitMarker = CreateSliderLimitMarker(
+            _radiusSlider,
+            new Color(0.82f, 0.22f, 0.18f, 0.95f));
+
+        _radiusValueText = CreateLabel(
+            string.Empty,
+            WardGuiLayoutSettings.GetRadiusValuePosition(),
+            21,
+            120f,
+            36f,
+            TextAnchor.MiddleCenter,
+            gui.AveriaSerifBold,
+            gui.ValheimYellow);
     }
 
     private void BuildTopControls(GUIManager gui)
@@ -1054,18 +1103,33 @@ internal sealed class WardGuiController : MonoBehaviour
         if (_autoCloseToggle == null ||
             _warningSoundToggle == null ||
             _warningFlashToggle == null ||
-            _areaMarkerRotationToggle == null)
+            _areaMarkerRotationToggle == null ||
+            _radiusSlider == null ||
+            _radiusValueText == null)
         {
             return;
         }
 
+        var displayedRadius = Mathf.Clamp(
+            _currentConfiguration.Radius,
+            WardSettings.MinRadius,
+            WardSettings.MaxRadius);
+
         _suppressUiEvents = true;
+        _radiusSlider.minValue = WardSettings.MinRadius;
+        _radiusSlider.maxValue = WardSettings.MaxRadius;
+        _radiusSlider.value = displayedRadius;
+        _radiusValueText.text = WardLocalization.LocalizeFormat(
+            WardLocalization.UiRadiusValueToken,
+            WardLocalization.UiRadiusValueFallback,
+            Mathf.RoundToInt(displayedRadius));
         _autoCloseToggle.isOn = _currentConfiguration.AutoCloseEnabled;
         _warningSoundToggle.isOn = _currentConfiguration.WarningSoundEnabled;
         _warningFlashToggle.isOn = _currentConfiguration.WarningFlashEnabled;
         _areaMarkerRotationToggle.isOn = _currentConfiguration.AreaMarkerRotationEnabled;
         RefreshRestrictionRows();
         _suppressUiEvents = false;
+        RefreshRadiusAdvisoryVisuals();
     }
 
     private void RefreshPermittedPlayers(bool force)
@@ -1484,6 +1548,18 @@ internal sealed class WardGuiController : MonoBehaviour
         ApplyConfigurationDraft(WardSettings.WithRestriction(_currentConfiguration, restriction, enabled));
     }
 
+    private void OnRadiusSliderChanged(float value)
+    {
+        if (_suppressUiEvents)
+        {
+            return;
+        }
+
+        _currentConfiguration = WardSettings.WithRadius(_currentConfiguration, value);
+        RefreshControls();
+        StageConfigurationPush();
+    }
+
     private void OnAutoCloseToggleChanged(bool enabled)
     {
         ApplyConfigurationDraft(WardSettings.WithAutoCloseEnabled(_currentConfiguration, enabled));
@@ -1545,6 +1621,17 @@ internal sealed class WardGuiController : MonoBehaviour
 
         _configurationPushPending = true;
         _nextConfigurationPushTime = Time.unscaledTime + ConfigurationPushDebounceSeconds;
+    }
+
+    private void StageConfigurationPush()
+    {
+        if (_suppressUiEvents || _currentWard == null)
+        {
+            return;
+        }
+
+        _configurationPushPending = true;
+        _nextConfigurationPushTime = float.PositiveInfinity;
     }
 
     private void FlushPendingConfigurationPush()
@@ -1744,6 +1831,31 @@ internal sealed class WardGuiController : MonoBehaviour
         return buttonObject.GetComponent<Button>();
     }
 
+    private Slider CreateSlider(
+        Vector2 position,
+        float width,
+        float minValue,
+        float maxValue,
+        bool wholeNumbers)
+    {
+        var sliderObject = DefaultControls.CreateSlider(new DefaultControls.Resources());
+        sliderObject.transform.SetParent(GetBuildParent(), false);
+        sliderObject.name = "STUWardRadiusSlider";
+
+        var sliderRect = sliderObject.GetComponent<RectTransform>();
+        ConfigureRect(sliderRect, position, width, 34f);
+
+        var slider = sliderObject.GetComponent<Slider>();
+        slider.direction = Slider.Direction.LeftToRight;
+        slider.minValue = minValue;
+        slider.maxValue = maxValue;
+        slider.wholeNumbers = wholeNumbers;
+
+        GUIManager.Instance.ApplySliderStyle(slider);
+        ShrinkSliderHandle(sliderObject.transform);
+        return slider;
+    }
+
     private Toggle CreateCenteredToggle(Transform parent, Vector2 position, float boxSize)
     {
         return CreateAnchoredToggle(parent, position, boxSize, centerGraphic: true, graphicYOffset: 0f);
@@ -1805,6 +1917,85 @@ internal sealed class WardGuiController : MonoBehaviour
         }
 
         return toggle;
+    }
+
+    private static Image? CreateSliderLimitMarker(Slider slider, Color color)
+    {
+        var sliderRect = slider.transform as RectTransform;
+        if (sliderRect == null)
+        {
+            return null;
+        }
+
+        var markerObject = new GameObject("STUWardRadiusLimitMarker", typeof(RectTransform), typeof(Image));
+        markerObject.transform.SetParent(sliderRect, false);
+
+        var markerRect = markerObject.GetComponent<RectTransform>();
+        markerRect.anchorMin = new Vector2(1f, 0.5f);
+        markerRect.anchorMax = new Vector2(1f, 0.5f);
+        markerRect.pivot = new Vector2(0.5f, 0.5f);
+        markerRect.anchoredPosition = Vector2.zero;
+        markerRect.sizeDelta = new Vector2(4f, GetSliderTrackHeight(slider));
+
+        var handleSlideArea = sliderRect.Find("Handle Slide Area");
+        if (handleSlideArea != null)
+        {
+            markerObject.transform.SetSiblingIndex(handleSlideArea.GetSiblingIndex());
+        }
+        else
+        {
+            markerObject.transform.SetAsLastSibling();
+        }
+
+        var markerImage = markerObject.GetComponent<Image>();
+        markerImage.color = color;
+        markerImage.raycastTarget = false;
+        return markerImage;
+    }
+
+    private void UpdateRadiusLimitMarker(float maxRadius)
+    {
+        if (_radiusSlider == null || _radiusLimitMarker == null)
+        {
+            return;
+        }
+
+        var clampedRadius = Mathf.Clamp(maxRadius, _radiusSlider.minValue, _radiusSlider.maxValue);
+        var shouldShowMarker = clampedRadius < _radiusSlider.maxValue - 0.01f;
+        _radiusLimitMarker.gameObject.SetActive(shouldShowMarker);
+        if (!shouldShowMarker)
+        {
+            return;
+        }
+
+        var normalized = Mathf.InverseLerp(_radiusSlider.minValue, _radiusSlider.maxValue, clampedRadius);
+        var markerRect = _radiusLimitMarker.rectTransform;
+        markerRect.anchorMin = new Vector2(normalized, 0.5f);
+        markerRect.anchorMax = new Vector2(normalized, 0.5f);
+        markerRect.anchoredPosition = Vector2.zero;
+        markerRect.sizeDelta = new Vector2(markerRect.sizeDelta.x, GetSliderTrackHeight(_radiusSlider));
+    }
+
+    private void UpdateRadiusValueVisuals(float maxRadius)
+    {
+        if (_radiusValueText == null)
+        {
+            return;
+        }
+
+        _radiusValueText.color = _currentConfiguration.Radius > maxRadius + 0.01f
+            ? new Color(0.85f, 0.2f, 0.2f)
+            : GUIManager.Instance.ValheimYellow;
+    }
+
+    private void RefreshRadiusAdvisoryVisuals()
+    {
+        var maxRadius = _currentWard != null
+            ? WardSettings.GetAdvisoryMaxRadius(_currentWard)
+            : WardSettings.MaxRadius;
+        UpdateRadiusLimitMarker(maxRadius);
+        UpdateRadiusValueVisuals(maxRadius);
+        _nextRadiusAdvisoryRefreshTime = Time.unscaledTime + RadiusAdvisoryRefreshSeconds;
     }
 
     private Text CreateLabel(
@@ -1875,6 +2066,11 @@ internal sealed class WardGuiController : MonoBehaviour
             _restrictionsPageRoot.SetActive(page == WardSettingsPage.Restrictions);
         }
 
+        if (page == WardSettingsPage.Restrictions && _visible)
+        {
+            RefreshRadiusAdvisoryVisuals();
+        }
+
         if (_previousPageButton != null)
         {
             _previousPageButton.gameObject.SetActive(page == WardSettingsPage.Restrictions);
@@ -1919,6 +2115,31 @@ internal sealed class WardGuiController : MonoBehaviour
         rectTransform.anchoredPosition = position;
         rectTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, width);
         rectTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, height);
+    }
+
+    private static void ShrinkSliderHandle(Transform sliderTransform)
+    {
+        var handle = sliderTransform.Find("Handle Slide Area/Handle") as RectTransform;
+        if (handle != null)
+        {
+            handle.localScale = new Vector3(0.5f, 0.8f, 1f);
+        }
+    }
+
+    private static float GetSliderTrackHeight(Slider slider)
+    {
+        var background = slider.transform.Find("Background") as RectTransform;
+        if (background == null)
+        {
+            return 14f;
+        }
+
+        if (background.rect.height > 0.01f)
+        {
+            return background.rect.height;
+        }
+
+        return background.sizeDelta.y > 0.01f ? background.sizeDelta.y : 14f;
     }
 
     private static string BuildPlayerDisplayText(string playerName, string guildName, string accountId)
@@ -2038,5 +2259,25 @@ internal sealed class WardGuiController : MonoBehaviour
         internal Toggle Toggle { get; }
         internal Text Label { get; }
         internal Text StateText { get; }
+    }
+
+    private sealed class SliderCommitHandler : MonoBehaviour, IEndDragHandler, IPointerUpHandler, IMoveHandler
+    {
+        internal System.Action? OnCommit { get; set; }
+
+        public void OnEndDrag(PointerEventData eventData)
+        {
+            OnCommit?.Invoke();
+        }
+
+        public void OnPointerUp(PointerEventData eventData)
+        {
+            OnCommit?.Invoke();
+        }
+
+        public void OnMove(AxisEventData eventData)
+        {
+            OnCommit?.Invoke();
+        }
     }
 }

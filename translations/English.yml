@@ -4,6 +4,8 @@
 "$stuw_ui_owner": "Owner: {0}"
 "$stuw_ui_guild": "Guild: {0}"
 "$stuw_ui_close": "Close"
+"$stuw_ui_radius": "Ward range"
+"$stuw_ui_radius_value": "{0} m"
 "$stuw_ui_auto_close": "Door auto-close"
 "$stuw_ui_warning_sound": "Ward alert sound"
 "$stuw_ui_warning_flash": "Ward alert visual effect"

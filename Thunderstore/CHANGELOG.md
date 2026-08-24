@@ -2,6 +2,7 @@
 
 ## 1.3.5
 
+- Restored a server-authoritative per-ward range slider on the second settings page. New wards still start at the largest legal radius; later expansion is clamped against the server maximum and current foreign wards without resizing neighboring wards.
 - Consolidated recent-player history into one server-profile-wide `BepInEx/config/STUWard.RecentPlayers.yml` file. Existing ward registrations remain stored on their wards and are unchanged.
 - Former per-world recent-player files are not migrated automatically or modified. To retain one history, stop the server before its first startup with STUWard 1.3.5 and copy the complete contents of the desired `STUWard.RecentPlayers.<worldUID>.yml` into `STUWard.RecentPlayers.yml`. Do not combine multiple files; entries older than twenty-eight days are pruned normally.
 

@@ -125,7 +125,7 @@ internal static partial class WardOwnership
         var projection = ManagedWardProjectionService.ResolveExplicitProjection(
             localPlayer.GetPlayerID(),
             accountId,
-            GuildsCompat.GetPlayerGuildIdentity(localPlayer));
+            WardGroupCompat.GetPlayerGroupIdentity(localPlayer));
         var projectionResult = ManagedWardProjectionService.ApplyOwnedLocalProjection(
             zdo,
             projection,
@@ -602,12 +602,12 @@ internal static partial class WardOwnership
         }
 
         // Resolve the placement group from authoritative server state before the
-        // radius calculation. If guild state cannot be resolved, clear client-provided
-        // guild metadata instead of trusting it for an overlap exemption.
+        // radius calculation. If group state cannot be resolved, clear client-provided
+        // group metadata instead of trusting it for an overlap exemption.
         var projection = ManagedWardProjectionService.ResolveProjection(zdo, ownerPlayerId, accountId);
-        if (!projection.HasResolvedGuild)
+        if (!projection.HasResolvedGroup)
         {
-            projection = new ManagedWardProjection(accountId, hasResolvedGuild: true, default);
+            projection = new ManagedWardProjection(accountId, hasResolvedGroup: true, default);
         }
 
         var projectionResult = ManagedWardProjectionService.ApplyProjection(zdo, projection);
@@ -781,7 +781,7 @@ internal static class PlayerStartWardOwnershipPatch
         WardRecentPlayers.RememberLocalServerPlayer(__instance);
         WardAdminDebugAccess.UpdateLocalState(__instance, force: true);
         WardMinimapPinsManager.UpdateLocalState(__instance, force: true);
-        GuildsCompat.OnLocalPlayerStarted(__instance);
+        WardGroupCompat.OnLocalPlayerStarted(__instance);
     }
 }
 

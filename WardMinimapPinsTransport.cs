@@ -72,7 +72,7 @@ internal static partial class WardMinimapPinsManager
         }
 
         var canSeeAllWards = WardAdminDebugAccess.IsPlayerAdminDebugController(playerId);
-        var playerGuildId = GuildsCompat.GetPlayerGuildId(playerId);
+        var playerGroup = WardGroupCompat.GetPlayerGroupIdentity(playerId);
         var prepared = WardMinimapVisibilityIndex.TryPrepare(ZDOMan.instance);
         var responseKind = WardPinsResponseKind.Unavailable;
         var snapshot = WardMinimapViewerSnapshot.Empty;
@@ -80,14 +80,14 @@ internal static partial class WardMinimapPinsManager
         {
             var viewerRevisionToken = WardMinimapVisibilityIndex.GetViewerRevisionToken(
                 playerId,
-                playerGuildId,
+                playerGroup,
                 canSeeAllWards);
             var includeEntries = requestFullSnapshot ||
                                  knownViewerRevisionToken == 0 ||
                                  viewerRevisionToken != knownViewerRevisionToken;
             snapshot = WardMinimapViewerSnapshotBuilder.Build(
                 playerId,
-                playerGuildId,
+                playerGroup,
                 canSeeAllWards,
                 viewerRevisionToken,
                 includeEntries,

@@ -9,6 +9,7 @@ internal static class WardLocalization
     internal const string UiTitleToken = "$stuw_ui_title";
     internal const string UiOwnerToken = "$stuw_ui_owner";
     internal const string UiGuildToken = "$stuw_ui_guild";
+    internal const string UiClanToken = "$stuw_ui_clan";
     internal const string UiCloseToken = "$stuw_ui_close";
     internal const string UiRadiusToken = "$stuw_ui_radius";
     internal const string UiRadiusValueToken = "$stuw_ui_radius_value";
@@ -56,6 +57,7 @@ internal static class WardLocalization
     internal const string UiTitleFallback = "Ward Settings";
     internal const string UiOwnerFallback = "Owner: {0}";
     internal const string UiGuildFallback = "Guild: {0}";
+    internal const string UiClanFallback = "Clan: {0}";
     internal const string UiCloseFallback = "Close";
     internal const string UiRadiusFallback = "Ward range";
     internal const string UiRadiusValueFallback = "{0} m";

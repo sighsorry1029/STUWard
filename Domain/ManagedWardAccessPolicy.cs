@@ -14,29 +14,29 @@ internal readonly struct WardGuildIdentity
 
 internal readonly struct ManagedWardAccessActor
 {
-    internal ManagedWardAccessActor(long playerId, WardGuildIdentity playerGuild, bool isAdminDebug)
+    internal ManagedWardAccessActor(long playerId, WardGroupIdentity playerGroup, bool isAdminDebug)
     {
         PlayerId = playerId;
-        PlayerGuild = playerGuild;
+        PlayerGroup = playerGroup;
         IsAdminDebug = isAdminDebug;
     }
 
     internal long PlayerId { get; }
-    internal WardGuildIdentity PlayerGuild { get; }
+    internal WardGroupIdentity PlayerGroup { get; }
     internal bool IsAdminDebug { get; }
 }
 
 internal readonly struct ManagedWardAccessSubject
 {
-    internal ManagedWardAccessSubject(long ownerPlayerId, WardGuildIdentity wardGuild, bool permitted)
+    internal ManagedWardAccessSubject(long ownerPlayerId, WardGroupIdentity wardGroup, bool permitted)
     {
         OwnerPlayerId = ownerPlayerId;
-        WardGuild = wardGuild;
+        WardGroup = wardGroup;
         Permitted = permitted;
     }
 
     internal long OwnerPlayerId { get; }
-    internal WardGuildIdentity WardGuild { get; }
+    internal WardGroupIdentity WardGroup { get; }
     internal bool Permitted { get; }
 }
 
@@ -56,13 +56,11 @@ internal static class ManagedWardAccessPolicy
             return true;
         }
 
-        return subject.Permitted || HasMatchingGuild(actor.PlayerGuild, subject.WardGuild);
+        return subject.Permitted || HasMatchingGroup(actor.PlayerGroup, subject.WardGroup);
     }
 
-    internal static bool HasMatchingGuild(WardGuildIdentity playerGuild, WardGuildIdentity wardGuild)
+    internal static bool HasMatchingGroup(WardGroupIdentity playerGroup, WardGroupIdentity wardGroup)
     {
-        return playerGuild.Id != 0 &&
-               wardGuild.Id != 0 &&
-               playerGuild.Id == wardGuild.Id;
+        return playerGroup.IsValid && wardGroup.IsValid && playerGroup == wardGroup;
     }
 }

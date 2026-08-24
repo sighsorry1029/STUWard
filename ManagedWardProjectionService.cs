@@ -4,29 +4,29 @@ namespace STUWard;
 
 internal readonly struct ManagedWardProjection
 {
-    internal ManagedWardProjection(string accountId, bool hasResolvedGuild, WardGuildIdentity guild)
+    internal ManagedWardProjection(string accountId, bool hasResolvedGroup, WardGroupIdentity group)
     {
         AccountId = accountId ?? string.Empty;
-        HasResolvedGuild = hasResolvedGuild;
-        Guild = guild;
+        HasResolvedGroup = hasResolvedGroup;
+        Group = group;
     }
 
     internal string AccountId { get; }
-    internal bool HasResolvedGuild { get; }
-    internal WardGuildIdentity Guild { get; }
+    internal bool HasResolvedGroup { get; }
+    internal WardGroupIdentity Group { get; }
 }
 
 internal readonly struct ManagedWardProjectionApplyResult
 {
-    internal ManagedWardProjectionApplyResult(bool accountChanged, bool guildChanged)
+    internal ManagedWardProjectionApplyResult(bool accountChanged, bool groupChanged)
     {
         AccountChanged = accountChanged;
-        GuildChanged = guildChanged;
+        GroupChanged = groupChanged;
     }
 
     internal bool AccountChanged { get; }
-    internal bool GuildChanged { get; }
-    internal bool AnyChanged => AccountChanged || GuildChanged;
+    internal bool GroupChanged { get; }
+    internal bool AnyChanged => AccountChanged || GroupChanged;
 }
 
 internal static class ManagedWardProjectionService
@@ -44,19 +44,22 @@ internal static class ManagedWardProjectionService
             : WardOwnership.ResolveWardSteamAccountId(zdo, ownerPlayerId, wardSteamAccountId);
         if (string.IsNullOrWhiteSpace(normalizedAccountId))
         {
-            return new ManagedWardProjection(string.Empty, hasResolvedGuild: false, default);
+            return new ManagedWardProjection(string.Empty, hasResolvedGroup: false, default);
         }
 
         var ownerName = GuildsCompat.GetWardOwnerNameForProjection(zdo);
-        if (GuildsCompat.TryResolveProjectedGuildIdentity(ownerPlayerId, normalizedAccountId, ownerName, out var guild))
+        if (WardGroupCompat.TryResolveProjectedGroupIdentity(ownerPlayerId, normalizedAccountId, ownerName, out var group))
         {
-            return new ManagedWardProjection(normalizedAccountId, hasResolvedGuild: true, guild);
+            return new ManagedWardProjection(normalizedAccountId, hasResolvedGroup: true, group);
         }
 
-        return new ManagedWardProjection(normalizedAccountId, hasResolvedGuild: false, default);
+        return new ManagedWardProjection(normalizedAccountId, hasResolvedGroup: false, default);
     }
 
-    internal static ManagedWardProjection ResolveExplicitProjection(long ownerPlayerId, string wardSteamAccountId, WardGuildIdentity guild)
+    internal static ManagedWardProjection ResolveExplicitProjection(
+        long ownerPlayerId,
+        string wardSteamAccountId,
+        WardGroupIdentity group)
     {
         var canonicalOwnerAccountId = ownerPlayerId != 0L
             ? WardOwnership.GetPlayerAccountId(ownerPlayerId)
@@ -64,7 +67,7 @@ internal static class ManagedWardProjectionService
         var normalizedAccountId = !string.IsNullOrWhiteSpace(canonicalOwnerAccountId)
             ? WardOwnership.NormalizeAccountIdValue(canonicalOwnerAccountId)
             : WardOwnership.NormalizeAccountIdValue(wardSteamAccountId);
-        return new ManagedWardProjection(normalizedAccountId, hasResolvedGuild: true, guild);
+        return new ManagedWardProjection(normalizedAccountId, hasResolvedGroup: true, group);
     }
 
     internal static ManagedWardProjectionApplyResult RefreshProjection(ZDO? zdo, long ownerPlayerId, string wardSteamAccountId)
@@ -90,13 +93,13 @@ internal static class ManagedWardProjectionService
             accountChanged = true;
         }
 
-        var guildChanged = false;
-        if (projection.HasResolvedGuild)
+        var groupChanged = false;
+        if (projection.HasResolvedGroup)
         {
-            guildChanged = ApplyProjectedGuildMetadata(zdo, projection.Guild);
+            groupChanged = WardGroupCompat.ApplyProjectedGroupMetadata(zdo, projection.Group);
         }
 
-        return new ManagedWardProjectionApplyResult(accountChanged, guildChanged);
+        return new ManagedWardProjectionApplyResult(accountChanged, groupChanged);
     }
 
     internal static ManagedWardProjectionApplyResult ObserveAuthoritativeWard(
@@ -178,26 +181,5 @@ internal static class ManagedWardProjectionService
         }
 
         return projectionResult;
-    }
-
-    private static bool ApplyProjectedGuildMetadata(ZDO zdo, WardGuildIdentity guild)
-    {
-        var changed = false;
-        var currentGuildId = zdo.GetInt(GuildsCompat.GuildIdKey, 0);
-        if (currentGuildId != guild.Id)
-        {
-            zdo.Set(GuildsCompat.GuildIdKey, guild.Id);
-            changed = true;
-        }
-
-        var guildName = guild.Name ?? string.Empty;
-        var currentGuildName = zdo.GetString(GuildsCompat.GuildNameKey, string.Empty);
-        if (!string.Equals(currentGuildName, guildName, StringComparison.Ordinal))
-        {
-            zdo.Set(GuildsCompat.GuildNameKey, guildName);
-            changed = true;
-        }
-
-        return changed;
     }
 }

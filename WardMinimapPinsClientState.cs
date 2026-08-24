@@ -212,8 +212,8 @@ internal static partial class WardMinimapPinsManager
         }
 
         var playerId = player.GetPlayerID();
-        var playerGuildId = GuildsCompat.GetPlayerGuildId(playerId);
-        var viewerRevisionToken = WardMinimapVisibilityIndex.GetViewerRevisionToken(playerId, playerGuildId, canSeeAllWards);
+        var playerGroup = WardGroupCompat.GetPlayerGroupIdentity(playerId);
+        var viewerRevisionToken = WardMinimapVisibilityIndex.GetViewerRevisionToken(playerId, playerGroup, canSeeAllWards);
         if (_snapshotState == ClientSnapshotState.TooLarge &&
             !_pendingForceRefresh &&
             viewerRevisionToken == _lastViewerRevisionToken)
@@ -229,7 +229,7 @@ internal static partial class WardMinimapPinsManager
             return;
         }
 
-        RebuildLocalSnapshot(playerId, playerGuildId, canSeeAllWards, viewerRevisionToken);
+        RebuildLocalSnapshot(playerId, playerGroup, canSeeAllWards, viewerRevisionToken);
     }
 
     private static void RequestRemoteSnapshotIfNeeded(Player player, bool canSeeAllWards, bool force)
@@ -290,13 +290,13 @@ internal static partial class WardMinimapPinsManager
 
     private static void RebuildLocalSnapshot(
         long playerId,
-        int playerGuildId,
+        WardGroupIdentity playerGroup,
         bool canSeeAllWards,
         int viewerRevisionToken)
     {
         var snapshot = WardMinimapViewerSnapshotBuilder.Build(
             playerId,
-            playerGuildId,
+            playerGroup,
             canSeeAllWards,
             viewerRevisionToken,
             includeEntries: true,

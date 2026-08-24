@@ -493,6 +493,7 @@
         <Compile Include="ManagedWardRuntimeLifecycle.cs"/>
         <Compile Include="ManagedWardProjectionService.cs"/>
         <Compile Include="Domain\ManagedWardAccessPolicy.cs"/>
+        <Compile Include="Domain\WardGroupIdentity.cs"/>
         <Compile Include="Domain\GuildIdentityPolicy.cs"/>
         <Compile Include="Domain\BuildingDamagePolicy.cs"/>
         <Compile Include="Domain\WardLimitPolicy.cs"/>
@@ -522,6 +523,7 @@
         <Compile Include="GuildsCompatWardMetadata.cs"/>
         <Compile Include="GuildsCompatLookup.cs"/>
         <Compile Include="GuildsCompatHooks.cs"/>
+        <Compile Include="WardGroupCompat.cs"/>
     </ItemGroup>
     <ItemGroup>
         <Content Include=".gitignore"/>

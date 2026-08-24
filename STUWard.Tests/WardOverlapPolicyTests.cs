@@ -8,8 +8,8 @@ public sealed class WardOverlapPolicyTests
     [Fact]
     public void IsForeignOverlap_blocks_overlapping_foreign_area()
     {
-        var query = new WardOverlapQuery(x: 0f, z: 0f, radius: 8f, ownerPlayerId: 10L, guildId: 1);
-        var area = new WardOverlapArea(id: 1, x: 10f, z: 0f, radius: 8f, ownerPlayerId: 20L, guildId: 2);
+        var query = Query(owner: 10L, Group("guilds", "1"));
+        var area = Area(id: 1, x: 10f, owner: 20L, Group("guilds", "2"));
 
         Assert.True(WardOverlapPolicy.IsForeignOverlap(query, area));
     }
@@ -17,34 +17,37 @@ public sealed class WardOverlapPolicyTests
     [Fact]
     public void IsForeignOverlap_allows_edge_touching_area()
     {
-        var query = new WardOverlapQuery(x: 0f, z: 0f, radius: 8f, ownerPlayerId: 10L, guildId: 1);
-        var area = new WardOverlapArea(id: 1, x: 16f, z: 0f, radius: 8f, ownerPlayerId: 20L, guildId: 2);
+        var query = Query(owner: 10L, Group("guilds", "1"));
+        var area = Area(id: 1, x: 16f, owner: 20L, Group("guilds", "2"));
 
         Assert.False(WardOverlapPolicy.IsForeignOverlap(query, area));
     }
 
-    [Theory]
-    [InlineData(10L, 20L, 7, 8, true)]
-    [InlineData(10L, 10L, 7, 8, false)]
-    [InlineData(10L, 20L, 7, 7, false)]
-    public void IsForeignOverlap_ignores_trusted_owner_or_guild(
-        long queryOwner,
-        long areaOwner,
-        int queryGuild,
-        int areaGuild,
-        bool expectedBlock)
+    [Fact]
+    public void IsForeignOverlap_ignores_same_owner_or_exact_group()
     {
-        var query = new WardOverlapQuery(x: 0f, z: 0f, radius: 8f, ownerPlayerId: queryOwner, guildId: queryGuild);
-        var area = new WardOverlapArea(id: 1, x: 10f, z: 0f, radius: 8f, ownerPlayerId: areaOwner, guildId: areaGuild);
+        Assert.False(WardOverlapPolicy.IsForeignOverlap(
+            Query(owner: 10L, Group("guilds", "7")),
+            Area(id: 1, x: 10f, owner: 10L, Group("guilds", "8"))));
+        Assert.False(WardOverlapPolicy.IsForeignOverlap(
+            Query(owner: 10L, Group("clan", "group-id")),
+            Area(id: 1, x: 10f, owner: 20L, Group("clan", "group-id"))));
+    }
 
-        Assert.Equal(expectedBlock, WardOverlapPolicy.IsForeignOverlap(query, area));
+    [Fact]
+    public void IsForeignOverlap_does_not_mix_providers_with_the_same_raw_id()
+    {
+        var query = Query(owner: 10L, Group("guilds", "7"));
+        var area = Area(id: 1, x: 10f, owner: 20L, Group("clan", "7"));
+
+        Assert.True(WardOverlapPolicy.IsForeignOverlap(query, area));
     }
 
     [Fact]
     public void IsForeignOverlap_ignores_requested_area()
     {
-        var query = new WardOverlapQuery(x: 0f, z: 0f, radius: 8f, ownerPlayerId: 10L, guildId: 1, ignoredAreaId: 1);
-        var area = new WardOverlapArea(id: 1, x: 1f, z: 0f, radius: 8f, ownerPlayerId: 20L, guildId: 2);
+        var query = new WardOverlapQuery(0f, 0f, 8f, 10L, Group("guilds", "1"), ignoredAreaId: 1);
+        var area = Area(id: 1, x: 1f, owner: 20L, Group("guilds", "2"));
 
         Assert.False(WardOverlapPolicy.IsForeignOverlap(query, area));
     }
@@ -52,55 +55,43 @@ public sealed class WardOverlapPolicyTests
     [Fact]
     public void GetMaxNonOverlappingRadius_clamps_to_nearest_foreign_area()
     {
-        var query = new WardOverlapQuery(x: 0f, z: 0f, radius: 20f, ownerPlayerId: 10L, guildId: 1);
+        var query = new WardOverlapQuery(0f, 0f, 20f, 10L, Group("guilds", "1"));
         var areas = new[]
         {
-            new WardOverlapArea(id: 1, x: 30f, z: 0f, radius: 8f, ownerPlayerId: 20L, guildId: 2),
-            new WardOverlapArea(id: 2, x: 50f, z: 0f, radius: 8f, ownerPlayerId: 30L, guildId: 3)
+            new WardOverlapArea(1, 30f, 0f, 8f, 20L, Group("guilds", "2")),
+            new WardOverlapArea(2, 50f, 0f, 8f, 30L, Group("guilds", "3"))
         };
 
-        var maxRadius = WardOverlapPolicy.GetMaxNonOverlappingRadius(64f, query, areas);
-
-        Assert.Equal(22f, maxRadius);
+        Assert.Equal(22f, WardOverlapPolicy.GetMaxNonOverlappingRadius(64f, query, areas));
     }
 
     [Fact]
     public void GetMaxNonOverlappingRadius_ignores_trusted_areas_and_clamps_to_fallback()
     {
-        var query = new WardOverlapQuery(x: 0f, z: 0f, radius: 20f, ownerPlayerId: 10L, guildId: 1);
+        var query = new WardOverlapQuery(0f, 0f, 20f, 10L, Group("clan", "one"));
         var areas = new[]
         {
-            new WardOverlapArea(id: 1, x: 5f, z: 0f, radius: 8f, ownerPlayerId: 10L, guildId: 2),
-            new WardOverlapArea(id: 2, x: 5f, z: 0f, radius: 8f, ownerPlayerId: 20L, guildId: 1)
+            new WardOverlapArea(1, 5f, 0f, 8f, 10L, Group("clan", "two")),
+            new WardOverlapArea(2, 5f, 0f, 8f, 20L, Group("clan", "one"))
         };
 
-        var maxRadius = WardOverlapPolicy.GetMaxNonOverlappingRadius(64f, query, areas);
-
-        Assert.Equal(64f, maxRadius);
+        Assert.Equal(64f, WardOverlapPolicy.GetMaxNonOverlappingRadius(64f, query, areas));
     }
 
     [Fact]
     public void GetMaxNonOverlappingRadius_never_returns_negative_radius()
     {
-        var query = new WardOverlapQuery(x: 0f, z: 0f, radius: 20f, ownerPlayerId: 10L, guildId: 1);
-        var areas = new[]
-        {
-            new WardOverlapArea(id: 1, x: 2f, z: 0f, radius: 8f, ownerPlayerId: 20L, guildId: 2)
-        };
+        var query = new WardOverlapQuery(0f, 0f, 20f, 10L, Group("guilds", "1"));
+        var areas = new[] { new WardOverlapArea(1, 2f, 0f, 8f, 20L, Group("guilds", "2")) };
 
-        var maxRadius = WardOverlapPolicy.GetMaxNonOverlappingRadius(64f, query, areas);
-
-        Assert.Equal(0f, maxRadius);
+        Assert.Equal(0f, WardOverlapPolicy.GetMaxNonOverlappingRadius(64f, query, areas));
     }
 
     [Fact]
     public void TryGetPlacementRadius_uses_the_largest_radius_left_by_an_existing_foreign_ward()
     {
-        var query = new WardOverlapQuery(x: 0f, z: 0f, radius: 32f, ownerPlayerId: 10L, guildId: 1);
-        var areas = new[]
-        {
-            new WardOverlapArea(id: 1, x: 50f, z: 0f, radius: 32f, ownerPlayerId: 20L, guildId: 2)
-        };
+        var query = new WardOverlapQuery(0f, 0f, 32f, 10L, Group("guilds", "1"));
+        var areas = new[] { new WardOverlapArea(1, 50f, 0f, 32f, 20L, Group("guilds", "2")) };
 
         var canPlace = WardOverlapPolicy.TryGetPlacementRadius(8f, 32f, query, areas, out var radius);
 
@@ -111,15 +102,27 @@ public sealed class WardOverlapPolicyTests
     [Fact]
     public void TryGetPlacementRadius_rejects_when_less_than_the_minimum_radius_remains()
     {
-        var query = new WardOverlapQuery(x: 0f, z: 0f, radius: 32f, ownerPlayerId: 10L, guildId: 1);
-        var areas = new[]
-        {
-            new WardOverlapArea(id: 1, x: 39f, z: 0f, radius: 32f, ownerPlayerId: 20L, guildId: 2)
-        };
+        var query = new WardOverlapQuery(0f, 0f, 32f, 10L, Group("guilds", "1"));
+        var areas = new[] { new WardOverlapArea(1, 39f, 0f, 32f, 20L, Group("guilds", "2")) };
 
         var canPlace = WardOverlapPolicy.TryGetPlacementRadius(8f, 32f, query, areas, out var radius);
 
         Assert.False(canPlace);
         Assert.Equal(7f, radius);
+    }
+
+    private static WardOverlapQuery Query(long owner, WardGroupIdentity group)
+    {
+        return new WardOverlapQuery(0f, 0f, 8f, owner, group);
+    }
+
+    private static WardOverlapArea Area(int id, float x, long owner, WardGroupIdentity group)
+    {
+        return new WardOverlapArea(id, x, 0f, 8f, owner, group);
+    }
+
+    private static WardGroupIdentity Group(string provider, string id)
+    {
+        return new WardGroupIdentity(provider, id, string.Empty);
     }
 }

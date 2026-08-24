@@ -9,7 +9,7 @@ internal readonly struct WardMinimapVisibilityIndexedEntry
     internal WardMinimapVisibilityIndexedEntry(
         ZDOID zdoId,
         long ownerPlayerId,
-        int wardGuildId,
+        WardGroupIdentity wardGroup,
         UnityEngine.Vector3 position,
         float radius,
         bool isEnabled,
@@ -17,7 +17,7 @@ internal readonly struct WardMinimapVisibilityIndexedEntry
     {
         ZdoId = zdoId;
         OwnerPlayerId = ownerPlayerId;
-        WardGuildId = wardGuildId;
+        WardGroup = wardGroup;
         Position = position;
         Radius = radius;
         IsEnabled = isEnabled;
@@ -26,7 +26,7 @@ internal readonly struct WardMinimapVisibilityIndexedEntry
 
     internal ZDOID ZdoId { get; }
     internal long OwnerPlayerId { get; }
-    internal int WardGuildId { get; }
+    internal WardGroupIdentity WardGroup { get; }
     internal UnityEngine.Vector3 Position { get; }
     internal float Radius { get; }
     internal bool IsEnabled { get; }
@@ -46,7 +46,7 @@ internal static class WardMinimapVisibilityIndex
 
     private sealed class ViewerCacheState
     {
-        internal int GuildId;
+        internal WardGroupIdentity Group;
         internal bool CanSeeAllWards;
         internal int IndexedRevision;
         internal int ViewerRevisionToken;
@@ -138,14 +138,14 @@ internal static class WardMinimapVisibilityIndex
         BumpIndexRevision();
     }
 
-    internal static int GetViewerRevisionToken(long playerId, int guildId, bool canSeeAllWards)
+    internal static int GetViewerRevisionToken(long playerId, WardGroupIdentity group, bool canSeeAllWards)
     {
-        return GetOrBuildViewerCache(playerId, guildId, canSeeAllWards).ViewerRevisionToken;
+        return GetOrBuildViewerCache(playerId, group, canSeeAllWards).ViewerRevisionToken;
     }
 
-    internal static ZDOID[] GetVisibleCandidateWardIds(long playerId, int guildId, bool canSeeAllWards)
+    internal static ZDOID[] GetVisibleCandidateWardIds(long playerId, WardGroupIdentity group, bool canSeeAllWards)
     {
-        return GetOrBuildViewerCache(playerId, guildId, canSeeAllWards).VisibleWardIds;
+        return GetOrBuildViewerCache(playerId, group, canSeeAllWards).VisibleWardIds;
     }
 
     internal static bool TryGetEntry(ZDOID zdoId, out WardMinimapVisibilityIndexedEntry entry)
@@ -199,7 +199,10 @@ internal static class WardMinimapVisibilityIndex
         }
     }
 
-    private static ViewerCacheState GetOrBuildViewerCache(long playerId, int guildId, bool canSeeAllWards)
+    private static ViewerCacheState GetOrBuildViewerCache(
+        long playerId,
+        WardGroupIdentity group,
+        bool canSeeAllWards)
     {
         if (!ViewerCaches.TryGetValue(playerId, out var cacheState))
         {
@@ -208,22 +211,25 @@ internal static class WardMinimapVisibilityIndex
         }
 
         if (cacheState.ViewerRevisionToken != 0 &&
-            cacheState.GuildId == guildId &&
+            cacheState.Group == group &&
             cacheState.CanSeeAllWards == canSeeAllWards &&
             cacheState.IndexedRevision == _indexRevision)
         {
             return cacheState;
         }
 
-        cacheState.VisibleWardIds = BuildVisibleWardIds(playerId, guildId, canSeeAllWards);
-        cacheState.GuildId = guildId;
+        cacheState.VisibleWardIds = BuildVisibleWardIds(playerId, group, canSeeAllWards);
+        cacheState.Group = group;
         cacheState.CanSeeAllWards = canSeeAllWards;
         cacheState.IndexedRevision = _indexRevision;
         cacheState.ViewerRevisionToken = NextViewerRevisionToken();
         return cacheState;
     }
 
-    private static ZDOID[] BuildVisibleWardIds(long playerId, int guildId, bool canSeeAllWards)
+    private static ZDOID[] BuildVisibleWardIds(
+        long playerId,
+        WardGroupIdentity group,
+        bool canSeeAllWards)
     {
         if (IndexedWards.Count == 0)
         {
@@ -231,11 +237,10 @@ internal static class WardMinimapVisibilityIndex
         }
 
         var visibleWardIds = new List<ZDOID>(IndexedWards.Count);
-        var playerGuild = new WardGuildIdentity(guildId, string.Empty);
         foreach (var indexedWard in IndexedWards.Values)
         {
             if (!canSeeAllWards &&
-                !ManagedWardAccessEvaluator.HasPlayerAccessToManagedWardIndexEntry(indexedWard, playerId, playerGuild))
+                !ManagedWardAccessEvaluator.HasPlayerAccessToManagedWardIndexEntry(indexedWard, playerId, group))
             {
                 continue;
             }
@@ -305,7 +310,7 @@ internal static class WardMinimapVisibilityIndex
         entry = new WardMinimapVisibilityIndexedEntry(
             managedZdo.m_uid,
             managedZdo.GetLong(ZDOVars.s_creator, 0L),
-            GuildsCompat.ResolveWardGuildIdentityReadOnly(managedZdo).Id,
+            WardGroupCompat.ResolveWardGroupIdentityReadOnly(managedZdo),
             managedZdo.GetPosition(),
             WardSettings.GetStoredRadius(managedZdo, WardSettings.MinRadius),
             managedZdo.GetBool(ZDOVars.s_enabled, false),
@@ -325,7 +330,7 @@ internal static class WardMinimapVisibilityIndex
         entry = new WardMinimapVisibilityIndexedEntry(
             zdo.m_uid,
             zdo.GetLong(ZDOVars.s_creator, 0L),
-            GuildsCompat.ResolveWardGuildIdentityReadOnly(zdo).Id,
+            WardGroupCompat.ResolveWardGroupIdentityReadOnly(zdo),
             area.transform.position,
             WardSettings.GetStoredRadiusOrMin(area),
             area.IsEnabled(),
@@ -336,7 +341,7 @@ internal static class WardMinimapVisibilityIndex
     private static bool EntriesEqual(WardMinimapVisibilityIndexedEntry left, WardMinimapVisibilityIndexedEntry right)
     {
         if (left.OwnerPlayerId != right.OwnerPlayerId ||
-            left.WardGuildId != right.WardGuildId ||
+            left.WardGroup != right.WardGroup ||
             left.Position != right.Position ||
             !Mathf.Approximately(left.Radius, right.Radius) ||
             left.IsEnabled != right.IsEnabled ||

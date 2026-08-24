@@ -1042,17 +1042,17 @@ internal static class WardRecentPlayers
     {
         var accountId = WardOwnership.NormalizeAccountIdValue(player.AccountId);
         var playerName = NormalizeText(player.Name, MaxPlayerNameLength);
-        if (!GuildsCompat.TryResolveCachedAuthoritativeGuildIdentity(
+        if (!WardGroupCompat.TryResolveCachedAuthoritativeGroupIdentity(
                 player.PlayerId,
                 accountId,
                 playerName,
-                out var guild) ||
-            guild.Id == 0)
+                out var group) ||
+            !group.IsValid)
         {
             return string.Empty;
         }
 
-        return NormalizeText(guild.Name, MaxGuildNameLength);
+        return NormalizeText(group.Name, MaxGuildNameLength);
     }
 
     private static string GetDisplayAccountId(StoredPlayer player)

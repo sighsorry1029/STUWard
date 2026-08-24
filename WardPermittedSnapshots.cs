@@ -338,13 +338,13 @@ internal static class WardPermittedSnapshots
 
             var playerName = WardOwnership.GetPlayerName(playerId);
             var guildName = previousEntry.GuildName;
-            if (GuildsCompat.TryResolveCachedAuthoritativeGuildIdentity(
+            if (WardGroupCompat.TryResolveCachedAuthoritativeGroupIdentity(
                     playerId,
                     accountId,
                     playerName,
-                    out var guild))
+                    out var group))
             {
-                guildName = guild.Id == 0 ? string.Empty : guild.Name;
+                guildName = group.IsValid ? group.Name : string.Empty;
             }
 
             entries.Add(new SnapshotEntry(

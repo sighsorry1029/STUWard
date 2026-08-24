@@ -3,6 +3,7 @@
 "$stuw_ui_title": "Ward Settings"
 "$stuw_ui_owner": "Owner: {0}"
 "$stuw_ui_guild": "Guild: {0}"
+"$stuw_ui_clan": "Clan: {0}"
 "$stuw_ui_close": "Close"
 "$stuw_ui_radius": "Ward range"
 "$stuw_ui_radius_value": "{0} m"

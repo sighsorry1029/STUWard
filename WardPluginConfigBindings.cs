@@ -29,6 +29,7 @@ internal static class WardPluginConfigBindings
         }
 
         UnbindHandler(Plugin.MaxWardRadius, HandleMaxWardRadiusChanged);
+        UnbindHandler(Plugin.WardRangeConfiguration, HandleWardRangeConfigurationChanged);
         UnbindHandler(Plugin.HostileCreatureStructureProtection, HandleWardPresenceConfigChanged);
         UnbindHandler(Plugin.DisableVanillaGuardStoneRecipe, HandleRecipeSettingsChanged);
         UnbindHandler(Plugin.StuWardRecipe, HandleRecipeSettingsChanged);
@@ -81,12 +82,20 @@ internal static class WardPluginConfigBindings
             configManagerOrder: GeneralOrderStart - OrderStep * 4
         );
 
+        Plugin.WardRangeConfiguration = Plugin.BindConfigEntry(
+            "1 - General",
+            "Ward Range Configuration",
+            Plugin.Toggle.Off,
+            "Controls whether trusted players can adjust each ward's radius in Ward Settings. Off hides the control and preserves the stored radius; new wards still receive the largest legal radius.",
+            configManagerOrder: GeneralOrderStart - OrderStep * 5
+        );
+
         Plugin.DisableVanillaGuardStoneRecipe = Plugin.BindConfigEntry(
             "1 - General",
             "Disable Vanilla Guard Stone Recipe",
             Plugin.Toggle.On,
             "If on, the vanilla guard_stone build recipe is removed from the Hammer piece table while STUWard remains available.",
-            configManagerOrder: GeneralOrderStart - OrderStep * 5
+            configManagerOrder: GeneralOrderStart - OrderStep * 6
         );
 
         Plugin.StuWardRecipe = Plugin.BindConfigEntry(
@@ -94,7 +103,7 @@ internal static class WardPluginConfigBindings
             "STUWard Recipe",
             "GreydwarfEye:1,BoneFragments:3,Flint:5,Wood:7",
             "STUWard recipe override. Format: ItemPrefab:Amount[:Recover], ...",
-            configManagerOrder: GeneralOrderStart - OrderStep * 6
+            configManagerOrder: GeneralOrderStart - OrderStep * 7
         );
     }
 
@@ -165,6 +174,7 @@ internal static class WardPluginConfigBindings
     private static void BindHandlers()
     {
         BindHandler(Plugin.MaxWardRadius, HandleMaxWardRadiusChanged);
+        BindHandler(Plugin.WardRangeConfiguration, HandleWardRangeConfigurationChanged);
         BindHandler(Plugin.HostileCreatureStructureProtection, HandleWardPresenceConfigChanged);
         BindHandler(Plugin.DisableVanillaGuardStoneRecipe, HandleRecipeSettingsChanged);
         BindHandler(Plugin.StuWardRecipe, HandleRecipeSettingsChanged);
@@ -177,6 +187,11 @@ internal static class WardPluginConfigBindings
     private static void HandleMaxWardRadiusChanged(object? _, EventArgs __)
     {
         WardSettings.HandleMaxRadiusChanged();
+    }
+
+    private static void HandleWardRangeConfigurationChanged(object? _, EventArgs __)
+    {
+        WardGuiController.Instance?.HandleWardRangeConfigurationChanged();
     }
 
     private static void HandleWardPresenceConfigChanged(object? _, EventArgs __)

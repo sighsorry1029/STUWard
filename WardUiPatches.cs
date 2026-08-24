@@ -644,12 +644,12 @@ internal static class ManagedWardHoverTextService
         var zdo = WardPrivateAreaSafeAccess.GetZdo(area);
         var dataRevision = zdo?.DataRevision ?? 0u;
         var playerId = player != null ? player.GetPlayerID() : 0L;
-        var guildName = GuildsCompat.GetWardGuildName(area) ?? string.Empty;
+        var guildName = WardGroupCompat.GetWardGroupName(area) ?? string.Empty;
         var guildLine = string.IsNullOrWhiteSpace(guildName)
             ? null
             : WardLocalization.LocalizeFormat(
-                WardLocalization.UiGuildToken,
-                WardLocalization.UiGuildFallback,
+                WardGroupCompat.GetGroupLabelToken(),
+                WardGroupCompat.GetGroupLabelFallback(),
                 guildName);
 
         var canConfigure = WardAccess.CanConfigureWard(area, player);

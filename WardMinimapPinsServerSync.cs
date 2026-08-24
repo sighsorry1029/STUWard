@@ -244,11 +244,11 @@ internal static partial class WardMinimapPinsManager
         }
 
         canSeeAllWards = playerId != 0L && WardAdminDebugAccess.IsPlayerAdminDebugController(playerId);
-        var playerGuildId = GuildsCompat.GetPlayerGuildId(playerId);
-        viewerRevisionToken = WardMinimapVisibilityIndex.GetViewerRevisionToken(playerId, playerGuildId, canSeeAllWards);
+        var playerGroup = WardGroupCompat.GetPlayerGroupIdentity(playerId);
+        viewerRevisionToken = WardMinimapVisibilityIndex.GetViewerRevisionToken(playerId, playerGroup, canSeeAllWards);
         var snapshot = WardMinimapViewerSnapshotBuilder.Build(
             playerId,
-            playerGuildId,
+            playerGroup,
             canSeeAllWards,
             viewerRevisionToken,
             includeEntries: true,

@@ -31,34 +31,34 @@ internal static class ManagedWardAccessEvaluator
             return false;
         }
 
-        actor = CreateActor(localPlayer.GetPlayerID(), GuildsCompat.GetPlayerGuildIdentity(localPlayer));
+        actor = CreateActor(localPlayer.GetPlayerID(), WardGroupCompat.GetPlayerGroupIdentity(localPlayer));
         return true;
     }
 
     internal static ManagedWardAccessActor CreateActor(long playerId)
     {
-        return CreateActor(playerId, GuildsCompat.GetPlayerGuildIdentity(playerId));
+        return CreateActor(playerId, WardGroupCompat.GetPlayerGroupIdentity(playerId));
     }
 
-    internal static ManagedWardAccessActor CreateActor(long playerId, WardGuildIdentity playerGuild)
+    internal static ManagedWardAccessActor CreateActor(long playerId, WardGroupIdentity playerGroup)
     {
         return new ManagedWardAccessActor(
             playerId,
-            playerGuild,
+            playerGroup,
             WardAdminDebugAccess.IsPlayerAdminDebugController(playerId));
     }
 
     internal static bool HasPlayerAccessToManagedWardIndexEntry(
         WardMinimapVisibilityIndexedEntry entry,
         long playerId,
-        WardGuildIdentity playerGuild)
+        WardGroupIdentity playerGroup)
     {
         if (playerId == 0L)
         {
             return false;
         }
 
-        var actor = CreateActor(playerId, playerGuild);
+        var actor = CreateActor(playerId, playerGroup);
         return ManagedWardAccessPolicy.CanAccess(
             actor,
             BuildManagedWardAccessSubjectFromIndexEntry(entry, actor));
@@ -76,7 +76,7 @@ internal static class ManagedWardAccessEvaluator
 
         return BuildManagedWardAccessSubjectCore(
             WardAccess.GetCanonicalCreatorPlayerId(area),
-            GuildsCompat.GetWardGuildId(area),
+            WardGroupCompat.GetWardGroupIdentity(area),
             WardPrivateAreaSafeAccess.IsPlayerPermitted(area, actor.PlayerId));
     }
 
@@ -86,7 +86,7 @@ internal static class ManagedWardAccessEvaluator
     {
         return BuildManagedWardAccessSubjectCore(
             zdo.GetLong(ZDOVars.s_creator, 0L),
-            GuildsCompat.ResolveWardGuildIdentityReadOnly(zdo).Id,
+            WardGroupCompat.ResolveWardGroupIdentityReadOnly(zdo),
             WardPrivateAreaSafeAccess.IsPlayerPermitted(zdo, actor.PlayerId));
     }
 
@@ -96,18 +96,18 @@ internal static class ManagedWardAccessEvaluator
     {
         return new ManagedWardAccessSubject(
             entry.OwnerPlayerId,
-            new WardGuildIdentity(entry.WardGuildId, string.Empty),
+            entry.WardGroup,
             IsPlayerPermitted(entry, actor.PlayerId));
     }
 
     private static ManagedWardAccessSubject BuildManagedWardAccessSubjectCore(
         long ownerPlayerId,
-        int wardGuildId,
+        WardGroupIdentity wardGroup,
         bool permitted)
     {
         return new ManagedWardAccessSubject(
             ownerPlayerId,
-            new WardGuildIdentity(wardGuildId, string.Empty),
+            wardGroup,
             permitted);
     }
 

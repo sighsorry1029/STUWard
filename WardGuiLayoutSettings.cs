@@ -20,7 +20,8 @@ internal static class WardGuiLayoutSettings
     internal static Vector2 GetRadiusValuePosition() => new(360f, 322f);
 
     internal static float GetBehaviorToggleSize() => 30f;
-    internal static Vector2 GetBehaviorControlsGridPosition() => new(-15f, 229f);
+    internal static Vector2 GetBehaviorControlsGridPosition(bool showRadiusConfiguration) =>
+        new(-15f, showRadiusConfiguration ? 229f : 245f);
     internal static Vector2 GetBehaviorControlsGridSize() => new(960f, 118f);
 
     internal static Vector2 GetRegisteredPlayersRemoveButtonPosition() => new(395f, 0f);
@@ -36,8 +37,10 @@ internal static class WardGuiLayoutSettings
     internal static Vector2 GetRecentPlayersListPosition() => new(-15f, -230f);
     internal static Vector2 GetRecentPlayersListSize() => new(960f, 340f);
 
-    internal static Vector2 GetRestrictionsHeaderPosition() => new(0f, 134f);
-    internal static Vector2 GetRestrictionListPosition() => new(-15f, -149f);
+    internal static Vector2 GetRestrictionsHeaderPosition(bool showRadiusConfiguration) =>
+        new(0f, showRadiusConfiguration ? 134f : 150f);
+    internal static Vector2 GetRestrictionListPosition(bool showRadiusConfiguration) =>
+        new(-15f, showRadiusConfiguration ? -149f : -133f);
     internal static Vector2 GetRestrictionListSize() => new(960f, 504f);
     internal static Vector2 GetRestrictionCellSize() => new(452f, 48f);
     internal static Vector2 GetRestrictionCellSpacing() => new(8f, 6f);

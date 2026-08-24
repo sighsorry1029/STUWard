@@ -11,7 +11,7 @@ internal static class ManagedWardPlacementPreviewService
         internal int CandidateInstanceId;
         internal Vector3 Point;
         internal long PlayerId;
-        internal int GuildId;
+        internal WardGroupIdentity Group;
         internal int SpatialRevision = -1;
         internal bool BlocksPlacement;
         internal bool HasValue;
@@ -27,13 +27,13 @@ internal static class ManagedWardPlacementPreviewService
         }
 
         var playerId = player != null ? player.GetPlayerID() : 0L;
-        var guildId = player != null ? GuildsCompat.GetPlayerGuildId(player) : 0;
+        var group = player != null ? WardGroupCompat.GetPlayerGroupIdentity(player) : default;
         var candidateInstanceId = candidate.GetInstanceID();
         var spatialRevision = WardAccess.GetManagedWardSpatialIndexRevision();
         if (OverlapCache.HasValue &&
             OverlapCache.CandidateInstanceId == candidateInstanceId &&
             OverlapCache.PlayerId == playerId &&
-            OverlapCache.GuildId == guildId &&
+            OverlapCache.Group == group &&
             OverlapCache.SpatialRevision == spatialRevision &&
             PointsMatch(OverlapCache.Point, point))
         {
@@ -44,7 +44,7 @@ internal static class ManagedWardPlacementPreviewService
         OverlapCache.CandidateInstanceId = candidateInstanceId;
         OverlapCache.Point = point;
         OverlapCache.PlayerId = playerId;
-        OverlapCache.GuildId = guildId;
+        OverlapCache.Group = group;
         OverlapCache.SpatialRevision = spatialRevision;
         OverlapCache.BlocksPlacement = blocksPlacement;
         OverlapCache.HasValue = true;
@@ -977,16 +977,16 @@ internal static class WardAccess
     internal static float GetMaxNonOverlappingRadius(PrivateArea? area, float fallbackRadius)
     {
         var ownerCreatorPlayerId = GetCanonicalCreatorPlayerId(area);
-        var guildId = GuildsCompat.IsAvailable() ? GuildsCompat.GetWardGuildId(area) : 0;
+        var group = WardGroupCompat.GetWardGroupIdentity(area);
         return area == null
             ? fallbackRadius
-            : GetMaxNonOverlappingRadius(area.transform.position, ownerCreatorPlayerId, guildId, area, fallbackRadius);
+            : GetMaxNonOverlappingRadius(area.transform.position, ownerCreatorPlayerId, group, area, fallbackRadius);
     }
 
     internal static float GetMaxNonOverlappingRadius(
         Vector3 point,
         long ownerCreatorPlayerId,
-        int guildId,
+        WardGroupIdentity group,
         PrivateArea? ignoredWard,
         float fallbackRadius)
     {
@@ -998,8 +998,8 @@ internal static class WardAccess
 
         return WardOverlapPolicy.GetMaxNonOverlappingRadius(
             fallbackRadius,
-            CreateWardOverlapQuery(point, fallbackRadius, ownerCreatorPlayerId, guildId, ignoredWard),
-            BuildWardOverlapAreas(allAreas, guildId));
+            CreateWardOverlapQuery(point, fallbackRadius, ownerCreatorPlayerId, group, ignoredWard),
+            BuildWardOverlapAreas(allAreas));
     }
 
     internal static bool TryGetAutomaticPlacementRadius(Player? player, Vector3 point, out float radius)
@@ -1011,13 +1011,13 @@ internal static class WardAccess
         }
 
         var ownerPlayerId = player.GetPlayerID();
-        var guildId = GuildsCompat.GetPlayerGuildId(player);
+        var group = WardGroupCompat.GetPlayerGroupIdentity(player);
         var allAreas = GetCandidateManagedWards(point, WardSettings.MaxRadius, requireEnabled: false);
         return WardOverlapPolicy.TryGetPlacementRadius(
             WardSettings.MinRadius,
             WardSettings.MaxRadius,
-            CreateWardOverlapQuery(point, WardSettings.MaxRadius, ownerPlayerId, guildId, ignoredWard: null),
-            BuildWardOverlapAreas(allAreas, guildId),
+            CreateWardOverlapQuery(point, WardSettings.MaxRadius, ownerPlayerId, group, ignoredWard: null),
+            BuildWardOverlapAreas(allAreas),
             out radius);
     }
 
@@ -1190,7 +1190,7 @@ internal static class WardAccess
             point,
             radius,
             player.GetPlayerID(),
-            GuildsCompat.GetPlayerGuildId(player),
+            WardGroupCompat.GetPlayerGroupIdentity(player),
             null,
             flash);
     }
@@ -1199,7 +1199,7 @@ internal static class WardAccess
         Vector3 point,
         float radius,
         long ownerCreatorPlayerId,
-        int guildId,
+        WardGroupIdentity group,
         PrivateArea? ignoredWard,
         bool flash)
     {
@@ -1212,7 +1212,7 @@ internal static class WardAccess
         var overlaps = false;
         PrivateArea? closestOverlappingArea = null;
         var closestOverlapDistance = float.MaxValue;
-        var query = CreateWardOverlapQuery(point, radius, ownerCreatorPlayerId, guildId, ignoredWard);
+        var query = CreateWardOverlapQuery(point, radius, ownerCreatorPlayerId, group, ignoredWard);
         foreach (var area in allAreas)
         {
             if (area == null || area == ignoredWard)
@@ -1220,7 +1220,7 @@ internal static class WardAccess
                 continue;
             }
 
-            var overlapArea = CreateWardOverlapArea(area, guildId);
+            var overlapArea = CreateWardOverlapArea(area);
             if (!WardOverlapPolicy.IsForeignOverlap(query, overlapArea))
             {
                 continue;
@@ -1257,7 +1257,7 @@ internal static class WardAccess
         Vector3 point,
         float radius,
         long ownerCreatorPlayerId,
-        int guildId,
+        WardGroupIdentity group,
         PrivateArea? ignoredWard)
     {
         return new WardOverlapQuery(
@@ -1265,11 +1265,11 @@ internal static class WardAccess
             point.z,
             radius,
             ownerCreatorPlayerId,
-            guildId,
+            group,
             ignoredWard != null ? ignoredWard.GetInstanceID() : 0);
     }
 
-    private static List<WardOverlapArea> BuildWardOverlapAreas(IReadOnlyList<PrivateArea> areas, int queryGuildId)
+    private static List<WardOverlapArea> BuildWardOverlapAreas(IReadOnlyList<PrivateArea> areas)
     {
         var overlapAreas = new List<WardOverlapArea>(areas.Count);
         for (var index = 0; index < areas.Count; index++)
@@ -1277,14 +1277,14 @@ internal static class WardAccess
             var area = areas[index];
             if (area != null)
             {
-                overlapAreas.Add(CreateWardOverlapArea(area, queryGuildId));
+                overlapAreas.Add(CreateWardOverlapArea(area));
             }
         }
 
         return overlapAreas;
     }
 
-    private static WardOverlapArea CreateWardOverlapArea(PrivateArea area, int queryGuildId)
+    private static WardOverlapArea CreateWardOverlapArea(PrivateArea area)
     {
         var position = area.transform.position;
         return new WardOverlapArea(
@@ -1293,7 +1293,7 @@ internal static class WardAccess
             position.z,
             WardSettings.GetStoredRadiusOrMin(area),
             GetCanonicalCreatorPlayerId(area),
-            queryGuildId != 0 && GuildsCompat.IsAvailable() ? GuildsCompat.GetWardGuildId(area) : 0);
+            WardGroupCompat.GetWardGroupIdentity(area));
     }
 
     internal static int GetManagedWardSpatialIndexRevision()

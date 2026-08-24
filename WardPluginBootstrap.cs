@@ -28,6 +28,7 @@ internal static class WardPluginBootstrap
         WardRecentPlayers.Shutdown();
         ManagedWardConfigFileService.Shutdown();
         GuildsCompat.TryShutdownHooks();
+        WardGroupCompat.Shutdown();
         Localizer.Unload();
     }
 

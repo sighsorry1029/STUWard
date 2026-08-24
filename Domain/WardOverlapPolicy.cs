@@ -5,14 +5,20 @@ namespace STUWard;
 
 internal readonly struct WardOverlapArea
 {
-    internal WardOverlapArea(int id, float x, float z, float radius, long ownerPlayerId, int guildId)
+    internal WardOverlapArea(
+        int id,
+        float x,
+        float z,
+        float radius,
+        long ownerPlayerId,
+        WardGroupIdentity group)
     {
         Id = id;
         X = x;
         Z = z;
         Radius = radius;
         OwnerPlayerId = ownerPlayerId;
-        GuildId = guildId;
+        Group = group;
     }
 
     internal int Id { get; }
@@ -20,18 +26,24 @@ internal readonly struct WardOverlapArea
     internal float Z { get; }
     internal float Radius { get; }
     internal long OwnerPlayerId { get; }
-    internal int GuildId { get; }
+    internal WardGroupIdentity Group { get; }
 }
 
 internal readonly struct WardOverlapQuery
 {
-    internal WardOverlapQuery(float x, float z, float radius, long ownerPlayerId, int guildId, int ignoredAreaId = 0)
+    internal WardOverlapQuery(
+        float x,
+        float z,
+        float radius,
+        long ownerPlayerId,
+        WardGroupIdentity group,
+        int ignoredAreaId = 0)
     {
         X = x;
         Z = z;
         Radius = radius;
         OwnerPlayerId = ownerPlayerId;
-        GuildId = guildId;
+        Group = group;
         IgnoredAreaId = ignoredAreaId;
     }
 
@@ -39,7 +51,7 @@ internal readonly struct WardOverlapQuery
     internal float Z { get; }
     internal float Radius { get; }
     internal long OwnerPlayerId { get; }
-    internal int GuildId { get; }
+    internal WardGroupIdentity Group { get; }
     internal int IgnoredAreaId { get; }
 }
 
@@ -98,7 +110,7 @@ internal static class WardOverlapPolicy
             return true;
         }
 
-        return area.GuildId != 0 && query.GuildId != 0 && area.GuildId == query.GuildId;
+        return area.Group.IsValid && query.Group.IsValid && area.Group == query.Group;
     }
 
     private static bool ShouldIgnoreArea(WardOverlapQuery query, WardOverlapArea area)

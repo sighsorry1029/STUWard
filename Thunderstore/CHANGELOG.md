@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.6
+
+- Added optional Clan 1.0.0 public API v4 integration. Primary Clan Leaders, Officers, and Members receive group-based ward access, overlap, placement, minimap visibility, and player-list metadata; Guests never grant automatic ward access.
+- Generalized group identities so Guilds and Clan remain distinct while preserving existing Guilds ward metadata. If both providers are installed, automatic group authorization fails closed until only one remains.
+- Added the synchronized `Ward Range Configuration` server setting, defaulting to `Off`. When disabled, the per-ward radius slider is hidden and the second settings page reclaims the space while preserving stored radii; enabling it restores trusted-player radius adjustment.
+- Shortened valid SteamID64 values in registered and recent-player rows to their final ten digits. Full IDs remain unchanged internally and searchable, while non-Steam account IDs remain fully displayed.
+
 ## 1.3.5
 
 - Restored a server-authoritative per-ward range slider on the second settings page. New wards still start at the largest legal radius; later expansion is clamped against the server maximum and current foreign wards without resizing neighboring wards.

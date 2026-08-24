@@ -321,6 +321,12 @@ internal static class WardSettings
             radius: Mathf.Clamp(radius, MinRadius, MaxRadius));
     }
 
+    internal static bool IsWardRangeConfigurationEnabled()
+    {
+        return Plugin.WardRangeConfiguration != null &&
+               Plugin.WardRangeConfiguration.Value == Plugin.Toggle.On;
+    }
+
     internal static WardConfiguration WithAutoCloseEnabled(WardConfiguration configuration, bool enabled)
     {
         return CopyConfiguration(
@@ -1476,7 +1482,10 @@ internal static class WardSettings
     private static WardConfiguration ClampConfiguration(ZDO zdo, WardConfiguration configuration)
     {
         var maxRadius = GetMaxNonOverlappingRadius(zdo);
-        var clampedRadius = Mathf.Clamp(Mathf.Min(configuration.Radius, maxRadius), MinRadius, MaxRadius);
+        var requestedRadius = IsWardRangeConfigurationEnabled()
+            ? configuration.Radius
+            : GetStoredRadius(zdo);
+        var clampedRadius = Mathf.Clamp(Mathf.Min(requestedRadius, maxRadius), MinRadius, MaxRadius);
         return CopyConfiguration(
             configuration,
             radius: clampedRadius,
@@ -1493,8 +1502,7 @@ internal static class WardSettings
 
         var position = zdo.GetPosition();
         var ownerPlayerId = zdo.GetLong(ZDOVars.s_creator, 0L);
-        var guildsAvailable = GuildsCompat.IsAvailable();
-        var guildId = guildsAvailable ? GuildsCompat.GetWardGuildId(zdo) : 0;
+        var group = WardGroupCompat.ResolveWardGroupIdentityReadOnly(zdo);
         var overlapAreas = new List<WardOverlapArea>();
         foreach (var candidate in zdoMan.m_objectsByID.Values)
         {
@@ -1513,12 +1521,12 @@ internal static class WardSettings
                 candidatePosition.z,
                 GetStoredRadius(candidate),
                 candidate.GetLong(ZDOVars.s_creator, 0L),
-                guildId != 0 && guildsAvailable ? GuildsCompat.GetWardGuildId(candidate) : 0));
+                WardGroupCompat.ResolveWardGroupIdentityReadOnly(candidate)));
         }
 
         return WardOverlapPolicy.GetMaxNonOverlappingRadius(
             MaxRadius,
-            new WardOverlapQuery(position.x, position.z, MaxRadius, ownerPlayerId, guildId),
+            new WardOverlapQuery(position.x, position.z, MaxRadius, ownerPlayerId, group),
             overlapAreas);
     }
 

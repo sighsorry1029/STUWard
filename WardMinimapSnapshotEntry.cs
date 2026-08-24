@@ -86,7 +86,7 @@ internal static class WardMinimapViewerSnapshotBuilder
 {
     internal static WardMinimapViewerSnapshot Build(
         long playerId,
-        int playerGuildId,
+        WardGroupIdentity playerGroup,
         bool canSeeAllWards,
         int viewerRevisionToken,
         bool includeEntries,
@@ -94,7 +94,7 @@ internal static class WardMinimapViewerSnapshotBuilder
     {
         var visibleWardIds = WardMinimapVisibilityIndex.GetVisibleCandidateWardIds(
             playerId,
-            playerGuildId,
+            playerGroup,
             canSeeAllWards);
         var indexedWardCount = WardMinimapVisibilityIndex.GetIndexedWardCount();
         var candidateWardCount = visibleWardIds.Length;

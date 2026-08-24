@@ -13,6 +13,9 @@ internal sealed class WardGuiController : MonoBehaviour
     private const float ConfigurationRequestTimeoutSeconds = 5f;
     private const float RecentPlayersRequestTimeoutSeconds = 5f;
     private const float RadiusAdvisoryRefreshSeconds = 1f;
+    private const ulong SteamIndividualIdMinimum = 76561197960265728UL;
+    private const ulong SteamIndividualIdMaximum = 76561202255233023UL;
+    private const int CompactSteamIdLength = 10;
 
     internal static WardGuiController? Instance { get; private set; }
 
@@ -168,7 +171,8 @@ internal sealed class WardGuiController : MonoBehaviour
             PushPendingConfiguration();
         }
 
-        if (_currentPage == WardSettingsPage.Restrictions &&
+        if (_radiusSlider != null &&
+            _currentPage == WardSettingsPage.Restrictions &&
             Time.unscaledTime >= _nextRadiusAdvisoryRefreshTime)
         {
             RefreshRadiusAdvisoryVisuals();
@@ -276,6 +280,32 @@ internal sealed class WardGuiController : MonoBehaviour
         CompleteCloseWardUi();
     }
 
+    internal void RefreshGroupMetadata()
+    {
+        if (!_visible || _currentWard == null)
+        {
+            return;
+        }
+
+        RefreshStaticTexts();
+        RefreshPermittedPlayers(force: true);
+        RequestRecentPlayersSnapshot();
+    }
+
+    internal void HandleWardRangeConfigurationChanged()
+    {
+        if (_configurationPushPending)
+        {
+            // A slider drag is staged until pointer-up. If the synchronized
+            // setting rebuilds the panel mid-drag, make that draft eligible
+            // for the normal request path instead of leaving it suspended.
+            _nextConfigurationPushTime = Time.unscaledTime;
+            FlushPendingConfigurationPush();
+        }
+
+        BuildGui();
+    }
+
     private void CompleteCloseWardUi()
     {
         _currentWard = null;
@@ -316,6 +346,9 @@ internal sealed class WardGuiController : MonoBehaviour
         _recentPlayersContent = null;
         _previousPageButton = null;
         _nextPageButton = null;
+        _radiusValueText = null;
+        _radiusSlider = null;
+        _radiusLimitMarker = null;
         _buildParent = null;
 
         var gui = GUIManager.Instance;
@@ -378,9 +411,14 @@ internal sealed class WardGuiController : MonoBehaviour
         BuildTrustedPlayers(gui);
         BuildRecentPlayers(gui);
         _buildParent = _restrictionsPageRoot.transform;
-        BuildRadiusControl(gui);
-        BuildTopControls(gui);
-        BuildRestrictions();
+        var showRadiusConfiguration = WardSettings.IsWardRangeConfigurationEnabled();
+        if (showRadiusConfiguration)
+        {
+            BuildRadiusControl(gui);
+        }
+
+        BuildTopControls(gui, showRadiusConfiguration);
+        BuildRestrictions(showRadiusConfiguration);
         _buildParent = null;
         SetActivePage(_currentPage);
         SetVisible(_visible);
@@ -432,14 +470,14 @@ internal sealed class WardGuiController : MonoBehaviour
             gui.ValheimYellow);
     }
 
-    private void BuildTopControls(GUIManager gui)
+    private void BuildTopControls(GUIManager gui, bool showRadiusConfiguration)
     {
         var gridRoot = new GameObject("STUWardBehaviorControls", typeof(RectTransform), typeof(GridLayoutGroup));
         gridRoot.transform.SetParent(GetBuildParent(), false);
         var gridSize = WardGuiLayoutSettings.GetBehaviorControlsGridSize();
         ConfigureRect(
             gridRoot.GetComponent<RectTransform>(),
-            WardGuiLayoutSettings.GetBehaviorControlsGridPosition(),
+            WardGuiLayoutSettings.GetBehaviorControlsGridPosition(showRadiusConfiguration),
             gridSize.x,
             gridSize.y);
 
@@ -1091,10 +1129,10 @@ internal sealed class WardGuiController : MonoBehaviour
             WardLocalization.UiOwnerToken,
             WardLocalization.UiOwnerFallback,
             WardPrivateAreaSafeAccess.GetCreatorName(_currentWard));
-        var guildName = GuildsCompat.GetWardGuildName(_currentWard);
+        var guildName = WardGroupCompat.GetWardGroupName(_currentWard);
         _guildValueText.text = WardLocalization.LocalizeFormat(
-            WardLocalization.UiGuildToken,
-            WardLocalization.UiGuildFallback,
+            WardGroupCompat.GetGroupLabelToken(),
+            WardGroupCompat.GetGroupLabelFallback(),
             string.IsNullOrWhiteSpace(guildName) ? "-" : guildName);
     }
 
@@ -1103,33 +1141,37 @@ internal sealed class WardGuiController : MonoBehaviour
         if (_autoCloseToggle == null ||
             _warningSoundToggle == null ||
             _warningFlashToggle == null ||
-            _areaMarkerRotationToggle == null ||
-            _radiusSlider == null ||
-            _radiusValueText == null)
+            _areaMarkerRotationToggle == null)
         {
             return;
         }
 
-        var displayedRadius = Mathf.Clamp(
-            _currentConfiguration.Radius,
-            WardSettings.MinRadius,
-            WardSettings.MaxRadius);
-
         _suppressUiEvents = true;
-        _radiusSlider.minValue = WardSettings.MinRadius;
-        _radiusSlider.maxValue = WardSettings.MaxRadius;
-        _radiusSlider.value = displayedRadius;
-        _radiusValueText.text = WardLocalization.LocalizeFormat(
-            WardLocalization.UiRadiusValueToken,
-            WardLocalization.UiRadiusValueFallback,
-            Mathf.RoundToInt(displayedRadius));
+        if (_radiusSlider != null && _radiusValueText != null)
+        {
+            var displayedRadius = Mathf.Clamp(
+                _currentConfiguration.Radius,
+                WardSettings.MinRadius,
+                WardSettings.MaxRadius);
+            _radiusSlider.minValue = WardSettings.MinRadius;
+            _radiusSlider.maxValue = WardSettings.MaxRadius;
+            _radiusSlider.value = displayedRadius;
+            _radiusValueText.text = WardLocalization.LocalizeFormat(
+                WardLocalization.UiRadiusValueToken,
+                WardLocalization.UiRadiusValueFallback,
+                Mathf.RoundToInt(displayedRadius));
+        }
+
         _autoCloseToggle.isOn = _currentConfiguration.AutoCloseEnabled;
         _warningSoundToggle.isOn = _currentConfiguration.WarningSoundEnabled;
         _warningFlashToggle.isOn = _currentConfiguration.WarningFlashEnabled;
         _areaMarkerRotationToggle.isOn = _currentConfiguration.AreaMarkerRotationEnabled;
         RefreshRestrictionRows();
         _suppressUiEvents = false;
-        RefreshRadiusAdvisoryVisuals();
+        if (_radiusSlider != null)
+        {
+            RefreshRadiusAdvisoryVisuals();
+        }
     }
 
     private void RefreshPermittedPlayers(bool force)
@@ -1385,13 +1427,13 @@ internal sealed class WardGuiController : MonoBehaviour
         }
     }
 
-    private void BuildRestrictions()
+    private void BuildRestrictions(bool showRadiusConfiguration)
     {
         var gui = GUIManager.Instance;
         var listSize = WardGuiLayoutSettings.GetRestrictionListSize();
         CreateLabel(
             WardLocalization.Localize(WardLocalization.UiRestrictionsToken, WardLocalization.UiRestrictionsFallback),
-            WardGuiLayoutSettings.GetRestrictionsHeaderPosition(),
+            WardGuiLayoutSettings.GetRestrictionsHeaderPosition(showRadiusConfiguration),
             24,
             listSize.x,
             40f,
@@ -1410,7 +1452,11 @@ internal sealed class WardGuiController : MonoBehaviour
             listSize.x,
             listSize.y);
 
-        ConfigureRect(scrollRoot.GetComponent<RectTransform>(), WardGuiLayoutSettings.GetRestrictionListPosition(), listSize.x, listSize.y);
+        ConfigureRect(
+            scrollRoot.GetComponent<RectTransform>(),
+            WardGuiLayoutSettings.GetRestrictionListPosition(showRadiusConfiguration),
+            listSize.x,
+            listSize.y);
         scrollRoot.name = "STUWardRestrictions";
 
         _restrictionsContent = scrollRoot.transform.Find("Scroll View/Viewport/Content") as RectTransform;
@@ -1990,6 +2036,11 @@ internal sealed class WardGuiController : MonoBehaviour
 
     private void RefreshRadiusAdvisoryVisuals()
     {
+        if (_radiusSlider == null)
+        {
+            return;
+        }
+
         var maxRadius = _currentWard != null
             ? WardSettings.GetAdvisoryMaxRadius(_currentWard)
             : WardSettings.MaxRadius;
@@ -2066,7 +2117,7 @@ internal sealed class WardGuiController : MonoBehaviour
             _restrictionsPageRoot.SetActive(page == WardSettingsPage.Restrictions);
         }
 
-        if (page == WardSettingsPage.Restrictions && _visible)
+        if (_radiusSlider != null && page == WardSettingsPage.Restrictions && _visible)
         {
             RefreshRadiusAdvisoryVisuals();
         }
@@ -2145,13 +2196,28 @@ internal sealed class WardGuiController : MonoBehaviour
     private static string BuildPlayerDisplayText(string playerName, string guildName, string accountId)
     {
         var guildDisplay = string.IsNullOrWhiteSpace(guildName) ? "-" : guildName;
-        var accountDisplay = string.IsNullOrWhiteSpace(accountId) ? "-" : accountId;
+        var accountDisplay = string.IsNullOrWhiteSpace(accountId)
+            ? "-"
+            : GetCompactAccountIdDisplay(accountId);
         return WardLocalization.LocalizeFormat(
             WardLocalization.UiRegisteredPlayerFormatToken,
             WardLocalization.UiRegisteredPlayerFormatFallback,
             playerName,
             guildDisplay,
             accountDisplay);
+    }
+
+    private static string GetCompactAccountIdDisplay(string accountId)
+    {
+        if (accountId.Length == 17 &&
+            ulong.TryParse(accountId, out var steamId) &&
+            steamId >= SteamIndividualIdMinimum &&
+            steamId <= SteamIndividualIdMaximum)
+        {
+            return accountId.Substring(accountId.Length - CompactSteamIdLength);
+        }
+
+        return accountId;
     }
 
     private static string BuildPlayerSearchText(string playerName, string guildName, string accountId, long playerId)
@@ -2176,7 +2242,7 @@ internal sealed class WardGuiController : MonoBehaviour
             return;
         }
 
-        guildName = GuildsCompat.GetPlayerGuildName(playerId);
+        guildName = WardGroupCompat.GetPlayerGroupName(playerId);
         accountId = WardOwnership.GetPlayerSteamIdDisplay(playerId);
     }
 

@@ -67,6 +67,11 @@ internal static partial class GuildsCompat
     private static AvailabilityState _availabilityState = AvailabilityState.Unknown;
     private static DateTime _nextAvailabilityProbeUtc = DateTime.MinValue;
 
+    internal static bool IsInstalled()
+    {
+        return GuildsAssembly != null;
+    }
+
     private static Assembly? GetPluginAssembly(string pluginGuid)
     {
         if (!Chainloader.PluginInfos.TryGetValue(pluginGuid, out var pluginInfo))

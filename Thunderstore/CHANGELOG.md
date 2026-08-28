@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.7
+
+- Updated optional Clan integration to the current `sighsorry.Clan` plugin GUID while retaining the public API v4 ward contract. The former `sighsorry.valheim.Clan` plugin GUID is no longer recognized.
+- Existing wards and individual registrations require no migration or replacement because their stored owner, registered-player, and immutable Clan identity data is unchanged. Servers and clients using Clan must install its current build together with this STUWard version.
+
 ## 1.3.6
 
 - Added optional Clan 1.0.0 public API v4 integration. Primary Clan Leaders, Officers, and Members receive group-based ward access, overlap, placement, minimap visibility, and player-list metadata; Guests never grant automatic ward access.

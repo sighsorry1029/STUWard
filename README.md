@@ -60,7 +60,7 @@ All trusted players can use the protected area, open and change ward settings, t
 
 The owner identity is still retained for ward limits, reporting, and group metadata; it does not grant a higher permission tier on an existing ward.
 
-STUWard supports either `Guilds` or `Clan 1.0.0+` (public API v4) as its group provider. Clan `Leader`, `Officer`, and `Member` roles are authorized through the primary Clan; `Guest` connections never grant automatic ward access. Individually registered, owner, and admin-debug trust continue to work independently of group membership. An older or incompatible Clan API fails closed for automatic group authorization.
+STUWard supports either `Guilds` or `Clan 1.0.0+` (`sighsorry.Clan`, public API v4) as its group provider. Clan `Leader`, `Officer`, and `Member` roles are authorized through the primary Clan; `Guest` connections never grant automatic ward access. Individually registered, owner, and admin-debug trust continue to work independently of group membership. An older or incompatible Clan API fails closed for automatic group authorization.
 
 ## Registration
 

@@ -7,6 +7,7 @@ namespace STUWard;
 
 internal static class WardGroupCompat
 {
+    internal const string ClanPluginGuid = "sighsorry.Clan";
     internal const string GroupProviderKey = "stuw_group_provider";
     internal const string GroupIdKey = "stuw_group_id";
     internal const string GroupNameKey = "stuw_group_name";
@@ -352,7 +353,6 @@ internal static class WardGroupCompat
 
     private static class ClanCompat
     {
-        private const string PluginGuid = "sighsorry.valheim.Clan";
         private const int MinimumApiVersion = 4;
         private static readonly TimeSpan UpdateProbeInterval = TimeSpan.FromMilliseconds(500);
 
@@ -774,7 +774,7 @@ internal static class WardGroupCompat
 
         private static Assembly? GetPluginAssembly()
         {
-            return Chainloader.PluginInfos.TryGetValue(PluginGuid, out var pluginInfo)
+            return Chainloader.PluginInfos.TryGetValue(ClanPluginGuid, out var pluginInfo)
                 ? pluginInfo.Instance?.GetType().Assembly
                 : null;
         }

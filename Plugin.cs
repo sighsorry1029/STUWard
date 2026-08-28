@@ -16,11 +16,11 @@ internal sealed class ConfigurationManagerAttributes
 [BepInPlugin(ModGuid, ModName, ModVersion)]
 [BepInDependency("com.jotunn.jotunn")]
 [BepInDependency("org.bepinex.plugins.guilds", BepInDependency.DependencyFlags.SoftDependency)]
-[BepInDependency("sighsorry.valheim.Clan", BepInDependency.DependencyFlags.SoftDependency)]
+[BepInDependency(WardGroupCompat.ClanPluginGuid, BepInDependency.DependencyFlags.SoftDependency)]
 public sealed class Plugin : BaseUnityPlugin
 {
     internal const string ModName = "STUWard";
-    internal const string ModVersion = "1.3.6";
+    internal const string ModVersion = "1.3.7";
     internal const string Author = "sighsorry";
     internal const string ModGuid = $"{Author}.{ModName}";
 

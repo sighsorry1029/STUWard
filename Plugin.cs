@@ -21,12 +21,12 @@ internal sealed class ConfigurationManagerAttributes
 public sealed class Plugin : BaseUnityPlugin
 {
     internal const string ModName = "STUWard";
-    internal const string ModVersion = "1.3.8";
+    internal const string ModVersion = "1.3.9";
     internal const string Author = "sighsorry";
     internal const string ModGuid = $"{Author}.{ModName}";
 
     internal static string DataDirectory =>
-        Path.Combine(Utils.GetSaveDataPath(FileHelpers.FileSource.Local), ModName);
+        Path.Combine(Paths.ConfigPath, ModName);
 
     internal static readonly ConfigSync ConfigSync = new(ModGuid)
     {

@@ -1,6 +1,4 @@
-using System;
 using System.Collections.Generic;
-using System.IO;
 using Jotunn.Managers;
 using LocalizationManager;
 using UnityEngine;
@@ -408,18 +406,6 @@ internal sealed class WardGuiController : MonoBehaviour
         _nextPageButton = CreateButton(">", WardGuiLayoutSettings.GetPageArrowButtonPosition(), 54f, 42f);
         _nextPageButton.onClick.AddListener(() => SetActivePage(WardSettingsPage.Restrictions));
         StylePageArrowButton(_nextPageButton);
-
-        if (!GUIManager.IsHeadless() && ZNet.instance?.IsServer() == true)
-        {
-            var openDataDirectoryButton = CreateButton(
-                string.Empty,
-                WardGuiLayoutSettings.GetDataDirectoryButtonPosition(),
-                54f,
-                42f);
-            openDataDirectoryButton.name = "STUWardOpenDataDirectoryButton";
-            openDataDirectoryButton.onClick.AddListener(OpenDataDirectory);
-            StyleDataDirectoryButton(openDataDirectoryButton);
-        }
 
         _buildParent = _generalPageRoot.transform;
         BuildTrustedPlayers(gui);
@@ -2165,65 +2151,6 @@ internal sealed class WardGuiController : MonoBehaviour
         text.color = GUIManager.Instance.ValheimYellow;
         text.alignment = TextAnchor.MiddleCenter;
         text.rectTransform.anchoredPosition += new Vector2(0f, 1f);
-    }
-
-    private static void StyleDataDirectoryButton(Button button)
-    {
-        var text = button.GetComponentInChildren<Text>();
-        if (text != null)
-        {
-            text.text = string.Empty;
-        }
-
-        var iconRoot = new GameObject("STUWardDataDirectoryIcon", typeof(RectTransform));
-        iconRoot.layer = button.gameObject.layer;
-        iconRoot.transform.SetParent(button.transform, false);
-        ConfigureRect(iconRoot.GetComponent<RectTransform>(), Vector2.zero, 30f, 26f);
-
-        var outlineColor = new Color(0.08f, 0.07f, 0.06f, 0.95f);
-        var folderColor = GUIManager.Instance.ValheimYellow;
-        CreateFolderIconPart(iconRoot.transform, "TabOutline", new Vector2(-6f, 7f), 14f, 9f, outlineColor);
-        CreateFolderIconPart(iconRoot.transform, "Tab", new Vector2(-6f, 7f), 10f, 5f, folderColor);
-        CreateFolderIconPart(iconRoot.transform, "BodyOutline", new Vector2(0f, -2f), 28f, 18f, outlineColor);
-        CreateFolderIconPart(iconRoot.transform, "Body", new Vector2(0f, -2f), 24f, 14f, folderColor);
-    }
-
-    private static void CreateFolderIconPart(
-        Transform parent,
-        string name,
-        Vector2 position,
-        float width,
-        float height,
-        Color color)
-    {
-        var part = new GameObject(name, typeof(RectTransform), typeof(Image));
-        part.layer = parent.gameObject.layer;
-        part.transform.SetParent(parent, false);
-        ConfigureRect(part.GetComponent<RectTransform>(), position, width, height);
-
-        var image = part.GetComponent<Image>();
-        image.color = color;
-        image.raycastTarget = false;
-    }
-
-    private static void OpenDataDirectory()
-    {
-        if (GUIManager.IsHeadless() || ZNet.instance?.IsServer() != true)
-        {
-            return;
-        }
-
-        var path = string.Empty;
-        try
-        {
-            path = Path.GetFullPath(Plugin.DataDirectory);
-            Directory.CreateDirectory(path);
-            Application.OpenURL(path + Path.DirectorySeparatorChar);
-        }
-        catch (Exception exception)
-        {
-            Plugin.Log.LogWarning($"Could not open STUWard data directory '{path}': {exception.Message}");
-        }
     }
 
     private static void ConfigureRect(RectTransform? rectTransform, Vector2 position, float width, float height)

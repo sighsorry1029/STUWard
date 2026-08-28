@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.9
+
+- Grouped `STUWard.yml`, `STUWard.RecentPlayers.yml`, and the generated `STUWard.WardCountReport.yml` under `BepInEx/config/STUWard`, and removed the Ward Settings folder button now that the files use a conventional config path.
+- There is no automatic migration or legacy-path fallback. Before first startup with this update, stop the game or server, create `BepInEx/config/STUWard`, and move the existing `BepInEx/config/STUWard.yml` and `BepInEx/config/STUWard.RecentPlayers.yml` files into it. Files left in the config root are ignored; without a manual move, STUWard creates the default policy and starts with an empty recent-player history. The generated ward-count report does not need to be moved. Existing ward ownership and registered-player permissions remain stored in ward ZDOs and are unaffected.
+
 ## 1.3.8
 
 - Moved `STUWard.yml`, `STUWard.RecentPlayers.yml`, and the generated `STUWard.WardCountReport.yml` to the shared `<Valheim save data>/STUWard` directory so local-host data survives mod-manager profile removal and related YAML files stay together. Worlds and mod-manager profiles using the same Valheim save-data root share the policy and recent-player history.

@@ -897,7 +897,7 @@ internal static class WardRecentPlayers
         {
             FormatVersion = FormatVersion,
             // Keep the v1 field so an existing per-world file can be copied here verbatim.
-            // It no longer scopes or validates the save-root-wide history.
+            // It no longer scopes or validates the server-profile-wide history.
             WorldUid = 0L,
             Players = new List<StoredPlayer>(PlayersById.Values)
         };

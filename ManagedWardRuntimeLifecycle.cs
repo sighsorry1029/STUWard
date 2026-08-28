@@ -30,10 +30,8 @@ internal static class ManagedWardRuntimeLifecycle
 
     internal static void BindNetwork()
     {
-        // Utils.GetSaveDataPath(Local) touches the platform cloud provider even
-        // for local files, so the managed YAML must not be loaded during the
-        // earlier BepInEx Awake phase. A server ZNet session also guarantees
-        // that Valheim has already applied any -savedir override.
+        // Managed YAML is authoritative server state. Wait for a server ZNet
+        // session so remote clients never initialize or monitor local copies.
         if (ZNet.instance?.IsServer() == true)
         {
             ManagedWardConfigFileService.Initialize();

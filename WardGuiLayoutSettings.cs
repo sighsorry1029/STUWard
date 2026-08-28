@@ -13,7 +13,6 @@ internal static class WardGuiLayoutSettings
     internal static Vector2 GetOwnerGuildLabelSize() => new(360f, 34f);
     internal static Vector2 GetCloseButtonPosition() => new(440f, 400f);
     internal static Vector2 GetPageArrowButtonPosition() => new(315f, 400f);
-    internal static Vector2 GetDataDirectoryButtonPosition() => new(242f, 400f);
 
     internal static Vector2 GetRadiusLabelPosition() => new(-360f, 322f);
     internal static Vector2 GetRadiusSliderPosition() => new(20f, 322f);

@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using BepInEx;
 using YamlDotNet.Serialization;
 
 namespace STUWard;
@@ -898,7 +897,7 @@ internal static class WardRecentPlayers
         {
             FormatVersion = FormatVersion,
             // Keep the v1 field so an existing per-world file can be copied here verbatim.
-            // It no longer scopes or validates the server-profile-wide history.
+            // It no longer scopes or validates the save-root-wide history.
             WorldUid = 0L,
             Players = new List<StoredPlayer>(PlayersById.Values)
         };
@@ -915,6 +914,7 @@ internal static class WardRecentPlayers
             }
 
             var path = GetFilePath();
+            Plugin.EnsureDataDirectory();
             var temporaryPath = path + ".tmp";
             File.WriteAllText(temporaryPath, yaml);
             if (File.Exists(path))
@@ -1029,7 +1029,7 @@ internal static class WardRecentPlayers
 
     private static string GetFilePath()
     {
-        return Path.Combine(Paths.ConfigPath, FileName);
+        return Path.Combine(Plugin.DataDirectory, FileName);
     }
 
     private static string GetDisplayName(StoredPlayer player)

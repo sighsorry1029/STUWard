@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.IO;
 using BepInEx;
 using BepInEx.Configuration;
 using BepInEx.Logging;
@@ -20,9 +21,12 @@ internal sealed class ConfigurationManagerAttributes
 public sealed class Plugin : BaseUnityPlugin
 {
     internal const string ModName = "STUWard";
-    internal const string ModVersion = "1.3.7";
+    internal const string ModVersion = "1.3.8";
     internal const string Author = "sighsorry";
     internal const string ModGuid = $"{Author}.{ModName}";
+
+    internal static string DataDirectory =>
+        Path.Combine(Utils.GetSaveDataPath(FileHelpers.FileSource.Local), ModName);
 
     internal static readonly ConfigSync ConfigSync = new(ModGuid)
     {
@@ -49,6 +53,11 @@ public sealed class Plugin : BaseUnityPlugin
     internal static ConfigEntry<int> WardMinimapPinScale = null!;
     internal static ConfigEntry<Toggle> WardMinimapActiveRanges = null!;
     internal static ConfigEntry<BoundaryBrightenMode> WardBoundaryBrightenMode = null!;
+
+    internal static void EnsureDataDirectory()
+    {
+        Directory.CreateDirectory(DataDirectory);
+    }
 
     internal enum Toggle
     {

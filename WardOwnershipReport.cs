@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using BepInEx;
 
 namespace STUWard;
 
@@ -23,7 +22,7 @@ internal static partial class WardOwnership
 
     internal static string GetReportFilePath()
     {
-        return Path.Combine(Paths.ConfigPath, ReportFileName);
+        return Path.Combine(Plugin.DataDirectory, ReportFileName);
     }
 
     private static string GetCurrentWorldName()
@@ -47,6 +46,7 @@ internal static partial class WardOwnership
 
         try
         {
+            Plugin.EnsureDataDirectory();
             File.WriteAllText(reportPath, reportContents);
             return true;
         }

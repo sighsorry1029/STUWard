@@ -223,6 +223,7 @@ internal static class ManagedWardReportService
         var reportPath = WardOwnership.GetReportFilePath();
         try
         {
+            Plugin.EnsureDataDirectory();
             File.WriteAllText(reportPath, reportContents);
             Plugin.Log.LogInfo($"{Plugin.ModName}: wrote ward report to {reportPath}");
             Plugin.Log.LogInfo($"{Plugin.ModName}: tracked accounts={trackedAccounts}, total wards={totalWards}, unresolved owner wards={unresolvedOwners}");

@@ -66,7 +66,7 @@ STUWard supports either `Guilds` or `Clan 1.0.0+` (`sighsorry.Clan`, public API 
 
 Individual registration is managed by trusted players in Ward Settings:
 
-- The server keeps one recent-player history for the BepInEx server profile in `BepInEx/config/STUWard.RecentPlayers.yml`.
+- The server stores structured policy in `<Valheim save data>/STUWard/STUWard.yml` and keeps one recent-player history in `<Valheim save data>/STUWard/STUWard.RecentPlayers.yml`.
 - The list includes authenticated characters currently online or seen within the last twenty-eight days, with online characters first and older activity lower in the list.
 - Registered and recent-player rows show the character name, resolved Guild/Clan group, account identity, and online/last-seen status. SteamID64 values are displayed as their last ten digits to save space; other platform IDs remain unchanged, and the full account ID remains searchable. Registered characters without retained activity show that their last-seen time is unavailable.
 - Trusted players can add a recent character to the ward or remove an individually registered character.
@@ -74,6 +74,8 @@ Individual registration is managed by trusted players in Ward Settings:
 - Disabled wards do not allow outsiders to register themselves.
 
 Recent-player history begins when STUWard 1.3.0 is installed. Earlier visits are not imported, and extending retention from fourteen to twenty-eight days does not restore records that were already pruned. Those characters must reconnect before appearing again.
+
+On Windows without a custom `-savedir`, the data directory is `AppData/LocalLow/IronGate/Valheim/STUWard`. A local host (single-player or listen server) can open it with the folder button in the Ward Settings header; the button is hidden from remote clients and headless dedicated servers. The directory is shared by every local world and mod-manager profile that uses the same Valheim save-data root. Dedicated server instances should use separate `-savedir` values when they require independent STUWard policy and recent-player history.
 
 ## Ward Overlap
 

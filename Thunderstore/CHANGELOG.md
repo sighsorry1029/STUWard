@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.8
+
+- Moved `STUWard.yml`, `STUWard.RecentPlayers.yml`, and the generated `STUWard.WardCountReport.yml` to the shared `<Valheim save data>/STUWard` directory so local-host data survives mod-manager profile removal and related YAML files stay together. Worlds and mod-manager profiles using the same Valheim save-data root share the policy and recent-player history.
+- Added a Ward Settings header button that opens the data directory for a local host (single-player or listen server). It is hidden from remote clients and headless dedicated servers.
+- There is no automatic migration or legacy-path fallback. Before first startup with this update, stop the game or server, create `<Valheim save data>/STUWard`, and move the existing `STUWard.yml` and `STUWard.RecentPlayers.yml` files into it. Files left in `BepInEx/config` are ignored; without a manual move, STUWard creates the default policy and starts with an empty recent-player history. The generated ward-count report does not need to be moved. Existing ward ownership and registered-player permissions remain stored in ward ZDOs and are unaffected.
+- Deferred managed YAML loading until the authoritative server session is ready, preventing early platform-storage initialization failures while preserving Valheim `-savedir` overrides.
+
 ## 1.3.7
 
 - Updated optional Clan integration to the current `sighsorry.Clan` plugin GUID while retaining the public API v4 ward contract. The former `sighsorry.valheim.Clan` plugin GUID is no longer recognized.

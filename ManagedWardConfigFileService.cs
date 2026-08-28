@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
-using BepInEx;
 using YamlDotNet.Serialization;
 
 namespace STUWard;
@@ -164,7 +163,7 @@ internal static class ManagedWardConfigFileService
 
     private static string GetConfigFilePath()
     {
-        return Path.Combine(Paths.ConfigPath, ConfigFileName);
+        return Path.Combine(Plugin.DataDirectory, ConfigFileName);
     }
 
     private static void EnsureConfigFileExists()
@@ -177,6 +176,7 @@ internal static class ManagedWardConfigFileService
 
         try
         {
+            Plugin.EnsureDataDirectory();
             File.WriteAllText(path, GetDefaultConfigFileContents());
             Plugin.Log.LogInfo($"Created managed ward config file '{path}'.");
         }

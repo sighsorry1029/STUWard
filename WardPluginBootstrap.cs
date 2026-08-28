@@ -12,7 +12,6 @@ internal static class WardPluginBootstrap
 
     internal static void InitializeFeatures()
     {
-        ManagedWardConfigFileService.Initialize();
         WardItemPrefabPolicy.Initialize();
 
         PrefabManager.OnVanillaPrefabsAvailable += RegisterStuWardPiece;

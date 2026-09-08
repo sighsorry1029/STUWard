@@ -16,19 +16,18 @@ internal static partial class GuildsCompat
         }
 
         var playerId = player.GetPlayerID();
-        if (TryGetCachedGuild(playerId, out guild))
+        if (TryGetUnexpiredCachedGuild(playerId, out var cached))
         {
-            return true;
-        }
+            if (cached.HasGuild && cached.GuildId != 0)
+            {
+                guild = new WardGuildIdentity(cached.GuildId, cached.GuildName);
+                return true;
+            }
 
-        if (IsCachedAuthoritativeNoGuild(playerId))
-        {
-            return false;
-        }
-
-        if (IsCachedTransientNoGuild(playerId))
-        {
-            return false;
+            if (!cached.HasGuild)
+            {
+                return false;
+            }
         }
 
         if (TryResolveGuildByPlayerFromApi(player, out guild))
@@ -76,19 +75,18 @@ internal static partial class GuildsCompat
             return guild.Id != 0;
         }
 
-        if (TryGetCachedGuild(playerId, out guild))
+        if (TryGetUnexpiredCachedGuild(playerId, out var cached))
         {
-            return true;
-        }
+            if (cached.HasGuild && cached.GuildId != 0)
+            {
+                guild = new WardGuildIdentity(cached.GuildId, cached.GuildName);
+                return true;
+            }
 
-        if (IsCachedAuthoritativeNoGuild(playerId))
-        {
-            return false;
-        }
-
-        if (IsCachedTransientNoGuild(playerId))
-        {
-            return false;
+            if (!cached.HasGuild)
+            {
+                return false;
+            }
         }
 
         // A remote player instantiated on this peer is a better identity source
@@ -213,14 +211,18 @@ internal static partial class GuildsCompat
             return true;
         }
 
-        if (TryGetCachedGuild(playerId, out guild))
+        if (TryGetUnexpiredCachedGuild(playerId, out var cached))
         {
-            return true;
-        }
+            if (cached.HasGuild && cached.GuildId != 0)
+            {
+                guild = new WardGuildIdentity(cached.GuildId, cached.GuildName);
+                return true;
+            }
 
-        if (IsCachedAuthoritativeNoGuild(playerId))
-        {
-            return true;
+            if (!cached.HasGuild && cached.AuthoritativeNoGuild)
+            {
+                return true;
+            }
         }
 
         if (!TryResolveAuthoritativeGuildIdentity(
@@ -321,10 +323,9 @@ internal static partial class GuildsCompat
         }
     }
 
-    private static bool TryGetCachedGuild(long playerId, out WardGuildIdentity guild)
+    private static bool TryGetUnexpiredCachedGuild(long playerId, out CachedWardGuildIdentity cached)
     {
-        guild = default;
-        if (!PlayerGuildCache.TryGetValue(playerId, out var cached))
+        if (!PlayerGuildCache.TryGetValue(playerId, out cached))
         {
             return false;
         }
@@ -335,45 +336,7 @@ internal static partial class GuildsCompat
             return false;
         }
 
-        if (!cached.HasGuild || cached.GuildId == 0)
-        {
-            return false;
-        }
-
-        guild = new WardGuildIdentity(cached.GuildId, cached.GuildName);
         return true;
-    }
-
-    private static bool IsCachedAuthoritativeNoGuild(long playerId)
-    {
-        if (!PlayerGuildCache.TryGetValue(playerId, out var cached))
-        {
-            return false;
-        }
-
-        if (cached.ExpiresAtUtc <= DateTime.UtcNow)
-        {
-            PlayerGuildCache.Remove(playerId);
-            return false;
-        }
-
-        return !cached.HasGuild && cached.AuthoritativeNoGuild;
-    }
-
-    private static bool IsCachedTransientNoGuild(long playerId)
-    {
-        if (!PlayerGuildCache.TryGetValue(playerId, out var cached))
-        {
-            return false;
-        }
-
-        if (cached.ExpiresAtUtc <= DateTime.UtcNow)
-        {
-            PlayerGuildCache.Remove(playerId);
-            return false;
-        }
-
-        return !cached.HasGuild && !cached.AuthoritativeNoGuild;
     }
 
     private static void CacheGuildLookup(

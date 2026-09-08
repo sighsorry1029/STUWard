@@ -91,13 +91,43 @@ internal sealed class WardGuiController : MonoBehaviour
 
     private void OnDestroy()
     {
+        ReleaseGui();
+    }
+
+    internal void Shutdown()
+    {
+        try
+        {
+            ReleaseGui();
+        }
+        finally
+        {
+            Destroy(gameObject);
+        }
+    }
+
+    private void ReleaseGui()
+    {
+        // Destroy is deferred by Unity; stop callbacks and draft submission now.
+        enabled = false;
+        _suppressUiEvents = true;
+        _visible = false;
+        _currentWard = null;
         GUIManager.OnCustomGUIAvailable -= BuildGui;
         WardRecentPlayers.SnapshotReceived -= HandleRecentPlayersSnapshot;
-        GUIManager.BlockInput(false);
+
+        // The UI root belongs to Jotunn's GUI tree, not this controller's object.
+        if (_root != null)
+        {
+            _root.SetActive(false);
+            Destroy(_root);
+            _root = null;
+        }
 
         if (Instance == this)
         {
             Instance = null;
+            GUIManager.BlockInput(false);
         }
     }
 

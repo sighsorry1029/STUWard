@@ -28,23 +28,15 @@ internal static partial class WardOwnership
 
     // Server-side identity/auth state:
     // sender -> session identity resolution and playerId -> accountId cache.
-    private sealed class IdentityAuthState
-    {
-        internal readonly Dictionary<long, string> ServerPlayerAccountIdsByPlayerId = new();
-        internal readonly Dictionary<long, ServerSessionIdentity> ServerSessionIdentitiesBySender = new();
-        internal DateTime NextSessionIdentityReconcileUtc = DateTime.MinValue;
-    }
-
-    private static readonly IdentityAuthState IdentityAuthData = new();
-
-    private static Dictionary<long, string> ServerPlayerAccountIdsByPlayerId => IdentityAuthData.ServerPlayerAccountIdsByPlayerId;
-    private static Dictionary<long, ServerSessionIdentity> ServerSessionIdentitiesBySender => IdentityAuthData.ServerSessionIdentitiesBySender;
+    private static readonly Dictionary<long, string> ServerPlayerAccountIdsByPlayerId = new();
+    private static readonly Dictionary<long, ServerSessionIdentity> ServerSessionIdentitiesBySender = new();
+    private static DateTime _nextSessionIdentityReconcileUtc = DateTime.MinValue;
 
     private static void ResetIdentityAuthState()
     {
         ServerPlayerAccountIdsByPlayerId.Clear();
         ServerSessionIdentitiesBySender.Clear();
-        IdentityAuthData.NextSessionIdentityReconcileUtc = DateTime.MinValue;
+        _nextSessionIdentityReconcileUtc = DateTime.MinValue;
     }
 
     internal static string GetWardSteamAccountId(PrivateArea? area)
@@ -329,12 +321,12 @@ internal static partial class WardOwnership
         }
 
         var nowUtc = DateTime.UtcNow;
-        if (!force && nowUtc < IdentityAuthData.NextSessionIdentityReconcileUtc)
+        if (!force && nowUtc < _nextSessionIdentityReconcileUtc)
         {
             return;
         }
 
-        IdentityAuthData.NextSessionIdentityReconcileUtc = nowUtc.Add(ServerSessionIdentityReconcileInterval);
+        _nextSessionIdentityReconcileUtc = nowUtc.Add(ServerSessionIdentityReconcileInterval);
         var peers = znet.GetPeers();
         if (peers == null)
         {

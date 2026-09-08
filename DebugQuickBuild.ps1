@@ -8,8 +8,8 @@ $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectFile = Join-Path $projectRoot "StuWard.csproj"
 
 Write-Host "[DebugQuickBuild] Building and deploying STUWard (Debug)..."
-& dotnet msbuild $projectFile "/t:DeployLocal" "/p:Configuration=Debug" "/p:Platform=AnyCPU"
+& dotnet build $projectFile "-c" "Debug" "-p:DeployToGame=true"
 if ($LASTEXITCODE -ne 0)
 {
-    throw "[DebugQuickBuild] DeployLocal failed with exit code $LASTEXITCODE."
+    throw "[DebugQuickBuild] Debug build or game deployment failed with exit code $LASTEXITCODE."
 }

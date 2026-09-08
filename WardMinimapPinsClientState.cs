@@ -315,6 +315,56 @@ internal static partial class WardMinimapPinsManager
         ClearPendingRemoteSnapshotBootstrapRequest();
     }
 
+    private static void ReplaceLocalSnapshot(IReadOnlyList<WardMinimapSnapshotEntry> snapshotEntries)
+    {
+        LocalSnapshot.Clear();
+        UpsertLocalSnapshotEntries(snapshotEntries);
+    }
+
+    private static void UpsertLocalSnapshotEntries(IReadOnlyList<WardMinimapSnapshotEntry> snapshotEntries)
+    {
+        for (var index = 0; index < snapshotEntries.Count; index++)
+        {
+            var entry = snapshotEntries[index];
+            LocalSnapshot[entry.ZdoId] = entry;
+        }
+    }
+
+    private static void ApplyLocalSnapshotDelta(IReadOnlyList<WardMinimapSnapshotEntry> snapshotEntries, IReadOnlyList<ZDOID> removedWardIds)
+    {
+        for (var index = 0; index < removedWardIds.Count; index++)
+        {
+            LocalSnapshot.Remove(removedWardIds[index]);
+        }
+
+        UpsertLocalSnapshotEntries(snapshotEntries);
+    }
+
+    private static void QueueForceRefresh()
+    {
+        if (_pendingForceRefresh)
+        {
+            return;
+        }
+
+        _pendingForceRefresh = true;
+    }
+
+    private static void QueueRemoteSnapshotBootstrapRequest()
+    {
+        _snapshotState = ClientSnapshotState.AwaitingFullSnapshot;
+    }
+
+    private static void ClearPendingRemoteSnapshotBootstrapRequest()
+    {
+        _snapshotState = ClientSnapshotState.Ready;
+    }
+
+    private static void ClearPendingForceRefresh()
+    {
+        _pendingForceRefresh = false;
+    }
+
     private static void MarkLocalSnapshotTooLarge(int viewerRevisionToken, int visibleWardCount)
     {
         _pendingSnapshotRequestId = 0;

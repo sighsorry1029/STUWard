@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.10
+
+- Reduced redundant minimap work by reusing snapshot keys during pin cleanup and skipping server snapshot construction when the viewer revision has not changed.
+- Simplified repeated Guilds cache and blocked-item checks while preserving authoritative guild results, short retries for clients still synchronizing, and item-use and attack behavior.
+- Ward Settings now stops its callbacks and releases its separate UI root when the plugin shuts down. Cleanup of an old or duplicate controller no longer releases the active controller's input block, and service shutdown failures no longer skip Harmony cleanup.
+- Consolidated minimap snapshot state handling and Clan map refresh calls, and removed an unnecessary ownership identity state wrapper.
+- Added `DeployToGame=true` support for Debug builds, copying only the final merged mod DLL to the local game's plugin folder. `DebugQuickBuild.ps1` now uses this build path.
+- Existing ward data, configuration keys, and RPC payload formats are unchanged; no migration from 1.3.9 is required. Servers and clients must update together.
+
 ## 1.3.9
 
 - Grouped `STUWard.yml`, `STUWard.RecentPlayers.yml`, and the generated `STUWard.WardCountReport.yml` under `BepInEx/config/STUWard`, and removed the Ward Settings folder button now that the files use a conventional config path.

@@ -20,15 +20,22 @@ internal static class WardPluginBootstrap
 
     internal static void Shutdown()
     {
-        PrefabManager.OnVanillaPrefabsAvailable -= RegisterStuWardPiece;
-        DoorRpcUseDoorPatch.Reset();
-        WardPluginConfigBindings.UnbindAll();
-        WardItemPrefabPolicy.Shutdown();
-        WardRecentPlayers.Shutdown();
-        ManagedWardConfigFileService.Shutdown();
-        GuildsCompat.TryShutdownHooks();
-        WardGroupCompat.Shutdown();
-        Localizer.Unload();
+        try
+        {
+            WardGuiController.Instance?.Shutdown();
+        }
+        finally
+        {
+            PrefabManager.OnVanillaPrefabsAvailable -= RegisterStuWardPiece;
+            DoorRpcUseDoorPatch.Reset();
+            WardPluginConfigBindings.UnbindAll();
+            WardItemPrefabPolicy.Shutdown();
+            WardRecentPlayers.Shutdown();
+            ManagedWardConfigFileService.Shutdown();
+            GuildsCompat.TryShutdownHooks();
+            WardGroupCompat.Shutdown();
+            Localizer.Unload();
+        }
     }
 
     private static void RegisterStuWardPiece()

@@ -21,7 +21,7 @@ internal sealed class ConfigurationManagerAttributes
 public sealed class Plugin : BaseUnityPlugin
 {
     internal const string ModName = "STUWard";
-    internal const string ModVersion = "1.3.9";
+    internal const string ModVersion = "1.3.10";
     internal const string Author = "sighsorry";
     internal const string ModGuid = $"{Author}.{ModName}";
 
@@ -147,9 +147,15 @@ public sealed class Plugin : BaseUnityPlugin
 
     private void OnDestroy()
     {
-        WardPluginBootstrap.Shutdown();
-        _harmony?.UnpatchSelf();
-        Config.Save();
+        try
+        {
+            WardPluginBootstrap.Shutdown();
+        }
+        finally
+        {
+            _harmony?.UnpatchSelf();
+            Config.Save();
+        }
     }
 
     internal static bool IsWardSettingsShortcutDown()

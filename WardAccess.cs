@@ -578,8 +578,7 @@ internal static class WardAccess
 
     internal static bool TryBlockItemUseAtPlayerOrHoveredTamedCreature(Player? player, ItemDrop.ItemData? item)
     {
-        if (!ShouldBlockConfiguredItemUse(player, item) &&
-            !ShouldBlockConfiguredItemUseAgainstHoveredTamedCreature(player, item))
+        if (!ShouldBlockConfiguredItemUseAtPlayerOrHoveredTamedCreature(player, item))
         {
             return true;
         }
@@ -674,7 +673,7 @@ internal static class WardAccess
 
     internal static bool TryBlockAttack(Player? player, ItemDrop.ItemData? item, ref bool result)
     {
-        if (!ShouldBlockConfiguredItemUse(player, item) && !ShouldBlockConfiguredItemUseAgainstHoveredTamedCreature(player, item))
+        if (!ShouldBlockConfiguredItemUseAtPlayerOrHoveredTamedCreature(player, item))
         {
             return true;
         }
@@ -1114,14 +1113,15 @@ internal static class WardAccess
         return targetPoint.HasValue && ShouldBlock(targetPoint.Value, 0f, player);
     }
 
-    private static bool ShouldBlockConfiguredItemUseAgainstHoveredTamedCreature(Player? player, ItemDrop.ItemData? item)
+    private static bool ShouldBlockConfiguredItemUseAtPlayerOrHoveredTamedCreature(Player? player, ItemDrop.ItemData? item)
     {
         if (player == null || item == null || !HasEnabledManagedWards() || !IsConfiguredBlockedItem(item))
         {
             return false;
         }
 
-        return TryGetHoveredTamedCreaturePoint(player, out var targetPoint) && ShouldBlockConfiguredItemUse(player, item, targetPoint);
+        return ShouldBlock(player.transform.position, 0f, player) ||
+               TryGetHoveredTamedCreaturePoint(player, out var targetPoint) && ShouldBlock(targetPoint, 0f, player);
     }
 
     private static bool IsConfiguredBlockedItem(ItemDrop.ItemData? item)

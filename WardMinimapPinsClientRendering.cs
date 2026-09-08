@@ -20,10 +20,8 @@ internal static partial class WardMinimapPinsManager
         var rangeIcon = showActiveRanges ? GetRepresentativeRangeSprite() : null;
         EnsureCustomPinTypes(minimap, wardIcon, rangeIcon);
 
-        var seenWardIds = new HashSet<ZDOID>();
         foreach (var entry in LocalSnapshot.Values)
         {
-            seenWardIds.Add(entry.ZdoId);
             if (showIconPins)
             {
                 UpsertIconPin(minimap, entry, wardIcon);
@@ -43,8 +41,8 @@ internal static partial class WardMinimapPinsManager
             }
         }
 
-        RemoveMissingPins(minimap, IconPins, seenWardIds);
-        RemoveMissingPins(minimap, ActiveRangePins, seenWardIds);
+        RemoveMissingPins(minimap, IconPins);
+        RemoveMissingPins(minimap, ActiveRangePins);
     }
 
     private static void UpsertIconPin(Minimap minimap, WardMinimapSnapshotEntry entry, Sprite? wardIcon)
@@ -163,12 +161,12 @@ internal static partial class WardMinimapPinsManager
         return pin != null && minimap.m_pins != null && minimap.m_pins.Contains(pin);
     }
 
-    private static void RemoveMissingPins(Minimap minimap, Dictionary<ZDOID, Minimap.PinData> pins, HashSet<ZDOID> seenWardIds)
+    private static void RemoveMissingPins(Minimap minimap, Dictionary<ZDOID, Minimap.PinData> pins)
     {
         List<ZDOID>? missingWardIds = null;
         foreach (var trackedPin in pins)
         {
-            if (seenWardIds.Contains(trackedPin.Key))
+            if (LocalSnapshot.ContainsKey(trackedPin.Key))
             {
                 continue;
             }
@@ -224,56 +222,6 @@ internal static partial class WardMinimapPinsManager
         _pendingSnapshotRequestId = 0;
         LocalSnapshot.Clear();
         QueueRemoteSnapshotBootstrapRequest();
-    }
-
-    private static void ReplaceLocalSnapshot(IReadOnlyList<WardMinimapSnapshotEntry> snapshotEntries)
-    {
-        LocalSnapshot.Clear();
-        UpsertLocalSnapshotEntries(snapshotEntries);
-    }
-
-    private static void UpsertLocalSnapshotEntries(IReadOnlyList<WardMinimapSnapshotEntry> snapshotEntries)
-    {
-        for (var index = 0; index < snapshotEntries.Count; index++)
-        {
-            var entry = snapshotEntries[index];
-            LocalSnapshot[entry.ZdoId] = entry;
-        }
-    }
-
-    private static void ApplyLocalSnapshotDelta(IReadOnlyList<WardMinimapSnapshotEntry> snapshotEntries, IReadOnlyList<ZDOID> removedWardIds)
-    {
-        for (var index = 0; index < removedWardIds.Count; index++)
-        {
-            LocalSnapshot.Remove(removedWardIds[index]);
-        }
-
-        UpsertLocalSnapshotEntries(snapshotEntries);
-    }
-
-    private static void QueueForceRefresh()
-    {
-        if (_pendingForceRefresh)
-        {
-            return;
-        }
-
-        _pendingForceRefresh = true;
-    }
-
-    private static void QueueRemoteSnapshotBootstrapRequest()
-    {
-        _snapshotState = ClientSnapshotState.AwaitingFullSnapshot;
-    }
-
-    private static void ClearPendingRemoteSnapshotBootstrapRequest()
-    {
-        _snapshotState = ClientSnapshotState.Ready;
-    }
-
-    private static void ClearPendingForceRefresh()
-    {
-        _pendingForceRefresh = false;
     }
 
     private static void EnsureCustomPinTypes(Minimap minimap, Sprite? wardIcon, Sprite? rangeIcon)

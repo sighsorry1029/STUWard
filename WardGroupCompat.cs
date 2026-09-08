@@ -580,8 +580,7 @@ internal static class WardGroupCompat
         {
             GuildsCompat.RefreshAllWardGuildProjections(liveDisplayRefresh: true);
             ManagedWardPresenceService.Invalidate();
-            WardMinimapVisibilityIndex.InvalidateAll();
-            WardMinimapPinsManager.NotifyWardDataMayHaveChanged(refreshImmediatelyIfVisible: true);
+            ManagedWardMapStateService.InvalidateProjection(liveDisplayRefresh: true);
         }
 
         private static void ObserveLocalSnapshot()
@@ -616,8 +615,7 @@ internal static class WardGroupCompat
         {
             ManagedWardPlacementPreviewService.Invalidate();
             ManagedWardPresenceService.Invalidate();
-            WardMinimapVisibilityIndex.InvalidateAll();
-            WardMinimapPinsManager.NotifyWardDataMayHaveChanged(refreshImmediatelyIfVisible: true);
+            ManagedWardMapStateService.InvalidateProjection(liveDisplayRefresh: true);
             WardGuiController.Instance?.RefreshGroupMetadata();
         }
 

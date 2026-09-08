@@ -17,6 +17,8 @@
         <Nullable>enable</Nullable>
         <RuntimeIdentifiers>win</RuntimeIdentifiers>
         <DeployLocal Condition="'$(DeployLocal)' == ''">false</DeployLocal>
+        <DeployToGame Condition="'$(DeployToGame)' == ''">false</DeployToGame>
+        <GamePluginDeployPath Condition="'$(GamePluginDeployPath)' == ''">C:\Program Files (x86)\Steam\steamapps\common\Valheim\BepInEx\plugins</GamePluginDeployPath>
         <RestoreSources>$(RestoreSources);$(MSBuildProjectDirectory)\LocalPackages</RestoreSources>
     </PropertyGroup>
     <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
@@ -599,6 +601,11 @@
             <VersionString>$(Major).$(Minor).$(Patch)</VersionString>
             <PackageDir>$(ProjectDir)\Thunderstore\$(PackageName)</PackageDir>
         </PropertyGroup>
+    </Target>
+    <Target Name="DeployDebugToGame" AfterTargets="GetAssemblyVersion" Condition="'$(Configuration)' == 'Debug' And '$(DeployToGame)' == 'true'">
+        <MakeDir Directories="$(GamePluginDeployPath)"/>
+        <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(GamePluginDeployPath)" OverwriteReadOnlyFiles="true"/>
+        <Message Text="Deployed final Debug mod DLL to $(GamePluginDeployPath)\$(TargetFileName)" Importance="high"/>
     </Target>
     <Target Name="DeployLocal" DependsOnTargets="Build;GetAssemblyVersion;CopyOutputDLL;CopyPluginRuntimeContent"/>
     <Target Name="DeployLocalAfterBuild" AfterTargets="GetAssemblyVersion" Condition=" '$(DeployLocal)' == 'true' Or '$(DeployLocal)' == 'True' ">

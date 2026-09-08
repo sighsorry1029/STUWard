@@ -246,6 +246,13 @@ internal static partial class WardMinimapPinsManager
         canSeeAllWards = playerId != 0L && WardAdminDebugAccess.IsPlayerAdminDebugController(playerId);
         var playerGroup = WardGroupCompat.GetPlayerGroupIdentity(playerId);
         viewerRevisionToken = WardMinimapVisibilityIndex.GetViewerRevisionToken(playerId, playerGroup, canSeeAllWards);
+        var syncState = GetOrCreateServerViewerSyncState(receiverUid);
+        if ((syncState.HasSentFullSnapshot || syncState.SnapshotTooLarge) &&
+            syncState.ViewerRevisionToken == viewerRevisionToken)
+        {
+            return false;
+        }
+
         var snapshot = WardMinimapViewerSnapshotBuilder.Build(
             playerId,
             playerGroup,
@@ -257,13 +264,6 @@ internal static partial class WardMinimapPinsManager
         candidateWardCount = snapshot.CandidateWardCount;
         visibleWardCount = snapshot.VisibleWardCount;
         enabledWardCount = snapshot.EnabledWardCount;
-
-        var syncState = GetOrCreateServerViewerSyncState(receiverUid);
-        if ((syncState.HasSentFullSnapshot || syncState.SnapshotTooLarge) &&
-            syncState.ViewerRevisionToken == viewerRevisionToken)
-        {
-            return false;
-        }
 
         if (snapshot.VisibleWardCount > WardMinimapSnapshotProtocol.MaxEntryCount)
         {

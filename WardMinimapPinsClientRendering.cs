@@ -94,7 +94,7 @@ internal static partial class WardMinimapPinsManager
 
         if (pinChanged)
         {
-            minimap.m_pinUpdateRequired = true;
+            minimap.GetPinUpdateRequired() = true;
         }
     }
 
@@ -152,13 +152,13 @@ internal static partial class WardMinimapPinsManager
 
         if (pinChanged)
         {
-            minimap.m_pinUpdateRequired = true;
+            minimap.GetPinUpdateRequired() = true;
         }
     }
 
     private static bool IsTrackedPinOnMinimap(Minimap minimap, Minimap.PinData pin)
     {
-        return pin != null && minimap.m_pins != null && minimap.m_pins.Contains(pin);
+        return pin != null && minimap.GetPins() != null && minimap.GetPins().Contains(pin);
     }
 
     private static void RemoveMissingPins(Minimap minimap, Dictionary<ZDOID, Minimap.PinData> pins)
@@ -226,7 +226,7 @@ internal static partial class WardMinimapPinsManager
 
     private static void EnsureCustomPinTypes(Minimap minimap, Sprite? wardIcon, Sprite? rangeIcon)
     {
-        if (minimap.m_visibleIconTypes == null || minimap.m_icons == null)
+        if (minimap.GetVisibleIcons() == null || minimap.m_icons == null)
         {
             return;
         }
@@ -249,17 +249,17 @@ internal static partial class WardMinimapPinsManager
 
     private static Minimap.PinType AddCustomPinType(Minimap minimap, Sprite? icon)
     {
-        var pinTypeIndex = minimap.m_visibleIconTypes.Length;
+        var pinTypeIndex = minimap.GetVisibleIcons().Length;
         var pinType = (Minimap.PinType)pinTypeIndex;
         ExpandVisibleIconTypes(minimap, pinTypeIndex + 1);
-        minimap.m_visibleIconTypes[pinTypeIndex] = true;
+        minimap.GetVisibleIcons()[pinTypeIndex] = true;
         UpdateCustomPinTypeSprite(minimap, pinType, icon);
         return pinType;
     }
 
     private static void ExpandVisibleIconTypes(Minimap minimap, int requiredLength)
     {
-        var visibleIconTypes = minimap.m_visibleIconTypes;
+        var visibleIconTypes = minimap.GetVisibleIcons();
         if (visibleIconTypes.Length >= requiredLength)
         {
             return;
@@ -272,7 +272,7 @@ internal static partial class WardMinimapPinsManager
             expanded[index] = true;
         }
 
-        minimap.m_visibleIconTypes = expanded;
+        minimap.GetVisibleIcons() = expanded;
     }
 
     private static void UpdateCustomPinTypeSprite(Minimap minimap, Minimap.PinType pinType, Sprite? icon)
@@ -310,9 +310,9 @@ internal static partial class WardMinimapPinsManager
     private static bool IsValidPinType(Minimap minimap, Minimap.PinType pinType)
     {
         var pinTypeIndex = (int)pinType;
-        return minimap.m_visibleIconTypes != null &&
+        return minimap.GetVisibleIcons() != null &&
                pinTypeIndex >= 0 &&
-               pinTypeIndex < minimap.m_visibleIconTypes.Length;
+               pinTypeIndex < minimap.GetVisibleIcons().Length;
     }
 
     private static bool HasSpriteData(Minimap minimap, Minimap.PinType pinType)

@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
     <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')"/>
     <Import Project="environment.props" Condition="Exists('environment.props')"/>
@@ -61,7 +61,6 @@
                 <GamePath Condition="!Exists('$(GamePath)')">D:\SteamLibrary\steamapps\common\Valheim</GamePath>
                 <BepInExPath Condition="!Exists('$(BepInExPath)')AND Exists('$(GamePath)')">$(GamePath)\BepInEx</BepInExPath>
                 <CorlibPath Condition="!Exists('$(CorlibPath)') AND Exists('$(GamePath)')">$(GamePath)\valheim_Data\Managed</CorlibPath>
-                <PublicizedAssembliesPath Condition="!Exists('$(PublicizedAssembliesPath)') AND Exists('$(GamePath)')">$(GamePath)\valheim_Data\Managed\publicized_assemblies</PublicizedAssembliesPath>
                 <AfterTargets Condition="'$(AfterTargets)' == ''">ILRepacker</AfterTargets>
             </PropertyGroup>
         </When>
@@ -69,40 +68,37 @@
     <PropertyGroup>
         <BepInExPath Condition="'$(BepInExPath)' == '' AND Exists('$(GamePath)\BepInEx')">$(GamePath)\BepInEx</BepInExPath>
         <CorlibPath Condition="'$(CorlibPath)' == '' AND Exists('$(GamePath)\valheim_Data\Managed')">$(GamePath)\valheim_Data\Managed</CorlibPath>
-        <PublicizedAssembliesPath Condition="'$(PublicizedAssembliesPath)' == '' AND Exists('$(GamePath)\valheim_Data\Managed\publicized_assemblies')">$(GamePath)\valheim_Data\Managed\publicized_assemblies</PublicizedAssembliesPath>
-        <JotunnPath Condition="'$(JotunnPath)' == '' AND Exists('$(BepInExPath)\plugins\Jotunn.dll')">$(BepInExPath)\plugins\Jotunn.dll</JotunnPath>
-        <JotunnPath Condition="'$(JotunnPath)' == '' AND Exists('$(BepInExPath)\plugins\Jotunn\Jotunn.dll')">$(BepInExPath)\plugins\Jotunn\Jotunn.dll</JotunnPath>
     </PropertyGroup>
     <ItemGroup>
         <Reference Include="0Harmony">
             <HintPath>$(BepInExPath)\core\0Harmony.dll</HintPath>
         </Reference>
         <Reference Include="Assembly-CSharp">
-          <HintPath>$(PublicizedAssembliesPath)\Assembly-CSharp_publicized.dll</HintPath>
+          <HintPath>$(CorlibPath)\Assembly-CSharp.dll</HintPath>
         </Reference>
         <Reference Include="assembly_googleanalytics">
-          <HintPath>$(PublicizedAssembliesPath)\assembly_googleanalytics_publicized.dll</HintPath>
+          <HintPath>$(CorlibPath)\assembly_googleanalytics.dll</HintPath>
         </Reference>
         <Reference Include="assembly_guiutils">
-            <HintPath>$(PublicizedAssembliesPath)\assembly_guiutils_publicized.dll</HintPath>
+            <HintPath>$(CorlibPath)\assembly_guiutils.dll</HintPath>
         </Reference>
         <Reference Include="assembly_lux">
-          <HintPath>$(PublicizedAssembliesPath)\assembly_lux_publicized.dll</HintPath>
+          <HintPath>$(CorlibPath)\assembly_lux.dll</HintPath>
         </Reference>
         <Reference Include="assembly_postprocessing">
-          <HintPath>$(PublicizedAssembliesPath)\assembly_postprocessing_publicized.dll</HintPath>
+          <HintPath>$(CorlibPath)\assembly_postprocessing.dll</HintPath>
         </Reference>
         <Reference Include="assembly_simplemeshcombine">
-          <HintPath>$(PublicizedAssembliesPath)\assembly_simplemeshcombine_publicized.dll</HintPath>
+          <HintPath>$(CorlibPath)\assembly_simplemeshcombine.dll</HintPath>
         </Reference>
         <Reference Include="assembly_sunshafts">
-          <HintPath>$(PublicizedAssembliesPath)\assembly_sunshafts_publicized.dll</HintPath>
+          <HintPath>$(CorlibPath)\assembly_sunshafts.dll</HintPath>
         </Reference>
         <Reference Include="assembly_utils">
-            <HintPath>$(PublicizedAssembliesPath)\assembly_utils_publicized.dll</HintPath>
+            <HintPath>$(CorlibPath)\assembly_utils.dll</HintPath>
         </Reference>
         <Reference Include="assembly_valheim">
-            <HintPath>$(PublicizedAssembliesPath)\assembly_valheim_publicized.dll</HintPath>
+            <HintPath>$(CorlibPath)\assembly_valheim.dll</HintPath>
         </Reference>
         <Reference Include="BepInEx">
             <HintPath>$(BepInExPath)\core\BepInEx.dll</HintPath>
@@ -121,9 +117,6 @@
         </Reference>
         <Reference Include="HarmonyXInterop">
           <HintPath>$(BepInExPath)\core\HarmonyXInterop.dll</HintPath>
-        </Reference>
-        <Reference Include="Jotunn">
-          <HintPath>$(JotunnPath)</HintPath>
         </Reference>
         <Reference Include="Mono.Cecil">
           <HintPath>$(BepInExPath)\core\Mono.Cecil.dll</HintPath>
@@ -162,7 +155,7 @@
             <HintPath>$(PkgSTUWardServerSync)\lib\net48\ServerSync.dll</HintPath>
         </Reference>
         <Reference Include="SoftReferenceableAssets">
-          <HintPath>$(PublicizedAssembliesPath)\SoftReferenceableAssets_publicized.dll</HintPath>
+          <HintPath>$(CorlibPath)\SoftReferenceableAssets.dll</HintPath>
         </Reference>
         <Reference Include="Splatform">
           <HintPath>$(CorlibPath)\Splatform.dll</HintPath>
@@ -519,6 +512,8 @@
         <Compile Include="WardItemPrefabPolicy.cs"/>
         <Compile Include="WardPermittedSnapshots.cs"/>
         <Compile Include="WardPrivateAreaSafeAccess.cs"/>
+        <Compile Include="WardGameAccess.cs"/>
+        <Compile Include="WardUiResources.cs"/>
         <Compile Include="WardRecentPlayers.cs"/>
         <Compile Include="WardAdminDebugAccess.cs"/>
         <Compile Include="WardUiPatches.cs"/>
@@ -533,6 +528,7 @@
         <Content Include="ILRepack.targets"/>
         <Content Include="LICENSE.txt"/>
         <Content Include="README.md"/>
+        <Content Include="THIRD_PARTY_NOTICES.txt"/>
         <Content Include="Thunderstore\CHANGELOG.md"/>
         <Content Include="Thunderstore\icon.png"/>
         <Content Include="Thunderstore\manifest.json"/>
@@ -554,7 +550,7 @@
           <PrivateAssets>all</PrivateAssets>
           <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
         </PackageReference>
-        <PackageReference Include="STUWardServerSync" Version="1.0.0">
+        <PackageReference Include="STUWardServerSync" Version="1.0.1">
           <GeneratePathProperty>true</GeneratePathProperty>
           <PrivateAssets>all</PrivateAssets>
           <IncludeAssets>compile;build;native;contentfiles;analyzers;buildtransitive</IncludeAssets>
@@ -567,9 +563,7 @@
     <Target Name="ValidateBuildEnvironment" BeforeTargets="ResolveReferences" Condition="'$(DesignTimeBuild)' != 'true'">
         <Error Text="Valheim game directory was not found. Set GamePath in environment.local.props or pass /p:GamePath=..." Condition="'$(GamePath)' == '' Or !Exists('$(GamePath)')"/>
         <Error Text="Valheim managed assemblies directory was not found: $(CorlibPath)" Condition="'$(CorlibPath)' == '' Or !Exists('$(CorlibPath)')"/>
-        <Error Text="Valheim publicized assemblies directory was not found: $(PublicizedAssembliesPath)" Condition="'$(PublicizedAssembliesPath)' == '' Or !Exists('$(PublicizedAssembliesPath)')"/>
         <Error Text="BepInEx directory was not found: $(BepInExPath)" Condition="'$(BepInExPath)' == '' Or !Exists('$(BepInExPath)')"/>
-        <Error Text="Jötunn assembly was not found. Set JotunnPath in environment.local.props or install Jötunn under BepInEx\plugins." Condition="'$(JotunnPath)' == '' Or !Exists('$(JotunnPath)')"/>
         <Error Text="Required reference assembly was not found: %(Reference.HintPath)" Condition="'%(Reference.HintPath)' != '' And !Exists('%(Reference.HintPath)')"/>
     </Target>
     <!-- To modify your build process, add your task inside one of the targets below and uncomment it.
@@ -672,6 +666,7 @@
             <PackageFiles Include="$(TargetDir)$(AssemblyName).dll" Condition="Exists('$(TargetDir)$(AssemblyName).dll')"/>
             <PackageFiles Include="$(ProjectDir)\Thunderstore\CHANGELOG.md" Condition="Exists('$(ProjectDir)\Thunderstore\CHANGELOG.md')"/>
             <PackageFiles Include="$(ProjectDir)\Thunderstore\icon.png" Condition="Exists('$(ProjectDir)\Thunderstore\icon.png')"/>
+            <PackageFiles Include="$(ProjectDir)THIRD_PARTY_NOTICES.txt"/>
         </ItemGroup>
         <MakeDir Directories="$(PackageDir)"/>
         <Copy SourceFiles="@(PackageFiles)"
@@ -683,6 +678,7 @@
         <MakeDir Directories="$(ProjectDir)\Nexus"/>
         <ItemGroup>
             <NexusPackageFiles Include="$(TargetDir)$(AssemblyName).dll" Condition="Exists('$(TargetDir)$(AssemblyName).dll')"/>
+            <NexusPackageFiles Include="$(ProjectDir)THIRD_PARTY_NOTICES.txt"/>
         </ItemGroup>
         <MakeDir Directories="$(PackageDir)"/>
         <Copy SourceFiles="@(NexusPackageFiles)"

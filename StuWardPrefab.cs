@@ -1,6 +1,3 @@
-using Jotunn.Configs;
-using Jotunn.Entities;
-using Jotunn.Managers;
 using LocalizationManager;
 using System;
 using UnityEngine;
@@ -87,52 +84,48 @@ internal sealed class StuWardPlacedHook : MonoBehaviour, IPlaced
 
 internal static class StuWardPrefab
 {
-    private static bool _registered;
+    private static GameObject? _prefabRoot;
+    private static PieceTable? _hammerTable;
     private static GameObject? _stuWardPrefab;
     private static GameObject? _vanillaGuardStonePrefab;
     private static int _vanillaGuardStoneIndex = -1;
     private static Piece.Requirement[]? _defaultStuWardRequirements;
-    internal static void Register()
+    // Called before ZNetScene builds its name/hash lookup. Inactive parent prevents
+    // Awake from allocating a ZDO or destroying ZNetView on the prefab clone.
+    internal static void Register(ZNetScene scene)
     {
-        if (_registered || PieceManager.Instance.GetPiece(StuWardArea.PrefabName) != null)
+        var existing = scene.m_prefabs.Find(prefab => prefab != null && prefab.name == StuWardArea.PrefabName);
+        if (existing != null && existing != _stuWardPrefab)
+            throw new InvalidOperationException("Another prefab is already registered as " + StuWardArea.PrefabName);
+
+        if (_stuWardPrefab != null)
         {
-            _registered = true;
+            if (existing == null) scene.m_prefabs.Add(_stuWardPrefab);
+            ApplyRecipeSettings();
             return;
         }
 
-        if (PrefabManager.Instance.GetPrefab(StuWardArea.BasePrefabName) == null)
+        var source = scene.m_prefabs.Find(prefab => prefab != null && prefab.name == StuWardArea.BasePrefabName);
+        if (source == null) throw new InvalidOperationException("Valheim guard_stone prefab is unavailable.");
+        _prefabRoot = new GameObject("STUWard Prefabs");
+        _prefabRoot.SetActive(false);
+        UnityEngine.Object.DontDestroyOnLoad(_prefabRoot);
+        var prefab = UnityEngine.Object.Instantiate(source, _prefabRoot.transform, false);
+        prefab.name = StuWardArea.PrefabName;
+        prefab.SetActive(true);
+        var piece = prefab.GetComponent<Piece>();
+        var area = prefab.GetComponent<PrivateArea>();
+        if (piece == null || area == null)
         {
-            return;
+            Shutdown();
+            throw new InvalidOperationException("guard_stone is missing Piece or PrivateArea.");
         }
+        prefab.AddComponent<StuWardArea>();
+        prefab.AddComponent<StuWardPlacedHook>();
 
-        var pieceConfig = new PieceConfig
-        {
-            PieceTable = "Hammer",
-            Name = StuWardArea.DisplayName,
-            Description = StuWardArea.Description
-        };
-
-        var customPiece = new CustomPiece(StuWardArea.PrefabName, StuWardArea.BasePrefabName, pieceConfig);
-        var prefab = customPiece.PiecePrefab;
-        var piece = customPiece.Piece;
-        var area = prefab != null ? prefab.GetComponent<PrivateArea>() : null;
-
-        if (prefab == null || piece == null || area == null)
-        {
-            Plugin.Log.LogWarning("Failed to create STUWard clone prefab from guard_stone.");
-            return;
-        }
-
-        if (prefab.GetComponent<StuWardArea>() == null)
-        {
-            prefab.AddComponent<StuWardArea>();
-        }
-
-        if (prefab.GetComponent<StuWardPlacedHook>() == null)
-        {
-            prefab.AddComponent<StuWardPlacedHook>();
-        }
-
+        // Preserve the defaults formerly applied by PieceConfig.
+        piece.m_enabled = true;
+        piece.m_allowedInDungeons = false;
         piece.m_name = StuWardArea.DisplayName;
         piece.m_description = StuWardArea.Description;
         piece.m_resources = CloneRequirements(piece.m_resources);
@@ -146,17 +139,36 @@ internal static class StuWardPrefab
         _stuWardPrefab = prefab;
         _defaultStuWardRequirements = CloneRequirements(piece.m_resources);
 
-        PieceManager.Instance.AddPiece(customPiece);
-        _registered = PieceManager.Instance.GetPiece(StuWardArea.PrefabName) != null;
+        scene.m_prefabs.Add(prefab);
+        ApplyRecipeSettings();
+        Plugin.Log.LogInfo("Registered STUWard prefab without Jotunn.");
+    }
 
-        if (_registered)
+    internal static void Shutdown()
+    {
+        if (_hammerTable != null)
         {
-            Plugin.Log.LogInfo("Registered STUWard clone piece.");
+            _hammerTable.m_pieces.Remove(_stuWardPrefab);
+            if (_vanillaGuardStonePrefab != null && !_hammerTable.m_pieces.Contains(_vanillaGuardStonePrefab))
+                _hammerTable.m_pieces.Insert(Mathf.Clamp(_vanillaGuardStoneIndex, 0, _hammerTable.m_pieces.Count), _vanillaGuardStonePrefab);
         }
+        _hammerTable = null;
+        _stuWardPrefab = null;
+        _vanillaGuardStonePrefab = null;
+        _vanillaGuardStoneIndex = -1;
+        _defaultStuWardRequirements = null;
+        if (_prefabRoot != null) UnityEngine.Object.Destroy(_prefabRoot);
+        _prefabRoot = null;
     }
 
     internal static void ApplyRecipeSettings()
     {
+        var table = GetHammerPieceTable();
+        if (table != null && _stuWardPrefab != null)
+        {
+            _hammerTable = table;
+            if (!table.m_pieces.Contains(_stuWardPrefab)) table.m_pieces.Add(_stuWardPrefab);
+        }
         ApplyVanillaGuardStoneRecipeSetting();
         ApplyStuWardRecipeSetting();
     }
@@ -169,22 +181,7 @@ internal static class StuWardPrefab
             return piece.m_icon;
         }
 
-        var registeredPiece = PieceManager.Instance.GetPiece(StuWardArea.PrefabName);
-        if (registeredPiece?.Piece != null && registeredPiece.Piece.m_icon != null)
-        {
-            return registeredPiece.Piece.m_icon;
-        }
-
-        var prefab = registeredPiece?.PiecePrefab ??
-                     PrefabManager.Instance.GetPrefab(StuWardArea.PrefabName) ??
-                     PrefabManager.Instance.GetPrefab(StuWardArea.BasePrefabName);
-        var prefabIcon = prefab != null ? prefab.GetComponent<Piece>()?.m_icon : null;
-        if (prefabIcon != null)
-        {
-            return prefabIcon;
-        }
-
-        return null;
+        return FindPrefab(StuWardArea.BasePrefabName)?.GetComponent<Piece>()?.m_icon;
     }
 
     internal static Piece.Requirement[] GetCurrentStuWardRequirements()
@@ -200,14 +197,14 @@ internal static class StuWardPrefab
             return piece;
         }
 
-        return PieceManager.Instance.GetPiece(StuWardArea.PrefabName)?.Piece;
+        return null;
     }
 
     private static void ApplyVanillaGuardStoneRecipeSetting()
     {
         var pieceTable = GetHammerPieceTable();
         var pieces = pieceTable?.m_pieces;
-        var guardStonePrefab = PrefabManager.Instance.GetPrefab(StuWardArea.BasePrefabName);
+        var guardStonePrefab = FindPrefab(StuWardArea.BasePrefabName);
         if (pieceTable == null || pieces == null || guardStonePrefab == null)
         {
             return;
@@ -271,7 +268,7 @@ internal static class StuWardPrefab
 
     private static PieceTable? GetHammerPieceTable()
     {
-        var hammerPrefab = PrefabManager.Instance.GetPrefab("Hammer");
+        var hammerPrefab = FindPrefab("Hammer");
         var itemDrop = hammerPrefab != null ? hammerPrefab.GetComponent<ItemDrop>() : null;
         return itemDrop?.m_itemData?.m_shared?.m_buildPieces;
     }
@@ -384,7 +381,13 @@ internal static class StuWardPrefab
             return itemPrefab;
         }
 
-        return PrefabManager.Instance.GetPrefab(prefabName);
+        return FindPrefab(prefabName);
+    }
+
+    private static GameObject? FindPrefab(string name)
+    {
+        if (name == StuWardArea.PrefabName && _stuWardPrefab != null) return _stuWardPrefab;
+        return ObjectDB.instance?.GetItemPrefab(name) ?? ZNetScene.instance?.GetPrefab(name);
     }
 
     private static bool TryParseBool(string value, out bool result)
@@ -410,7 +413,7 @@ internal static class StuWardPrefab
     }
 }
 
-[HarmonyPatch(typeof(ObjectDB), nameof(ObjectDB.Awake))]
+[HarmonyPatch(typeof(ObjectDB), "Awake")]
 internal static class ObjectDBAwakePatch
 {
     private static void Postfix()
@@ -428,4 +431,17 @@ internal static class ObjectDBCopyOtherDbPatch
         Localizer.ReloadCurrentLanguageIfAvailable();
         StuWardPrefab.ApplyRecipeSettings();
     }
+}
+
+[HarmonyPatch(typeof(ZNetScene), "Awake")]
+internal static class StuWardRegisterPrefabPatch
+{
+    private static void Prefix(ZNetScene __instance) => StuWardPrefab.Register(__instance);
+    private static void Postfix() => StuWardPrefab.ApplyRecipeSettings();
+}
+
+[HarmonyPatch(typeof(ZNetScene), "OnDestroy")]
+internal static class StuWardReleasePrefabPatch
+{
+    private static void Postfix() => StuWardPrefab.Shutdown();
 }

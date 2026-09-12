@@ -711,9 +711,17 @@ internal static partial class WardOwnership
 
 }
 
-[HarmonyPatch(typeof(ZDOMan), nameof(ZDOMan.Load))]
+[HarmonyPatch]
 internal static class ZdoManLoadWardOwnershipPatch
 {
+    private static IEnumerable<System.Reflection.MethodBase> TargetMethods()
+    {
+        // 1.0 has two native loaders. Both must finish before persisted wards
+        // can be distinguished from new placements; do not replay refunds.
+        yield return AccessTools.DeclaredMethod(typeof(ZDOMan), nameof(ZDOMan.Load));
+        yield return AccessTools.DeclaredMethod(typeof(ZDOMan), nameof(ZDOMan.LoadChunks));
+    }
+
     private static void Postfix(ZDOMan __instance)
     {
         WardOwnership.OnAuthoritativeWorldZdosLoaded(__instance);
@@ -729,7 +737,7 @@ internal static class ZNetAwakeWardOwnershipPatch
     }
 }
 
-[HarmonyPatch(typeof(ZNet), nameof(ZNet.RPC_PeerInfo))]
+[HarmonyPatch(typeof(ZNet), "RPC_PeerInfo")]
 internal static class ZNetRpcPeerInfoWardOwnershipPatch
 {
     private static void Postfix(ZNet __instance, ZRpc rpc)
@@ -743,7 +751,7 @@ internal static class ZNetRpcPeerInfoWardOwnershipPatch
     }
 }
 
-[HarmonyPatch(typeof(ZNet), nameof(ZNet.RPC_CharacterID))]
+[HarmonyPatch(typeof(ZNet), "RPC_CharacterID")]
 internal static class ZNetRpcCharacterIdWardOwnershipPatch
 {
     private static void Postfix(ZNet __instance, ZRpc rpc, ZDOID characterID)

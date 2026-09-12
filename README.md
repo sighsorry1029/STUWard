@@ -1,5 +1,7 @@
 # STU Ward
 
+The current source targets Valheim **1.0.7** and BepInExPack **5.4.2350**. Jotunn is no longer required by STUWard. Guilds and Clan remain optional integrations; other installed mods may still require Jotunn.
+
 Simple, Tidy, and Unique Ward for Valheim servers. <br>
 It adds a clone of vanilla ward but with more server-side features such as diverse protections, permission control, Guilds/Clan integration, ward count limits, and compatibility handling for common utility mods.
 <br>

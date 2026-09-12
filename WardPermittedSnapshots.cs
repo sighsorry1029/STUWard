@@ -519,7 +519,7 @@ internal static class WardPermittedSnapshots
     }
 }
 
-[HarmonyPatch(typeof(PrivateArea), nameof(PrivateArea.AddPermitted))]
+[HarmonyPatch(typeof(PrivateArea), "AddPermitted")]
 internal static class PrivateAreaAddPermittedSnapshotPatch
 {
     private static void Postfix(PrivateArea __instance, long playerID)
@@ -537,7 +537,7 @@ internal static class PrivateAreaAddPermittedSnapshotPatch
     }
 }
 
-[HarmonyPatch(typeof(PrivateArea), nameof(PrivateArea.RemovePermitted))]
+[HarmonyPatch(typeof(PrivateArea), "RemovePermitted")]
 internal static class PrivateAreaRemovePermittedSnapshotPatch
 {
     private static void Postfix(PrivateArea __instance, long playerID)

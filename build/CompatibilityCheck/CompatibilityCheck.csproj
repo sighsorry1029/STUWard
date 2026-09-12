@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <BepInExCorePath Condition="'$(BepInExCorePath)' == ''">C:\Program Files (x86)\Steam\steamapps\common\Valheim\BepInEx\core</BepInExCorePath>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="0Harmony" HintPath="$(BepInExCorePath)\0Harmony.dll" />
+    <Reference Include="Mono.Cecil" HintPath="$(BepInExCorePath)\Mono.Cecil.dll" />
+  </ItemGroup>
+</Project>

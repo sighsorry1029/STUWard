@@ -605,7 +605,7 @@ internal static class WardAccess
             return false;
         }
 
-        var inventoryItems = inventory.m_inventory;
+        var inventoryItems = inventory.GetAllItems();
         if (inventoryItems == null || inventoryItems.Count == 0)
         {
             return false;
@@ -1028,7 +1028,7 @@ internal static class WardAccess
             return zdoCreator;
         }
 
-        var piece = area?.m_piece != null ? area.m_piece : area?.GetComponent<Piece>();
+        var piece = area?.GetWardPiece() != null ? area.GetWardPiece() : area?.GetComponent<Piece>();
         return piece != null ? piece.GetCreator() : 0L;
     }
 
@@ -1142,7 +1142,7 @@ internal static class WardAccess
             return false;
         }
 
-        var hoveringCreature = player.m_hoveringCreature;
+        var hoveringCreature = player.GetHoverCreature();
         if (hoveringCreature != null && hoveringCreature.IsTamed())
         {
             targetPoint = hoveringCreature.transform.position;
@@ -1320,7 +1320,7 @@ internal static class WardAccess
         AllWardIndex.Clear();
         EnabledWardIndex.Clear();
 
-        var allAreas = PrivateArea.m_allAreas;
+        var allAreas = WardGameAccess.GetAllAreas();
         if (allAreas == null)
         {
             return;

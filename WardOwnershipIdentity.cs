@@ -484,7 +484,7 @@ internal static partial class WardOwnership
 
     private static ZNet.PlayerInfo? FindPlayerInfo(long playerId)
     {
-        var players = ZNet.instance?.m_players;
+        var players = ZNet.instance?.GetPlayerList();
         if (players == null)
         {
             return null;
@@ -510,7 +510,7 @@ internal static partial class WardOwnership
             return null;
         }
 
-        var players = ZNet.instance?.m_players;
+        var players = ZNet.instance?.GetPlayerList();
         if (players == null)
         {
             return null;
@@ -535,7 +535,7 @@ internal static partial class WardOwnership
             return null;
         }
 
-        var players = ZNet.instance?.m_players;
+        var players = ZNet.instance?.GetPlayerList();
         if (players == null)
         {
             return null;
@@ -601,7 +601,7 @@ internal static partial class WardOwnership
         try
         {
             var platformUserId = (int)ZNet.m_onlineBackend == 0
-                ? new PlatformUserID(ZNet.instance.m_steamPlatform, peer.m_socket.GetHostName())
+                ? new PlatformUserID(ZNet.instance.GetSteamPlatform(), peer.m_socket.GetHostName())
                 : new PlatformUserID(peer.m_socket.GetHostName());
             return NormalizeAccountId(platformUserId.m_userID.ToString());
         }

@@ -30,7 +30,7 @@ internal static class WardPrivateAreaSafeAccess
             return null;
         }
 
-        return area.m_nview != null ? area.m_nview : area.GetComponent<ZNetView>();
+        return area.GetWardView() != null ? area.GetWardView() : area.GetComponent<ZNetView>();
     }
 
     internal static ZDO? GetZdo(PrivateArea? area)

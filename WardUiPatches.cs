@@ -88,7 +88,7 @@ internal static class ManagedWardLifecycle
     }
 }
 
-[HarmonyPatch(typeof(PrivateArea), nameof(PrivateArea.Awake))]
+[HarmonyPatch(typeof(PrivateArea), "Awake")]
 internal static class PrivateAreaAwakePatch
 {
     private static void Postfix(PrivateArea __instance)
@@ -132,7 +132,7 @@ internal static class PrivateAreaAwakePatch
     }
 }
 
-[HarmonyPatch(typeof(PrivateArea), nameof(PrivateArea.OnDestroy))]
+[HarmonyPatch(typeof(PrivateArea), "OnDestroy")]
 internal static class PrivateAreaOnDestroyPatch
 {
     private static void Prefix(PrivateArea __instance)
@@ -141,7 +141,7 @@ internal static class PrivateAreaOnDestroyPatch
     }
 }
 
-[HarmonyPatch(typeof(PrivateArea), nameof(PrivateArea.UpdateStatus))]
+[HarmonyPatch(typeof(PrivateArea), "UpdateStatus")]
 internal static class PrivateAreaUpdateStatusPatch
 {
     private static void Postfix(PrivateArea __instance)
@@ -698,19 +698,17 @@ internal static class ManagedWardHoverTextService
             return true;
         }
 
-        var lines = CollectHoverTextLines(originalText, out var actionLineIndex);
+        var lines = CollectHoverTextLines(originalText);
         if (lines.Count < 2)
         {
             return false;
         }
 
-        // Vanilla adds an opt-in/opt-out action for every non-owner looking at an
-        // inactive ward. Managed wards no longer support self-registration, so
-        // remove the vanilla action before adding the trusted-only control action.
-        if (actionLineIndex >= 0)
-        {
-            lines.RemoveAt(actionLineIndex);
-        }
+        // Replace only PrivateArea's own actions. Removing every bracketed line
+        // would discard interaction hints contributed by unrelated mods. Remove
+        // all matching ward actions so an earlier postfix cannot leave a duplicate.
+        var vanillaActionLines = GetVanillaWardActionLines();
+        lines.RemoveAll(line => IsAnyExactLine(originalText, line, vanillaActionLines));
 
         if (guildLine != null)
         {
@@ -735,10 +733,9 @@ internal static class ManagedWardHoverTextService
         return true;
     }
 
-    private static List<HoverTextLine> CollectHoverTextLines(string text, out int actionLineIndex)
+    private static List<HoverTextLine> CollectHoverTextLines(string text)
     {
         var lines = new List<HoverTextLine>(4);
-        actionLineIndex = -1;
         var lineStart = 0;
 
         while (lineStart <= text.Length)
@@ -750,11 +747,6 @@ internal static class ManagedWardHoverTextService
             }
 
             var lineLength = lineEnd - lineStart;
-            if (actionLineIndex < 0 && lineLength > 0 && text[lineStart] == '[')
-            {
-                actionLineIndex = lines.Count;
-            }
-
             lines.Add(new HoverTextLine(lineStart, lineLength));
             if (lineEnd >= text.Length)
             {
@@ -765,6 +757,45 @@ internal static class ManagedWardHoverTextService
         }
 
         return lines;
+    }
+
+    private static string[] GetVanillaWardActionLines()
+    {
+        return
+        [
+            LocalizePrivateAreaAction("$piece_guardstone_activate"),
+            LocalizePrivateAreaAction("$piece_guardstone_deactivate"),
+            LocalizePrivateAreaAction("$piece_guardstone_add"),
+            LocalizePrivateAreaAction("$piece_guardstone_remove")
+        ];
+    }
+
+    private static string LocalizePrivateAreaAction(string token)
+    {
+        return Localization.instance.Localize($"[<color=yellow><b>$KEY_Use</b></color>] {token}");
+    }
+
+    private static bool IsAnyExactLine(
+        string source,
+        HoverTextLine line,
+        IReadOnlyList<string> candidates)
+    {
+        if (line.IsInserted)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < candidates.Count; index++)
+        {
+            var candidate = candidates[index];
+            if (candidate.Length == line.Length &&
+                string.CompareOrdinal(source, line.Start, candidate, 0, line.Length) == 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static string BuildHoverText(
@@ -865,7 +896,7 @@ internal static class PrivateAreaRpcTogglePermittedManagedPatch
     }
 }
 
-[HarmonyPatch(typeof(PrivateArea), nameof(PrivateArea.HideMarker))]
+[HarmonyPatch(typeof(PrivateArea), "HideMarker")]
 internal static class PrivateAreaHideMarkerPatch
 {
     private static bool Prefix(PrivateArea __instance)
@@ -879,7 +910,7 @@ internal static class PrivateAreaHideMarkerPatch
     }
 }
 
-[HarmonyPatch(typeof(CircleProjector), nameof(CircleProjector.CreateSegments))]
+[HarmonyPatch(typeof(CircleProjector), "CreateSegments")]
 internal static class CircleProjectorCreateSegmentsPatch
 {
     private static void Prefix(CircleProjector __instance)
@@ -907,7 +938,7 @@ internal static class CircleProjectorCreateSegmentsPatch
     }
 }
 
-[HarmonyPatch(typeof(PrivateArea), nameof(PrivateArea.RPC_FlashShield))]
+[HarmonyPatch(typeof(PrivateArea), "RPC_FlashShield")]
 internal static class PrivateAreaRpcFlashShieldVolumePatch
 {
     private static bool Prefix(PrivateArea __instance)
@@ -916,7 +947,7 @@ internal static class PrivateAreaRpcFlashShieldVolumePatch
     }
 }
 
-[HarmonyPatch(typeof(Door), nameof(Door.RPC_UseDoor))]
+[HarmonyPatch(typeof(Door), "RPC_UseDoor")]
 internal static class DoorRpcUseDoorPatch
 {
     private const float AutoCloseDelaySeconds = 5f;
@@ -1094,7 +1125,7 @@ internal static class DoorRpcUseDoorPatch
             return null;
         }
 
-        var nview = door.m_nview != null ? door.m_nview : door.GetComponent<ZNetView>();
+        var nview = door.GetComponent<ZNetView>();
         return nview != null && nview.IsValid() ? nview : null;
     }
 
@@ -1119,7 +1150,7 @@ internal static class DoorRpcUseDoorPatch
     }
 }
 
-[HarmonyPatch(typeof(PrivateArea), nameof(PrivateArea.SetEnabled))]
+[HarmonyPatch(typeof(PrivateArea), "SetEnabled")]
 internal static class PrivateAreaSetEnabledWardMinimapVisibilityPatch
 {
     private static void Postfix(PrivateArea __instance)

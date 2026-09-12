@@ -420,7 +420,7 @@ internal static class WardSettings
         ClampStoredRadiiToServerMaximum();
         ManagedWardRuntimeContexts.ClearConfigurationCaches();
 
-        var allAreas = PrivateArea.m_allAreas;
+        var allAreas = WardGameAccess.GetAllAreas();
         if (allAreas == null)
         {
             return;
@@ -449,7 +449,7 @@ internal static class WardSettings
         }
 
         var maximumRadius = MaxRadius;
-        foreach (var zdo in ZDOMan.instance.m_objectsByID.Values)
+        foreach (var zdo in ZDOMan.instance.GetWorldObjects().Values)
         {
             if (zdo == null ||
                 !WardOwnership.IsManagedWardZdo(zdo) ||
@@ -652,7 +652,7 @@ internal static class WardSettings
             return;
         }
 
-        area.CancelInvoke(nameof(PrivateArea.HideMarker));
+        area.CancelInvoke("HideMarker");
         area.m_areaMarker.gameObject.SetActive(true);
     }
 
@@ -1504,7 +1504,7 @@ internal static class WardSettings
         var ownerPlayerId = zdo.GetLong(ZDOVars.s_creator, 0L);
         var group = WardGroupCompat.ResolveWardGroupIdentityReadOnly(zdo);
         var overlapAreas = new List<WardOverlapArea>();
-        foreach (var candidate in zdoMan.m_objectsByID.Values)
+        foreach (var candidate in zdoMan.GetWorldObjects().Values)
         {
             if (candidate == null ||
                 candidate.m_uid == zdo.m_uid ||
@@ -1535,7 +1535,7 @@ internal static class WardSettings
         CircleProjector marker,
         WardConfiguration configuration)
     {
-        var segments = marker.m_segments;
+        var segments = marker.GetSegments();
         if (segments == null || segments.Count == 0)
         {
             return;
@@ -1618,7 +1618,7 @@ internal static class WardSettings
     {
         if (visible)
         {
-            area.CancelInvoke(nameof(PrivateArea.HideMarker));
+            area.CancelInvoke("HideMarker");
         }
 
         var markerObject = area.m_areaMarker.gameObject;
@@ -1660,7 +1660,7 @@ internal static class WardSettings
         out CachedAreaMarkerVisualState visualState)
     {
         visualState = default;
-        var segments = marker.m_segments;
+        var segments = marker.GetSegments();
         if (segments == null || segments.Count == 0)
         {
             return false;

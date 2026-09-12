@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "id": "valheim-1.0.7-r1",
+  "gameVersion": "1.0.7",
+  "upstream": {
+    "url": "https://github.com/blaxxun-boop/ServerSync",
+    "commit": "c57c2aa54e07cdcc7630d6068699ea781622323e",
+    "license": "MIT-0"
+  },
+  "artifact": {
+    "path": "lib/net48/ServerSync.dll",
+    "sha256": "b4dd786997f4e90d770f09ef3e9d64154754fe7e8edfb4841795751895b35846",
+    "bytes": 49664,
+    "assemblyIdentity": "ServerSync, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+    "fileVersion": "1.0.0.1",
+    "configuration": "Debug"
+  },
+  "baselineInputSha256": "166956302a294e224474b26f4c7d58409084ad3f48bd0af1feb7551f229c8f60",
+  "sourceFiles": [
+    {
+      "path": "src/ConfigSync.cs",
+      "sha256": "3ec0bf8370f0d420e73de0ae6afdf3facf786be20d40560501e84c564f8aecc0"
+    },
+    {
+      "path": "src/Properties/AssemblyInfo.cs",
+      "sha256": "fd9bc654712cbebf6a49fe3fa9310d07f3ed7ab06371704f3cf93b21ca7111d1"
+    },
+    {
+      "path": "src/ServerSync.csproj",
+      "sha256": "d54f4e6984ee9881752b955e0a57590e4ee394f915284c06b22624df75857703"
+    },
+    {
+      "path": "src/global.json",
+      "sha256": "16ca559416acb7fb017cd02277f4214a9632d73bb06679f4ec1c7100e054d9a9"
+    },
+    {
+      "path": "Build.ps1",
+      "sha256": "145c51c967717018da426d7aa219659f27a18caaef7d66814396956edd52a0bc"
+    },
+    {
+      "path": "build-inputs.json",
+      "sha256": "1028d782ed2a6cbc088dd932852e98e54170989eed4bee9247170782a906d2e9"
+    },
+    {
+      "path": "LICENSE.txt",
+      "sha256": "81d67aea6f0731054b1a121f36e6d337b4dd445646201077add32a93d41b0034"
+    },
+    {
+      "path": "upstream/ConfigSync.cs",
+      "sha256": "0c6623ef756c1bf4b762d91bb42979bc6a7f123efd313ee516b0f85caeb4c445"
+    },
+    {
+      "path": "source-changes.diff",
+      "sha256": "329b3bfd2563fbf85ce84bb84cfd9ee55f8f40ebe95ded66a65c9c382b68a7f4"
+    }
+  ],
+  "inputManifest": "build-inputs.json",
+  "verification": "verification-summary.json",
+  "actualGameRuntimeVerified": false,
+  "deployment": "Consumer-specific vendored/pinned package with ILRepack internalization; not a standalone runtime plugin."
+}

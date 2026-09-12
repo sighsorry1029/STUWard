@@ -94,18 +94,18 @@ internal static class ManagedWardReportService
 
     private static void AddCommandToAutocomplete(Terminal? terminal)
     {
-        if (terminal == null || terminal.m_commandList == null)
+        if (terminal == null || terminal.GetCommandList() == null)
         {
             return;
         }
 
-        if (terminal.m_commandList.Contains(WardReportConsoleCommand))
+        if (terminal.GetCommandList().Contains(WardReportConsoleCommand))
         {
             return;
         }
 
-        terminal.m_commandList.Add(WardReportConsoleCommand);
-        terminal.m_commandList.Sort(StringComparer.OrdinalIgnoreCase);
+        terminal.GetCommandList().Add(WardReportConsoleCommand);
+        terminal.GetCommandList().Sort(StringComparer.OrdinalIgnoreCase);
     }
 
     private static void WriteWardReportToTerminal(Terminal? terminal)

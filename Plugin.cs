@@ -15,13 +15,12 @@ internal sealed class ConfigurationManagerAttributes
 }
 
 [BepInPlugin(ModGuid, ModName, ModVersion)]
-[BepInDependency("com.jotunn.jotunn")]
 [BepInDependency("org.bepinex.plugins.guilds", BepInDependency.DependencyFlags.SoftDependency)]
 [BepInDependency(WardGroupCompat.ClanPluginGuid, BepInDependency.DependencyFlags.SoftDependency)]
 public sealed class Plugin : BaseUnityPlugin
 {
     internal const string ModName = "STUWard";
-    internal const string ModVersion = "1.3.10";
+    internal const string ModVersion = "1.3.12";
     internal const string Author = "sighsorry";
     internal const string ModGuid = $"{Author}.{ModName}";
 
@@ -36,6 +35,7 @@ public sealed class Plugin : BaseUnityPlugin
     };
 
     private Harmony _harmony = null!;
+    private bool _ready;
 
     internal static ManualLogSource Log = null!;
     internal static Plugin Instance = null!;
@@ -107,9 +107,10 @@ public sealed class Plugin : BaseUnityPlugin
 
             _harmony = new Harmony(ModGuid);
             WardPatchRegistry.ApplyAll(_harmony);
-            CreateOrReuseWardGuiController();
+            if (!WardUiResources.IsHeadless) CreateOrReuseWardGuiController();
 
             Config.Save();
+            _ready = true;
         }
         catch (System.Exception exception)
         {
@@ -142,11 +143,12 @@ public sealed class Plugin : BaseUnityPlugin
 
     private void Update()
     {
-        ManagedWardRuntimeLifecycle.Update();
+        if (_ready) ManagedWardRuntimeLifecycle.Update();
     }
 
     private void OnDestroy()
     {
+        _ready = false;
         try
         {
             WardPluginBootstrap.Shutdown();

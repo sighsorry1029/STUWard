@@ -1,5 +1,5 @@
 using System.Collections.Generic;
-using Jotunn.Managers;
+using UnityEngine.SceneManagement;
 using LocalizationManager;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -9,6 +9,8 @@ namespace STUWard;
 
 internal sealed class WardGuiController : MonoBehaviour
 {
+    private readonly WardUiResources _gui = new();
+
     private const float ConfigurationPushDebounceSeconds = 0.15f;
     private const float ConfigurationRequestTimeoutSeconds = 5f;
     private const float RecentPlayersRequestTimeoutSeconds = 5f;
@@ -84,8 +86,17 @@ internal sealed class WardGuiController : MonoBehaviour
         Instance = this;
         DontDestroyOnLoad(gameObject);
 
-        GUIManager.OnCustomGUIAvailable += BuildGui;
+        SceneManager.sceneLoaded += OnSceneLoaded;
         WardRecentPlayers.SnapshotReceived += HandleRecentPlayersSnapshot;
+        BuildGui();
+    }
+
+    private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
+    {
+        if (mode == LoadSceneMode.Additive) return;
+        CompleteCloseWardUi();
+        _gui.Release();
+        _root = null;
         BuildGui();
     }
 
@@ -113,10 +124,10 @@ internal sealed class WardGuiController : MonoBehaviour
         _suppressUiEvents = true;
         _visible = false;
         _currentWard = null;
-        GUIManager.OnCustomGUIAvailable -= BuildGui;
+        SceneManager.sceneLoaded -= OnSceneLoaded;
         WardRecentPlayers.SnapshotReceived -= HandleRecentPlayersSnapshot;
 
-        // The UI root belongs to Jotunn's GUI tree, not this controller's object.
+        // The canvas has its own lifetime and must be released explicitly.
         if (_root != null)
         {
             _root.SetActive(false);
@@ -127,7 +138,7 @@ internal sealed class WardGuiController : MonoBehaviour
         if (Instance == this)
         {
             Instance = null;
-            GUIManager.BlockInput(false);
+            _gui.Release();
         }
     }
 
@@ -234,7 +245,7 @@ internal sealed class WardGuiController : MonoBehaviour
         }
 
         var player = Player.m_localPlayer;
-        var hovering = player != null ? player.m_hovering : null;
+        var hovering = player != null ? player.GetHoverObject() : null;
         if (hovering == null)
         {
             return false;
@@ -303,7 +314,7 @@ internal sealed class WardGuiController : MonoBehaviour
                 _root.SetActive(false);
             }
 
-            GUIManager.BlockInput(false);
+            WardUiResources.BlockInput(false);
             return;
         }
 
@@ -352,7 +363,7 @@ internal sealed class WardGuiController : MonoBehaviour
 
     private void BuildGui()
     {
-        if (GUIManager.CustomGUIFront == null)
+        if (!_gui.EnsureReady())
         {
             return;
         }
@@ -381,10 +392,10 @@ internal sealed class WardGuiController : MonoBehaviour
         _radiusLimitMarker = null;
         _buildParent = null;
 
-        var gui = GUIManager.Instance;
+        var gui = _gui;
         var panelSize = WardGuiLayoutSettings.GetPanelSize();
         _root = new GameObject("STUWardGUIRoot", typeof(RectTransform), typeof(Image));
-        _root.transform.SetParent(GUIManager.CustomGUIFront.transform, false);
+        _root.transform.SetParent(_gui.CanvasRoot!.transform, false);
 
         var rootRect = _root.GetComponent<RectTransform>();
         rootRect.anchorMin = Vector2.zero;
@@ -464,7 +475,7 @@ internal sealed class WardGuiController : MonoBehaviour
         }
     }
 
-    private void BuildRadiusControl(GUIManager gui)
+    private void BuildRadiusControl(WardUiResources gui)
     {
         CreateLabel(
             WardLocalization.Localize(WardLocalization.UiRadiusToken, WardLocalization.UiRadiusFallback),
@@ -500,7 +511,7 @@ internal sealed class WardGuiController : MonoBehaviour
             gui.ValheimYellow);
     }
 
-    private void BuildTopControls(GUIManager gui, bool showRadiusConfiguration)
+    private void BuildTopControls(WardUiResources gui, bool showRadiusConfiguration)
     {
         var gridRoot = new GameObject("STUWardBehaviorControls", typeof(RectTransform), typeof(GridLayoutGroup));
         gridRoot.transform.SetParent(GetBuildParent(), false);
@@ -550,7 +561,7 @@ internal sealed class WardGuiController : MonoBehaviour
         _autoCloseToggle.onValueChanged.AddListener(OnAutoCloseToggleChanged);
     }
 
-    private Toggle CreateBehaviorToggleRow(Transform parent, string name, string labelText, GUIManager gui)
+    private Toggle CreateBehaviorToggleRow(Transform parent, string name, string labelText, WardUiResources gui)
     {
         var cellSize = WardGuiLayoutSettings.GetRestrictionCellSize();
         var row = new GameObject(name, typeof(RectTransform), typeof(Image));
@@ -587,7 +598,7 @@ internal sealed class WardGuiController : MonoBehaviour
         return toggle;
     }
 
-    private void BuildTrustedPlayers(GUIManager gui)
+    private void BuildTrustedPlayers(WardUiResources gui)
     {
         var permittedListSize = WardGuiLayoutSettings.GetPermittedListSize();
         var permittedListPosition = WardGuiLayoutSettings.GetPermittedListPosition();
@@ -620,7 +631,7 @@ internal sealed class WardGuiController : MonoBehaviour
         }
     }
 
-    private void BuildRecentPlayers(GUIManager gui)
+    private void BuildRecentPlayers(WardUiResources gui)
     {
         var listSize = WardGuiLayoutSettings.GetRecentPlayersListSize();
         var headerLabelSize = WardGuiLayoutSettings.GetPlayerListHeaderLabelSize();
@@ -655,7 +666,7 @@ internal sealed class WardGuiController : MonoBehaviour
     }
 
     private RectTransform? CreatePlayerListContent(
-        GUIManager gui,
+        WardUiResources gui,
         string objectName,
         Vector2 position,
         Vector2 size)
@@ -938,7 +949,7 @@ internal sealed class WardGuiController : MonoBehaviour
             new Vector2(-rowWidth * 0.5f + 10f, 0f),
             rowWidth - 318f,
             TextAnchor.MiddleLeft,
-            GUIManager.Instance.ValheimBeige);
+            _gui.ValheimBeige);
         nameText.horizontalOverflow = HorizontalWrapMode.Wrap;
         var statusText = CreatePlayerRowText(
             row.transform,
@@ -946,7 +957,7 @@ internal sealed class WardGuiController : MonoBehaviour
             new Vector2(rowWidth * 0.5f - buttonWidth - 164f, 0f),
             150f,
             TextAnchor.MiddleRight,
-            GUIManager.Instance.ValheimYellow);
+            _gui.ValheimYellow);
 
         var addButton = CreateAnchoredButton(
             row.transform,
@@ -976,7 +987,7 @@ internal sealed class WardGuiController : MonoBehaviour
         return row;
     }
 
-    private static Text CreatePlayerRowText(
+    private Text CreatePlayerRowText(
         Transform parent,
         string name,
         Vector2 position,
@@ -995,7 +1006,7 @@ internal sealed class WardGuiController : MonoBehaviour
         rect.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, 38f);
 
         var text = textObject.GetComponent<Text>();
-        var gui = GUIManager.Instance;
+        var gui = _gui;
         gui.ApplyTextStyle(text, gui.AveriaSerifBold, color, 18, false);
         text.alignment = alignment;
         text.horizontalOverflow = HorizontalWrapMode.Overflow;
@@ -1046,7 +1057,7 @@ internal sealed class WardGuiController : MonoBehaviour
         _recentPlayersStatusRow!.Text.text = text;
         _recentPlayersStatusRow.Text.color = isError
             ? new Color(0.85f, 0.35f, 0.25f)
-            : GUIManager.Instance.ValheimBeige;
+            : _gui.ValheimBeige;
         _recentPlayersStatusRow.Root.transform.SetSiblingIndex(0);
         _recentPlayersStatusRow.Root.SetActive(true);
         _recentPlayersListState = state;
@@ -1077,7 +1088,7 @@ internal sealed class WardGuiController : MonoBehaviour
             new Vector2(-rowWidth * 0.5f + 10f, 0f),
             rowWidth - 24f,
             TextAnchor.MiddleLeft,
-            GUIManager.Instance.ValheimBeige);
+            _gui.ValheimBeige);
         _recentPlayersStatusRow = new StatusRowView(root, text);
     }
 
@@ -1127,7 +1138,7 @@ internal sealed class WardGuiController : MonoBehaviour
     private static bool TryGetWardZdoId(PrivateArea ward, out ZDOID wardZdoId)
     {
         wardZdoId = ZDOID.None;
-        var zdo = ward.m_nview != null && ward.m_nview.IsValid() ? ward.m_nview.GetZDO() : null;
+        var zdo = ward.GetWardView() != null && ward.GetWardView().IsValid() ? ward.GetWardView().GetZDO() : null;
         if (zdo == null)
         {
             return false;
@@ -1145,7 +1156,7 @@ internal sealed class WardGuiController : MonoBehaviour
             _root.SetActive(visible);
         }
 
-        GUIManager.BlockInput(visible);
+        WardUiResources.BlockInput(visible);
     }
 
     private void RefreshStaticTexts()
@@ -1353,7 +1364,7 @@ internal sealed class WardGuiController : MonoBehaviour
             new Vector2(nameLeftEdge, 0f),
             nameWidth,
             TextAnchor.MiddleLeft,
-            GUIManager.Instance.ValheimBeige);
+            _gui.ValheimBeige);
         nameText.horizontalOverflow = HorizontalWrapMode.Wrap;
         var statusText = CreatePlayerRowText(
             row.transform,
@@ -1361,7 +1372,7 @@ internal sealed class WardGuiController : MonoBehaviour
             new Vector2(statusLeftEdge, 0f),
             statusWidth,
             TextAnchor.MiddleRight,
-            GUIManager.Instance.ValheimYellow);
+            _gui.ValheimYellow);
         statusText.resizeTextForBestFit = true;
         statusText.resizeTextMinSize = 13;
         statusText.resizeTextMaxSize = 18;
@@ -1403,7 +1414,7 @@ internal sealed class WardGuiController : MonoBehaviour
             new Vector2(-rowWidth * 0.5f + 10f, 0f),
             rowWidth - 24f,
             TextAnchor.MiddleLeft,
-            GUIManager.Instance.ValheimBeige);
+            _gui.ValheimBeige);
 
         _emptyPermittedRow = new StatusRowView(row, nameText);
     }
@@ -1459,7 +1470,7 @@ internal sealed class WardGuiController : MonoBehaviour
 
     private void BuildRestrictions(bool showRadiusConfiguration)
     {
-        var gui = GUIManager.Instance;
+        var gui = _gui;
         var listSize = WardGuiLayoutSettings.GetRestrictionListSize();
         CreateLabel(
             WardLocalization.Localize(WardLocalization.UiRestrictionsToken, WardLocalization.UiRestrictionsFallback),
@@ -1500,7 +1511,7 @@ internal sealed class WardGuiController : MonoBehaviour
         {
             verticalLayout.enabled = false;
             // Unity delays Destroy until the end of the frame, but only one
-            // LayoutGroup may exist on this object. Remove Jotunn's generated
+            // LayoutGroup may exist on this object. Remove the generated
             // layout immediately before replacing it with the grid.
             DestroyImmediate(verticalLayout);
         }
@@ -1560,7 +1571,7 @@ internal sealed class WardGuiController : MonoBehaviour
         labelRect.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, rowHeight - 8f);
 
         var label = labelObject.GetComponent<Text>();
-        var gui = GUIManager.Instance;
+        var gui = _gui;
         gui.ApplyTextStyle(label, gui.AveriaSerifBold, gui.ValheimBeige, 20, false);
         label.text = WardLocalization.Localize(definition.LocalizationToken, definition.LocalizationFallback);
         label.alignment = TextAnchor.MiddleLeft;
@@ -1588,7 +1599,7 @@ internal sealed class WardGuiController : MonoBehaviour
 
     private void RefreshRestrictionRows()
     {
-        var gui = GUIManager.Instance;
+        var gui = _gui;
         var definitions = WardSettings.RestrictionDefinitions;
         for (var index = 0; index < definitions.Count; index++)
         {
@@ -1883,7 +1894,7 @@ internal sealed class WardGuiController : MonoBehaviour
 
     private Button CreateButton(string text, Vector2 position, float width, float height)
     {
-        var buttonObject = GUIManager.Instance.CreateButton(
+        var buttonObject = _gui.CreateButton(
             text,
             _panel!.transform,
             new Vector2(0.5f, 0.5f),
@@ -1896,7 +1907,7 @@ internal sealed class WardGuiController : MonoBehaviour
 
     private Button CreateAnchoredButton(Transform parent, string text, Vector2 position, float width, float height)
     {
-        var buttonObject = GUIManager.Instance.CreateButton(
+        var buttonObject = _gui.CreateButton(
             text,
             parent,
             new Vector2(0.5f, 0.5f),
@@ -1927,7 +1938,7 @@ internal sealed class WardGuiController : MonoBehaviour
         slider.maxValue = maxValue;
         slider.wholeNumbers = wholeNumbers;
 
-        GUIManager.Instance.ApplySliderStyle(slider);
+        _gui.ApplySliderStyle(slider);
         ShrinkSliderHandle(sliderObject.transform);
         return slider;
     }
@@ -1969,7 +1980,7 @@ internal sealed class WardGuiController : MonoBehaviour
         var checkmark = toggleObject.transform.Find("Background/Checkmark")?.GetComponent<Image>();
         if (checkmark != null)
         {
-            checkmark.color = GUIManager.Instance.ValheimOrange;
+            checkmark.color = _gui.ValheimOrange;
             if (checkmark.transform is RectTransform checkmarkRect)
             {
                 var innerSize = Mathf.Max(4f, boxSize - 6f);
@@ -2061,7 +2072,7 @@ internal sealed class WardGuiController : MonoBehaviour
 
         _radiusValueText.color = _currentConfiguration.Radius > maxRadius + 0.01f
             ? new Color(0.85f, 0.2f, 0.2f)
-            : GUIManager.Instance.ValheimYellow;
+            : _gui.ValheimYellow;
     }
 
     private void RefreshRadiusAdvisoryVisuals()
@@ -2089,7 +2100,7 @@ internal sealed class WardGuiController : MonoBehaviour
         Font font,
         Color color)
     {
-        var labelObject = GUIManager.Instance.CreateText(
+        var labelObject = _gui.CreateText(
             text,
             GetBuildParent(),
             new Vector2(0.5f, 0.5f),
@@ -2116,7 +2127,7 @@ internal sealed class WardGuiController : MonoBehaviour
         string objectName)
     {
         var size = WardGuiLayoutSettings.GetPlayerSearchSize();
-        var inputObject = GUIManager.Instance.CreateInputField(
+        var inputObject = _gui.CreateInputField(
             _generalPageRoot!.transform,
             new Vector2(0.5f, 0.5f),
             new Vector2(0.5f, 0.5f),
@@ -2168,7 +2179,7 @@ internal sealed class WardGuiController : MonoBehaviour
         }
     }
 
-    private static void StylePageArrowButton(Button? button)
+    private void StylePageArrowButton(Button? button)
     {
         var text = button != null ? button.GetComponentInChildren<Text>() : null;
         if (text == null)
@@ -2178,7 +2189,7 @@ internal sealed class WardGuiController : MonoBehaviour
 
         text.text = text.text.Trim();
         text.fontSize = 34;
-        text.color = GUIManager.Instance.ValheimYellow;
+        text.color = _gui.ValheimYellow;
         text.alignment = TextAnchor.MiddleCenter;
         text.rectTransform.anchoredPosition += new Vector2(0f, 1f);
     }

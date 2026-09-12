@@ -6,8 +6,7 @@ using System.Reflection;
 using System.Text;
 using BepInEx;
 using BepInEx.Bootstrap;
-using Jotunn.Entities;
-using Jotunn.Managers;
+using HarmonyLib;
 using YamlDotNet.Serialization;
 
 namespace LocalizationManager;
@@ -22,8 +21,7 @@ public static class Localizer
         .Build();
 
     private static BaseUnityPlugin? _plugin;
-    private static bool _registeredWithJotunn;
-    private static bool _hookedJotunn;
+    private static bool _loaded;
     private static string? _lastLoggedAppliedLanguage;
     private static int _lastLoggedAppliedCount = -1;
 
@@ -55,28 +53,21 @@ public static class Localizer
         }
     }
 
-    private static CustomLocalization CustomLocalization => Jotunn.Managers.LocalizationManager.Instance.GetLocalization();
+    private static readonly Action<Localization, string, string> AddWord = AccessTools.MethodDelegate<Action<Localization, string, string>>(AccessTools.DeclaredMethod(typeof(Localization), "AddWord", new[] { typeof(string), typeof(string) }));
 
     public static void Load()
     {
         _ = Plugin;
         LoadTranslations();
-        RegisterWithJotunn();
-        HookJotunn();
+        _loaded = true;
         ReloadCurrentLanguageIfAvailable();
         SafeCallLocalizeComplete();
     }
 
     public static void Unload()
     {
-        if (_hookedJotunn)
-        {
-            Jotunn.Managers.LocalizationManager.OnLocalizationAdded -= ReloadCurrentLanguageIfAvailable;
-            _hookedJotunn = false;
-        }
-
+        _loaded = false;
         _plugin = null;
-        _registeredWithJotunn = false;
         _lastLoggedAppliedLanguage = null;
         _lastLoggedAppliedCount = -1;
     }
@@ -89,7 +80,6 @@ public static class Localizer
         }
 
         LoadTranslations();
-        RegisterWithJotunn();
         ApplyCurrentLanguage(Localization.instance);
     }
 
@@ -99,6 +89,7 @@ public static class Localizer
 
     public static void AddText(string key, string text)
     {
+        key = NormalizeTokenKey(key);
         if (!CachedTranslations.TryGetValue("English", out var english))
         {
             english = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -106,14 +97,10 @@ public static class Localizer
         }
 
         english[key] = text;
-        var language = "English";
-        var token = key;
-        CustomLocalization.ClearToken(language, token);
-        CustomLocalization.AddTranslation(language, token, text);
 
         if (Localization.instance != null)
         {
-            Localization.instance.AddWord(key, text);
+            AddWord(Localization.instance, key, text);
         }
     }
 
@@ -152,43 +139,23 @@ public static class Localizer
             $"Loaded STUWard localizations: {string.Join(", ", CachedTranslations.Select(kv => $"{kv.Key}={kv.Value.Count}"))}");
     }
 
-    private static void RegisterWithJotunn()
+    [HarmonyPatch(typeof(Localization), nameof(Localization.SetupLanguage))]
+    internal static class SetupLanguagePatch
     {
-        if (_registeredWithJotunn)
+        private static void Postfix(Localization __instance, string language)
         {
-            return;
+            if (_loaded) ApplyCurrentLanguage(__instance, language);
         }
-
-        _registeredWithJotunn = true;
-        foreach (var (language, translations) in CachedTranslations)
-        {
-            var translationCopy = new Dictionary<string, string>(translations, StringComparer.Ordinal);
-            CustomLocalization.AddTranslation(language, translationCopy);
-        }
-
-        global::STUWard.Plugin.Log?.LogInfo(
-            $"Registered STUWard localizations with Jotunn: {string.Join(", ", CachedTranslations.Keys)}");
     }
 
-    private static void HookJotunn()
+    private static void ApplyCurrentLanguage(Localization localization, string? language = null)
     {
-        if (_hookedJotunn)
-        {
-            return;
-        }
-
-        Jotunn.Managers.LocalizationManager.OnLocalizationAdded += ReloadCurrentLanguageIfAvailable;
-        _hookedJotunn = true;
-    }
-
-    private static void ApplyCurrentLanguage(Localization localization)
-    {
-        var selectedLanguage = localization.GetSelectedLanguage();
+        var selectedLanguage = language ?? localization.GetSelectedLanguage();
         var translations = GetTranslationsForLanguage(selectedLanguage);
 
         foreach (var (key, value) in translations)
         {
-            localization.AddWord(key, value);
+            AddWord(localization, key, value);
         }
 
         if (!string.Equals(_lastLoggedAppliedLanguage, selectedLanguage, StringComparison.Ordinal) ||
@@ -326,8 +293,22 @@ public static class Localizer
 
     private static Dictionary<string, string> DeserializeTranslations(string rawText)
     {
-        return Deserializer.Deserialize<Dictionary<string, string>>(rawText) ?? new Dictionary<string, string>(StringComparer.Ordinal);
+        var parsed = Deserializer.Deserialize<Dictionary<string, string>>(rawText);
+        var normalized = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (parsed == null)
+        {
+            return normalized;
+        }
+
+        foreach (var (key, value) in parsed)
+        {
+            normalized[NormalizeTokenKey(key)] = value;
+        }
+
+        return normalized;
     }
+
+    private static string NormalizeTokenKey(string key) => key.TrimStart('$');
 
     private static void MergeInto(IDictionary<string, string> target, IReadOnlyDictionary<string, string> source)
     {

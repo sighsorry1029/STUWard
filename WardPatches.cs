@@ -177,7 +177,7 @@ internal static class DirectInteractionPatches
     }
 }
 
-[HarmonyPatch(typeof(PrivateArea), nameof(PrivateArea.HaveLocalAccess))]
+[HarmonyPatch(typeof(PrivateArea), "HaveLocalAccess")]
 internal static class PrivateAreaHaveLocalAccessManagedPatch
 {
     private static void Postfix(PrivateArea __instance, ref bool __result)
@@ -209,7 +209,7 @@ internal static class PrivateAreaCheckAccessManagedPatch
         }
 
         var effectiveRadius = radius;
-        var placementGhost = player.m_placementGhost;
+        var placementGhost = player.GetPlacementGhost();
         var placementGhostArea = placementGhost != null ? placementGhost.GetComponent<PrivateArea>() : null;
         if (placementGhost != null &&
             StuWardArea.IsManaged(placementGhostArea) &&
@@ -254,7 +254,7 @@ internal static class PrivateAreaCheckAccessManagedPatch
     }
 }
 
-[HarmonyPatch(typeof(Container), nameof(Container.CheckAccess))]
+[HarmonyPatch(typeof(Container), "CheckAccess")]
 internal static class ContainerCheckAccessManagedPatch
 {
     private static bool Prefix(Container __instance, long playerID, ref bool __result)
@@ -325,10 +325,10 @@ internal static class StationUsePatches
 {
     private static IEnumerable<MethodBase> TargetMethods()
     {
-        yield return AccessTools.DeclaredMethod(typeof(ArmorStand), nameof(ArmorStand.UseItem));
-        yield return AccessTools.DeclaredMethod(typeof(MapTable), nameof(MapTable.OnRead), new[] { typeof(Switch), typeof(Humanoid), typeof(ItemDrop.ItemData) });
-        yield return AccessTools.DeclaredMethod(typeof(MapTable), nameof(MapTable.OnRead), new[] { typeof(Switch), typeof(Humanoid), typeof(ItemDrop.ItemData), typeof(bool) });
-        yield return AccessTools.DeclaredMethod(typeof(MapTable), nameof(MapTable.OnWrite));
+        yield return AccessTools.DeclaredMethod(typeof(ArmorStand), "UseItem");
+        yield return AccessTools.DeclaredMethod(typeof(MapTable), "OnRead", new[] { typeof(Switch), typeof(Humanoid), typeof(ItemDrop.ItemData) });
+        yield return AccessTools.DeclaredMethod(typeof(MapTable), "OnRead", new[] { typeof(Switch), typeof(Humanoid), typeof(ItemDrop.ItemData), typeof(bool) });
+        yield return AccessTools.DeclaredMethod(typeof(MapTable), "OnWrite");
     }
 
     private static bool Prefix(Component __instance, Humanoid __1, ref bool __result, out WardCheckScopeState __state)
@@ -358,9 +358,9 @@ internal static class ProcessingInteractionPatches
 {
     private static IEnumerable<MethodBase> TargetMethods()
     {
-        yield return AccessTools.DeclaredMethod(typeof(Smelter), nameof(Smelter.OnAddOre));
-        yield return AccessTools.DeclaredMethod(typeof(Smelter), nameof(Smelter.OnAddFuel));
-        yield return AccessTools.DeclaredMethod(typeof(Incinerator), nameof(Incinerator.OnIncinerate));
+        yield return AccessTools.DeclaredMethod(typeof(Smelter), "OnAddOre");
+        yield return AccessTools.DeclaredMethod(typeof(Smelter), "OnAddFuel");
+        yield return AccessTools.DeclaredMethod(typeof(Incinerator), "OnIncinerate");
     }
 
     private static bool Prefix(Component __instance, Humanoid __1, ref bool __result)
@@ -391,7 +391,7 @@ internal static class TeleportWorldTeleportPatch
     }
 }
 
-[HarmonyPatch(typeof(TeleportWorldTrigger), nameof(TeleportWorldTrigger.OnTriggerEnter))]
+[HarmonyPatch(typeof(TeleportWorldTrigger), "OnTriggerEnter")]
 [HarmonyPriority(800)]
 [HarmonyBefore(new[] { "org.bepinex.plugins.targetportal" })]
 internal static class TeleportWorldTriggerPatch
@@ -689,7 +689,7 @@ internal static class PlayerTryPlacePiecePatch
 {
     private static bool Prefix(Player __instance, ref bool __result)
     {
-        var ghost = __instance.m_placementGhost;
+        var ghost = __instance.GetPlacementGhost();
         if (ghost == null)
         {
             return true;
@@ -707,12 +707,12 @@ internal static class PlayerTryPlacePiecePatch
     }
 }
 
-[HarmonyPatch(typeof(Player), nameof(Player.SetupPlacementGhost))]
+[HarmonyPatch(typeof(Player), "SetupPlacementGhost")]
 internal static class PlayerSetupPlacementGhostPatch
 {
     private static void Postfix(Player __instance)
     {
-        var area = __instance.m_placementGhost != null ? __instance.m_placementGhost.GetComponent<PrivateArea>() : null;
+        var area = __instance.GetPlacementGhost() != null ? __instance.GetPlacementGhost().GetComponent<PrivateArea>() : null;
         if (StuWardArea.IsManaged(area))
         {
             WardSettings.ApplyPlacementGhostPreviewRadius(area!);
@@ -725,7 +725,7 @@ internal static class PlayerUpdatePlacementGhostPatch
 {
     private static void Postfix(Player __instance)
     {
-        var placementGhost = __instance.m_placementGhost;
+        var placementGhost = __instance.GetPlacementGhost();
         var area = placementGhost != null ? placementGhost.GetComponent<PrivateArea>() : null;
         if (placementGhost != null && StuWardArea.IsManaged(area))
         {
@@ -734,7 +734,7 @@ internal static class PlayerUpdatePlacementGhostPatch
             if (__instance.GetPlacementStatus() == Player.PlacementStatus.Valid &&
                 ManagedWardPlacementPreviewService.ShouldShowAsInvalid(__instance, placementGhost.transform, placementGhost.transform.position))
             {
-                __instance.m_placementStatus = Player.PlacementStatus.MoreSpace;
+                __instance.GetPlacementStatusRef() = Player.PlacementStatus.MoreSpace;
                 __instance.SetPlacementGhostValid(false);
             }
         }
@@ -755,7 +755,7 @@ internal static class PlayerPlacePiecePatch
     }
 }
 
-[HarmonyPatch(typeof(Player), nameof(Player.CheckCanRemovePiece))]
+[HarmonyPatch(typeof(Player), "CheckCanRemovePiece")]
 internal static class PlayerCheckCanRemovePiecePatch
 {
     [HarmonyPriority(Priority.Last)]
@@ -771,7 +771,7 @@ internal static class PlayerCheckCanRemovePiecePatch
     }
 }
 
-[HarmonyPatch(typeof(Player), nameof(Player.RemovePiece))]
+[HarmonyPatch(typeof(Player), "RemovePiece")]
 internal static class PlayerRemovePiecePatch
 {
     private static bool Prefix(Player __instance, ref bool __result)
@@ -837,7 +837,7 @@ internal static class AttackSpawnOnHitTerrainPatch
     }
 }
 
-[HarmonyPatch(typeof(TerrainOp), nameof(TerrainOp.Awake))]
+[HarmonyPatch(typeof(TerrainOp), "Awake")]
 internal static class TerrainOpAwakePatch
 {
     private static bool Prefix(TerrainOp __instance)
@@ -1060,12 +1060,12 @@ internal static class PlayerUseHotbarItemPatch
 {
     private static bool Prefix(Player __instance, int index)
     {
-        if (__instance != Player.m_localPlayer || __instance.m_inventory == null)
+        if (__instance != Player.m_localPlayer || __instance.GetInventory() == null)
         {
             return true;
         }
 
-        var item = __instance.m_inventory.GetItemAt(index - 1, 0);
+        var item = __instance.GetInventory().GetItemAt(index - 1, 0);
         return WardAccess.TryBlockItemUseAtPlayerOrHoveredTamedCreature(__instance, item);
     }
 }
@@ -1081,7 +1081,7 @@ internal static class HumanoidUseItemPatch
     }
 }
 
-[HarmonyPatch(typeof(Humanoid), nameof(Humanoid.UpdateEquipment))]
+[HarmonyPatch(typeof(Humanoid), "UpdateEquipment")]
 internal static class HumanoidUpdateEquipmentPatch
 {
     private const float ForceUnequipCheckIntervalSeconds = 0.15f;
@@ -1133,7 +1133,7 @@ internal static class AttackStartBlockedItemTargetPatch
     }
 }
 
-[HarmonyPatch(typeof(InventoryGui), nameof(InventoryGui.OnRightClickItem))]
+[HarmonyPatch(typeof(InventoryGui), "OnRightClickItem")]
 [HarmonyPriority(800)]
 [HarmonyBefore(new[] { "kg.TameableCollector" })]
 internal static class InventoryGuiOnRightClickItemPatch
@@ -1207,9 +1207,9 @@ internal static class TameableCollectorCollectorItemPatch
             return true;
         }
 
-        if (__originalMethod.Name == "TryCatch" && player.m_hoveringCreature != null)
+        if (__originalMethod.Name == "TryCatch" && player.GetHoverCreature() != null)
         {
-            return WardAccess.TryBlockItemUse(player, item, player.m_hoveringCreature.transform.position);
+            return WardAccess.TryBlockItemUse(player, item, player.GetHoverCreature().transform.position);
         }
 
         return WardAccess.TryBlockItemUse(player, item);
@@ -1419,7 +1419,7 @@ internal static class PlayerAutoPickupPatch
         __state = null;
         if (__instance == null ||
             __instance.IsTeleporting() ||
-            !Player.m_enableAutoPickup ||
+            !WardGameAccess.IsAutoPickupEnabled ||
             !WardAccess.HasEnabledManagedWards() ||
             !WardItemPrefabPolicy.CanAnyPickupBeBlocked())
         {
@@ -1494,7 +1494,7 @@ internal static class PlayerAutoPickupPatch
             pickupPoint,
             autoPickupRange,
             colliders,
-            player.m_autoPickupMask);
+            player.GetPickupMask());
         while (colliderCount == colliders.Length && colliders.Length < MaxBufferedAutoPickupColliders)
         {
             Array.Resize(
@@ -1505,7 +1505,7 @@ internal static class PlayerAutoPickupPatch
                 pickupPoint,
                 autoPickupRange,
                 colliders,
-                player.m_autoPickupMask);
+                player.GetPickupMask());
         }
 
         if (colliderCount != colliders.Length)
@@ -1513,7 +1513,7 @@ internal static class PlayerAutoPickupPatch
             return colliders;
         }
 
-        colliders = Physics.OverlapSphere(pickupPoint, autoPickupRange, player.m_autoPickupMask);
+        colliders = Physics.OverlapSphere(pickupPoint, autoPickupRange, player.GetPickupMask());
         colliderCount = colliders.Length;
         return colliders;
     }
@@ -1589,7 +1589,7 @@ internal static class WardPatchHelpers
             return null;
         }
 
-        if (!Physics.Raycast(camera.transform.position, camera.transform.forward, out var hit, 50f, player.m_removeRayMask))
+        if (!Physics.Raycast(camera.transform.position, camera.transform.forward, out var hit, 50f, player.GetRemoveRayMask()))
         {
             return null;
         }

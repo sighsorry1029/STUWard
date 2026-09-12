@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.3.12
+- Fixed some UI problems
+
+## 1.3.11
+
+- Updated STUWard for Valheim 1.0.7 using the original client and dedicated-server assemblies. Updated game API calls, Harmony targets, routed-message and effect handling, and authoritative ward discovery after both regular and chunked world loads.
+- Removed STUWard's Jotunn runtime dependency. Prefab registration, localization, UI resources, native asset lookup, and input blocking now use a focused implementation inside STUWard while preserving the existing ward prefab name, recipe policy, localization files, and public localization surface.
+- Updated the embedded ServerSync build to the reviewed `valheim-1.0.7-r1` revision while preserving configuration keys, locks, version checks, RPC identifiers, and payload formats.
+- Replaced publicized compile references with original game assemblies and cached the required private-member access through Harmony. Cleanup now continues across independent services, and frame updates remain disabled if plugin initialization does not complete.
+- Existing ward ZDO data, configuration and YAML formats, permission and ownership rules, optional Guilds/Clan/TargetPortal integrations, duplicate-processing guards, and refund behavior are unchanged. Servers and clients must update together.
+
 ## 1.3.10
 
 - Reduced redundant minimap work by reusing snapshot keys during pin cleanup and skipping server snapshot construction when the viewer revision has not changed.

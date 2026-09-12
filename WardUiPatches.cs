@@ -7,31 +7,6 @@ using UnityEngine;
 
 namespace STUWard;
 
-internal static class ManagedWardInitializationCoordinator
-{
-    internal static void EnsureLocalInitialization(PrivateArea area)
-    {
-        if (area == null || !ManagedWardIdentity.EnsureManagedComponent(area))
-        {
-            return;
-        }
-
-        WardSettings.CaptureNativeAreaMarkerSpeed(area);
-    }
-
-    internal static bool TryGetValidZdo(ManagedWardRef ward, out ZDO zdo)
-    {
-        zdo = null!;
-        if (!ward.HasValidNetworkIdentity)
-        {
-            return false;
-        }
-
-        zdo = ward.Zdo!;
-        return true;
-    }
-}
-
 internal static class ManagedWardLifecycle
 {
     internal static void NotifyAreaReady(PrivateArea? area, bool matchedByComponent, bool matchedByZdo)
@@ -39,7 +14,7 @@ internal static class ManagedWardLifecycle
         var ward = ManagedWardRef.FromArea(area);
         if (area == null ||
             (!matchedByComponent && !matchedByZdo) ||
-            !ManagedWardInitializationCoordinator.TryGetValidZdo(ward, out _))
+            !ward.HasValidNetworkIdentity)
         {
             return;
         }
@@ -49,7 +24,7 @@ internal static class ManagedWardLifecycle
             return;
         }
 
-        ManagedWardInitializationCoordinator.EnsureLocalInitialization(area);
+        WardSettings.CaptureNativeAreaMarkerSpeed(area);
 
         var context = ManagedWardRuntimeContexts.GetOrCreate(area);
         if (!context.NetworkInitializationComplete)
@@ -108,7 +83,10 @@ internal static class PrivateAreaAwakePatch
         }
 
         ManagedWardIdentity.TryResolve(ward, repairComponent: true, out matchedByComponent, out matchedByZdo);
-        ManagedWardInitializationCoordinator.EnsureLocalInitialization(__instance);
+        if (matchedByComponent)
+        {
+            WardSettings.CaptureNativeAreaMarkerSpeed(__instance);
+        }
     }
 
     private static bool ShouldSkipPlacementGhostAwake(PrivateArea area, bool matchedByComponent, bool matchedByZdo, ZDO? zdo)
@@ -240,7 +218,6 @@ internal static class ZNetSceneCreateObjectManagedWardPatch
             return;
         }
 
-        ManagedWardInitializationCoordinator.EnsureLocalInitialization(area);
         ManagedWardLifecycle.NotifyAreaReady(area, matchedByComponent, matchedByZdo);
     }
 }
@@ -933,7 +910,7 @@ internal static class CircleProjectorCreateSegmentsPatch
             return;
         }
 
-        ManagedWardInitializationCoordinator.EnsureLocalInitialization(area);
+        WardSettings.CaptureNativeAreaMarkerSpeed(area);
         WardSettings.ApplyAreaState(ward);
     }
 }

@@ -695,8 +695,9 @@ internal static class PlayerTryPlacePiecePatch
             return true;
         }
 
-        if (!WardAccess.TryBlockManagedWardPlacement(__instance, ghost.transform, ghost.transform.position, ref __result))
+        if (!WardAccess.TryBlockManagedWardPlacement(__instance, ghost.transform, ghost.transform.position))
         {
+            __result = false;
             return false;
         }
 

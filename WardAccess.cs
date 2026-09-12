@@ -940,23 +940,6 @@ internal static class WardAccess
         return ManagedWardPresenceService.ShouldBlockHostileCreatureDamageToBuilding(point);
     }
 
-    internal static bool TryBlockManagedWardPlacement(Player? player, Component? candidate, Vector3 point, ref bool result)
-    {
-        if (!IsManagedWardPlacementCandidate(candidate))
-        {
-            return true;
-        }
-
-        if (!WouldBlockManagedWardPlacement(player, candidate, point, flash: true))
-        {
-            return true;
-        }
-
-        ShowWardOverlapMessage(player);
-        result = false;
-        return false;
-    }
-
     internal static bool TryBlockManagedWardPlacement(Player? player, Component? candidate, Vector3 point)
     {
         if (!IsManagedWardPlacementCandidate(candidate))

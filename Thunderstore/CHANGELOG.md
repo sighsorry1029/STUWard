@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.13
+
+- Simplified managed-ward initialization and placement validation while preserving Harmony targets, placement results, marker setup, overlap rules, and player feedback.
+- Consolidated authoritative server request validation for ward toggles, settings, permitted-player removal, and recent-player access. Sender identity, ward validity, trust, and mutation ownership rules are unchanged.
+- Reduced repeated recipe setup work by reusing the resolved Hammer table and refreshing the available-piece list once after both vanilla and STUWard recipe policies are applied.
+- Removed unused compile references while retaining the same final runtime assembly dependencies and the existing ServerSync and YamlDotNet merge path.
+- Configuration keys and defaults, ward ZDO data, YAML formats, RPC payloads, prefab names, and optional Guilds, Clan, TargetPortal, TameableCollector, AzuCraftyBoxes, and PortablePals integrations are unchanged. Servers and clients must update together.
+
 ## 1.3.12
 - Fixed some UI problems
 

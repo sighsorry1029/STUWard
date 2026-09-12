@@ -20,7 +20,7 @@ internal sealed class ConfigurationManagerAttributes
 public sealed class Plugin : BaseUnityPlugin
 {
     internal const string ModName = "STUWard";
-    internal const string ModVersion = "1.3.12";
+    internal const string ModVersion = "1.3.13";
     internal const string Author = "sighsorry";
     internal const string ModGuid = $"{Author}.{ModName}";
 

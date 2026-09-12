@@ -1297,12 +1297,11 @@ internal static class WardSettings
             return;
         }
 
-        if (!WardOwnership.TryResolveAuthoritativeManagedWardRequest(
+        if (!WardOwnership.TryResolveTrustedManagedWardRequest(
                 sender,
                 wardZdoId,
                 out zdo,
-                out var requesterId) ||
-            !WardAccess.HasManagedWardTrust(zdo, requesterId))
+                out _))
         {
             SendRoutedUpdateConfigurationResponse(
                 sender,
@@ -1352,17 +1351,16 @@ internal static class WardSettings
         if (ZNet.instance == null || !ZNet.instance.IsServer() ||
             !TryReadWardZdoId(pkg, out var wardZdoId) ||
             !TryReadRemovePermittedRequest(pkg, out var targetPlayerId) ||
-            !WardOwnership.TryResolveAuthoritativeManagedWardRequest(
+            !WardOwnership.TryResolveTrustedManagedWardRequest(
                 sender,
                 wardZdoId,
                 out var zdo,
-                out var requesterId))
+                out _))
         {
             return;
         }
 
-        if (!WardAccess.HasManagedWardTrust(zdo, requesterId) ||
-            !WardOwnership.TryClaimManagedWardMutationOwnership(zdo) ||
+        if (!WardOwnership.TryClaimManagedWardMutationOwnership(zdo) ||
             !WardPrivateAreaSafeAccess.RemovePermittedPlayer(zdo, targetPlayerId))
         {
             return;

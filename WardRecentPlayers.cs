@@ -331,7 +331,7 @@ internal static class WardRecentPlayers
     {
         if (!TryConsumeRequestBudget(sender) ||
             !TryReadWardRequest(request, out var requestId, out var wardZdoId) ||
-            !TryAuthorize(sender, wardZdoId, out var zdo, out _))
+            !WardOwnership.TryResolveTrustedManagedWardRequest(sender, wardZdoId, out var zdo, out _))
         {
             return;
         }
@@ -343,7 +343,7 @@ internal static class WardRecentPlayers
     {
         if (!TryConsumeRequestBudget(sender) ||
             !TryReadAddRequest(request, out var requestId, out var wardZdoId, out var targetPlayerId) ||
-            !TryAuthorize(sender, wardZdoId, out var zdo, out _))
+            !WardOwnership.TryResolveTrustedManagedWardRequest(sender, wardZdoId, out var zdo, out _))
         {
             return;
         }
@@ -375,14 +375,6 @@ internal static class WardRecentPlayers
         // Successful retries and targets that became registered since the click are
         // acknowledged with the same request id and the current canonical snapshot.
         SendSnapshot(sender, requestId, zdo);
-    }
-
-    private static bool TryAuthorize(long sender, ZDOID wardZdoId, out ZDO zdo, out long requesterId)
-    {
-        zdo = null!;
-        requesterId = 0L;
-        return WardOwnership.TryResolveAuthoritativeManagedWardRequest(sender, wardZdoId, out zdo, out requesterId) &&
-               WardAccess.HasManagedWardTrust(zdo, requesterId);
     }
 
     private static void SendSnapshot(long receiverUid, long requestId, ZDO wardZdo)

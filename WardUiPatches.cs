@@ -376,12 +376,8 @@ internal static class ManagedWardInteractionRpc
 
     private static void HandleRoutedToggleEnabled(long sender, ZPackage? request)
     {
-        if (!TryResolveServerWardRequest(sender, request, out var zdo, out var requesterId))
-        {
-            return;
-        }
-
-        if (!WardAccess.HasManagedWardTrust(zdo, requesterId))
+        if (!TryReadRoutedWardRequest(request, out var wardZdoId) ||
+            !WardOwnership.TryResolveTrustedManagedWardRequest(sender, wardZdoId, out var zdo, out _))
         {
             return;
         }
@@ -435,33 +431,6 @@ internal static class ManagedWardInteractionRpc
 
         var transform = area.transform;
         _ = effectList.Create(transform.position, transform.rotation, null, 1f, -1);
-    }
-
-    private static bool TryResolveServerWardRequest(
-        long sender,
-        ZPackage? request,
-        out ZDO zdo,
-        out long requesterId)
-    {
-        zdo = null!;
-        requesterId = 0L;
-        return TryReadRoutedWardRequest(request, out var wardZdoId) &&
-               TryResolveServerWardRequest(sender, wardZdoId, out zdo, out requesterId);
-    }
-
-    private static bool TryResolveServerWardRequest(
-        long sender,
-        ZDOID wardZdoId,
-        out ZDO zdo,
-        out long requesterId)
-    {
-        zdo = null!;
-        requesterId = 0L;
-        return WardOwnership.TryResolveAuthoritativeManagedWardRequest(
-            sender,
-            wardZdoId,
-            out zdo,
-            out requesterId);
     }
 
     private static bool TryReadRoutedWardRequest(ZPackage? request, out ZDOID wardZdoId)

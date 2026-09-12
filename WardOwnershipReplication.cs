@@ -214,6 +214,16 @@ internal static partial class WardOwnership
         return true;
     }
 
+    internal static bool TryResolveTrustedManagedWardRequest(
+        long sender,
+        ZDOID wardZdoId,
+        out ZDO zdo,
+        out long requesterId)
+    {
+        return TryResolveAuthoritativeManagedWardRequest(sender, wardZdoId, out zdo, out requesterId) &&
+               WardAccess.HasManagedWardTrust(zdo, requesterId);
+    }
+
     internal static void CompleteAuthoritativeManagedWardMutation(ZDO zdo)
     {
         ZDOMan.instance?.ForceSendZDO(zdo.m_uid);

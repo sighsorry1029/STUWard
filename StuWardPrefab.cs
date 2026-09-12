@@ -164,13 +164,19 @@ internal static class StuWardPrefab
     internal static void ApplyRecipeSettings()
     {
         var table = GetHammerPieceTable();
+        var piece = GetStuWardPiece();
         if (table != null && _stuWardPrefab != null)
         {
             _hammerTable = table;
             if (!table.m_pieces.Contains(_stuWardPrefab)) table.m_pieces.Add(_stuWardPrefab);
         }
-        ApplyVanillaGuardStoneRecipeSetting();
-        ApplyStuWardRecipeSetting();
+
+        var refreshForVanillaRecipe = ApplyVanillaGuardStoneRecipeSetting(table);
+        var refreshForStuWardRecipe = ApplyStuWardRecipeSetting(piece);
+        if (refreshForVanillaRecipe || refreshForStuWardRecipe)
+        {
+            Player.m_localPlayer?.UpdateAvailablePiecesList();
+        }
     }
 
     internal static Sprite? GetPieceIcon()
@@ -200,14 +206,13 @@ internal static class StuWardPrefab
         return null;
     }
 
-    private static void ApplyVanillaGuardStoneRecipeSetting()
+    private static bool ApplyVanillaGuardStoneRecipeSetting(PieceTable? pieceTable)
     {
-        var pieceTable = GetHammerPieceTable();
         var pieces = pieceTable?.m_pieces;
         var guardStonePrefab = FindPrefab(StuWardArea.BasePrefabName);
         if (pieceTable == null || pieces == null || guardStonePrefab == null)
         {
-            return;
+            return false;
         }
 
         _vanillaGuardStonePrefab ??= guardStonePrefab;
@@ -233,15 +238,14 @@ internal static class StuWardPrefab
             pieces.Insert(insertIndex, _vanillaGuardStonePrefab);
         }
 
-        Player.m_localPlayer?.UpdateAvailablePiecesList();
+        return true;
     }
 
-    private static void ApplyStuWardRecipeSetting()
+    private static bool ApplyStuWardRecipeSetting(Piece? piece)
     {
-        var piece = _stuWardPrefab != null ? _stuWardPrefab.GetComponent<Piece>() : null;
         if (piece == null)
         {
-            return;
+            return false;
         }
 
         var recipeOverride = Plugin.StuWardRecipe?.Value?.Trim() ?? string.Empty;
@@ -250,20 +254,20 @@ internal static class StuWardPrefab
             if (_defaultStuWardRequirements != null)
             {
                 piece.m_resources = CloneRequirements(_defaultStuWardRequirements);
-                Player.m_localPlayer?.UpdateAvailablePiecesList();
+                return true;
             }
 
-            return;
+            return false;
         }
 
         if (!TryParseRequirements(recipeOverride, out var requirements))
         {
             Plugin.Log.LogWarning($"Invalid STUWard recipe override '{recipeOverride}'. Keeping previous recipe.");
-            return;
+            return false;
         }
 
         piece.m_resources = requirements;
-        Player.m_localPlayer?.UpdateAvailablePiecesList();
+        return true;
     }
 
     private static PieceTable? GetHammerPieceTable()

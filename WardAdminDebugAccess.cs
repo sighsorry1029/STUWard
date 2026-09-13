@@ -12,21 +12,33 @@ internal static class WardAdminDebugAccess
     private static readonly TimeSpan DebugStateResendInterval = TimeSpan.FromSeconds(3);
 
     private static readonly HashSet<long> ServerDebugAdminPlayerIds = new();
+    // Only the server owns these live connection bindings. Clients consume the
+    // existing player-id projection, never a locally inferred administrator list.
+    private static readonly Dictionary<long, ZNetPeer> ServerAdminPeers = new();
+    private static readonly Dictionary<long, string> LastServerDecisions = new();
 
-    private static bool _rpcsRegistered;
+    private static ZRoutedRpc? _registeredRoutedRpc;
     private static bool? _lastLocalDebugAdminState;
     private static bool _serverApprovedLocalDebugState;
     private static bool _hasReceivedAdminDebugSnapshot;
     private static DateTime _lastLocalDebugAdminSyncUtc = DateTime.MinValue;
+    private static DateTime _responseWaitStartedUtc = DateTime.MinValue;
+    private static DateTime _nextNoResponseWarningUtc = DateTime.MinValue;
+    private static bool? _lastLoggedLocalApproval;
 
     internal static void ResetRuntimeState()
     {
-        _rpcsRegistered = false;
+        _registeredRoutedRpc = null;
         _lastLocalDebugAdminState = null;
         _serverApprovedLocalDebugState = false;
         _hasReceivedAdminDebugSnapshot = false;
         _lastLocalDebugAdminSyncUtc = DateTime.MinValue;
+        _responseWaitStartedUtc = DateTime.MinValue;
+        _nextNoResponseWarningUtc = DateTime.MinValue;
+        _lastLoggedLocalApproval = null;
         ServerDebugAdminPlayerIds.Clear();
+        ServerAdminPeers.Clear();
+        LastServerDecisions.Clear();
     }
 
     internal static void EnsureRuntimeBindings()
@@ -37,7 +49,7 @@ internal static class WardAdminDebugAccess
     internal static void RegisterRpcs()
     {
         var routedRpc = ZRoutedRpc.instance;
-        if (_rpcsRegistered || routedRpc == null)
+        if (routedRpc == null || ReferenceEquals(_registeredRoutedRpc, routedRpc))
         {
             return;
         }
@@ -45,7 +57,7 @@ internal static class WardAdminDebugAccess
         routedRpc.Register<bool>(RpcRequestAdminDebugState, HandleRequestAdminDebugState);
         routedRpc.Register<long, bool>(RpcReceiveAdminDebugProjection, HandleReceiveAdminDebugProjection);
         routedRpc.Register<ZPackage>(RpcReceiveAdminDebugSnapshot, HandleReceiveAdminDebugSnapshot);
-        _rpcsRegistered = true;
+        _registeredRoutedRpc = routedRpc;
     }
 
     internal static void UpdateLocalState(Player? player, bool force = false)
@@ -74,16 +86,38 @@ internal static class WardAdminDebugAccess
             return;
         }
 
-        var shouldRetrySnapshot = !_hasReceivedAdminDebugSnapshot && resendIntervalElapsed;
+        var shouldRetrySnapshot = (!_hasReceivedAdminDebugSnapshot ||
+                                   _responseWaitStartedUtc != DateTime.MinValue ||
+                                   (!enabled && _serverApprovedLocalDebugState)) && resendIntervalElapsed;
         if (!force && !stateChanged && !shouldResendEnabledState && !shouldRetrySnapshot)
         {
             return;
         }
 
+        RegisterRpcs();
+        var routedRpc = ZRoutedRpc.instance;
+        var server = routedRpc?.GetServerPeerID() ?? 0L;
+        if (server == 0L) return;
+
+        if (stateChanged)
+        {
+            Plugin.Log.LogInfo($"[admin-debug] Local debug requested={enabled}; waiting for server approval.");
+            _lastLoggedLocalApproval = null;
+        }
+        if (_responseWaitStartedUtc == DateTime.MinValue)
+        {
+            _responseWaitStartedUtc = now;
+            _nextNoResponseWarningUtc = now.AddSeconds(10);
+        }
+        else if (now >= _nextNoResponseWarningUtc)
+        {
+            Plugin.Log.LogWarning($"[admin-debug] No server approval response; requested={enabled}. Check STUWard on the server and its [admin-debug] log.");
+            _nextNoResponseWarningUtc = now.AddSeconds(30);
+        }
+
         _lastLocalDebugAdminState = enabled;
         _lastLocalDebugAdminSyncUtc = now;
-        RegisterRpcs();
-        ZRoutedRpc.instance?.InvokeRoutedRPC(RpcRequestAdminDebugState, enabled);
+        routedRpc!.InvokeRoutedRPC(server, RpcRequestAdminDebugState, enabled);
     }
 
     // UI/input preview path only. Server-side RPC validation remains authoritative.
@@ -127,12 +161,13 @@ internal static class WardAdminDebugAccess
             return true;
         }
 
-        var accountId = WardOwnership.GetPlayerAccountId(playerId);
-        if (IsAdminAccountId(accountId))
+        if (ServerAdminPeers.TryGetValue(playerId, out var peer) &&
+            TryAuthorizePeer(peer, out var currentPlayerId, out _, out _) && currentPlayerId == playerId)
         {
             return true;
         }
 
+        Plugin.Log.LogInfo($"[admin-debug] Revoked playerId={playerId}: connection identity or server administrator permission changed.");
         SetServerAdminDebugState(playerId, false);
         return false;
     }
@@ -144,10 +179,24 @@ internal static class WardAdminDebugAccess
             return;
         }
 
+        ServerAdminPeers.Remove(playerId);
         if (ServerDebugAdminPlayerIds.Remove(playerId))
         {
             BroadcastAdminDebugState(playerId, false);
         }
+    }
+
+    internal static void ForgetServerPeer(long sender)
+    {
+        LastServerDecisions.Remove(sender);
+        List<long>? removed = null;
+        foreach (var entry in ServerAdminPeers)
+        {
+            if (entry.Value.m_uid != sender) continue;
+            (removed ??= new List<long>()).Add(entry.Key);
+        }
+        if (removed != null)
+            foreach (var playerId in removed) ForgetServerPlayer(playerId);
     }
 
     private static bool IsLocalAdminDebugController(Player? player)
@@ -180,15 +229,63 @@ internal static class WardAdminDebugAccess
             return;
         }
 
-        if (!WardOwnership.TryResolveAuthoritativePlayerIdFromSender(sender, out var playerId))
-        {
-            return;
-        }
-
-        var accountId = WardOwnership.GetAuthoritativeAccountIdFromSender(sender, playerId);
-        var approved = enabled && IsAdminAccountId(accountId);
+        var peer = ZNet.instance.GetPeer(sender);
+        if (peer == null) return;
+        var isAdmin = TryAuthorizePeer(peer, out var playerId, out var hostId, out var reason);
+        var approved = enabled && isAdmin;
+        if (!enabled && playerId != 0L) reason = "debug-off";
+        LogServerDecision(sender, playerId, hostId, enabled, reason);
+        if (playerId == 0L) return; // Retry when the character identity is ready.
+        if (approved) ServerAdminPeers[playerId] = peer;
         SetServerAdminDebugState(playerId, approved);
         SendAdminDebugStateSnapshot(sender);
+    }
+
+    private static bool TryAuthorizePeer(ZNetPeer peer, out long playerId, out string hostId, out string reason)
+    {
+        playerId = 0L;
+        hostId = string.Empty;
+        reason = "peer-not-ready";
+        var net = ZNet.instance;
+        if (net == null || !net.IsServer() || !peer.IsReady() ||
+            !ReferenceEquals(net.GetPeer(peer.m_uid), peer)) return false;
+        if (!WardOwnership.TryResolveAuthoritativePlayerIdFromSender(peer.m_uid, out playerId))
+        {
+            reason = "identity-not-ready";
+            return false;
+        }
+        try
+        {
+            hostId = peer.m_socket?.GetHostName() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(hostId))
+            {
+                reason = "host-id-unavailable";
+                return false;
+            }
+
+            // Same live authenticated identity and policy as Valheim's remote
+            // admin commands, including Server Devcommands' ListContainsId patch.
+            // Do not override a native denial with cached or normalized account IDs.
+            var approved = net.IsAdmin(hostId);
+            reason = approved ? "approved" : "not-server-admin";
+            return approved;
+        }
+        catch (Exception error)
+        {
+            reason = "admin-check-error:" + error.GetType().Name;
+            return false;
+        }
+    }
+
+    private static void LogServerDecision(long sender, long playerId, string hostId, bool requested, string reason)
+    {
+        // Native host IDs are accounts, not user-supplied character names. Bound
+        // and sanitize diagnostics, and log changes instead of every heartbeat.
+        var host = hostId.Length > 128 ? hostId.Substring(0, 128) : hostId;
+        var decision = $"playerId={playerId} host='{host.Replace('\r', ' ').Replace('\n', ' ')}' requested={requested} result={reason}";
+        if (LastServerDecisions.TryGetValue(sender, out var previous) && previous == decision) return;
+        LastServerDecisions[sender] = decision;
+        Plugin.Log.LogInfo($"[admin-debug] sender={sender} {decision}");
     }
 
     private static void HandleReceiveAdminDebugProjection(long sender, long playerId, bool enabled)
@@ -247,7 +344,10 @@ internal static class WardAdminDebugAccess
         }
 
         var localPlayerId = Player.m_localPlayer?.GetPlayerID() ?? 0L;
+        // A snapshot received between character instances must also revoke the
+        // old local approval; the notification helper has no player in that gap.
         _serverApprovedLocalDebugState = localPlayerId != 0L && projectedPlayerIds.Contains(localPlayerId);
+        UpdateLocalServerApproval(localPlayerId, _serverApprovedLocalDebugState);
         _hasReceivedAdminDebugSnapshot = true;
         _lastLocalDebugAdminSyncUtc = DateTime.UtcNow;
     }
@@ -262,6 +362,7 @@ internal static class WardAdminDebugAccess
         var changed = enabled
             ? ServerDebugAdminPlayerIds.Add(playerId)
             : ServerDebugAdminPlayerIds.Remove(playerId);
+        if (!enabled) ServerAdminPeers.Remove(playerId);
         if (changed || enabled)
         {
             // Enabled clients heartbeat so peers that joined after the original
@@ -313,6 +414,12 @@ internal static class WardAdminDebugAccess
 
         _serverApprovedLocalDebugState = enabled;
         _lastLocalDebugAdminSyncUtc = DateTime.UtcNow;
+        _responseWaitStartedUtc = DateTime.MinValue;
+        if (_lastLoggedLocalApproval != enabled)
+        {
+            Plugin.Log.LogInfo($"[admin-debug] Server approval={enabled}; local debug requested={Player.m_debugMode}.");
+            _lastLoggedLocalApproval = enabled;
+        }
     }
 
     internal static bool IsAdminAccountId(string accountId)

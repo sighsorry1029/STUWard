@@ -365,6 +365,7 @@ internal static partial class WardOwnership
         }
 
         ManagedWardReportService.ForgetSender(peer.m_uid);
+        WardAdminDebugAccess.ForgetServerPeer(peer.m_uid);
         WardRemoteGroupAccess.ForgetPeer(peer.m_uid);
 
         if (ServerSessionIdentitiesBySender.TryGetValue(peer.m_uid, out var sessionIdentity))

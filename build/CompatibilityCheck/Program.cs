@@ -160,6 +160,42 @@ addPath.Invoke(null, new[] { paths, "same/path", first });
 addPath.Invoke(null, new[] { paths, "same/path", second });
 addPath.Invoke(null, new object?[] { paths, null, second });
 Check(paths.Count == 1 && paths["same/path"]!.Equals(first), "Asset lookup overwrote an earlier path");
+// Execute the production packet parser using the original game's ZPackage.
+// This exercises malformed network input without creating a Unity object.
+var readGroups = mod.GetType("STUWard.WardRemoteGroupAccess", true)!.GetMethod("TryReadSnapshot", hiddenStatic)!;
+var packageType = readGroups.GetParameters()[0].ParameterType;
+byte[] GroupPacket(int count, bool row = false, bool trailing = false)
+{
+    using var stream = new MemoryStream();
+    using var writer = new BinaryWriter(stream);
+    writer.Write(7L);
+    writer.Write(count);
+    if (row)
+    {
+        writer.Write(20L); writer.Write(30L); writer.Write(40L); writer.Write(50u);
+        writer.Write("guilds"); writer.Write("123"); writer.Write("Guild");
+    }
+    if (trailing) writer.Write((byte)1);
+    writer.Flush();
+    return stream.ToArray();
+}
+bool ReadGroupPacket(byte[] bytes, out int count)
+{
+    var arguments = new object?[] { Activator.CreateInstance(packageType, new object[] { bytes }), 0L, null };
+    var success = (bool)readGroups.Invoke(null, arguments)!;
+    count = ((System.Collections.ICollection)arguments[2]!).Count;
+    return success;
+}
+Check(ReadGroupPacket(GroupPacket(0), out var emptyCount) && emptyCount == 0, "No-group replacement packet rejected");
+Check(ReadGroupPacket(GroupPacket(1, row: true), out var groupCount) && groupCount == 1, "Group packet rejected by original ZPackage");
+Check(!ReadGroupPacket(GroupPacket(1), out _), "Truncated group packet accepted");
+Check(!ReadGroupPacket(GroupPacket(-1), out _), "Negative group count accepted");
+Check(!ReadGroupPacket(GroupPacket(1025), out _), "Oversized group count accepted");
+Check(!ReadGroupPacket(GroupPacket(0, trailing: true), out _), "Trailing group payload accepted");
+Check(!ReadGroupPacket(new byte[512 * 1024 + 1], out _), "Oversized group payload accepted");
+var requesterGuard = mod.GetType("STUWard.ContainerManagedRequesterIdentityPatch", true)!.GetMethod("Prefix", hiddenStatic)!;
+Check(requesterGuard.GetCustomAttribute<HarmonyPriority>()!.info.priority > Priority.First,
+    "Requester identity must be checked before shared-container state-changing prefixes");
 Console.WriteLine($"PASS: {checks} managed/IL checks; {targetCount} required target lookups. Unity native accessor initialization, rendering, prefab lifetime and networking were NOT executed.");
 // Unity's managed assemblies can enter unavailable native teardown paths when
 // this standalone verifier unloads under the Editor Mono runtime. All checks

@@ -167,18 +167,13 @@ internal static partial class GuildsCompat
             return false;
         }
 
-        var player = Player.GetPlayer(playerId);
-        if (player != null && TryResolveGuildByPlayerFromApi(player, out guild))
-        {
-            return true;
-        }
-
         var normalizedAccountId = WardOwnership.NormalizeAccountIdValue(accountId);
         var normalizedPlayerName = playerName?.Trim() ?? string.Empty;
-        return TryResolveGuildByAccountAndNameFromApi(
-            normalizedAccountId,
-            normalizedPlayerName,
-            out guild);
+        // The server already authenticated this reference. Guilds' Player overload
+        // can return no guild when its player-list entry has not arrived yet.
+        if (TryResolveGuildByAccountAndNameFromApi(normalizedAccountId, normalizedPlayerName, out guild)) return true;
+        var player = Player.GetPlayer(playerId);
+        return player != null && TryResolveGuildByPlayerFromApi(player, out guild);
     }
 
     internal static bool TryResolveCachedAuthoritativeGuildIdentity(

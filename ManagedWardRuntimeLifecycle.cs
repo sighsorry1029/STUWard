@@ -18,6 +18,7 @@ internal static class ManagedWardRuntimeLifecycle
         WardRecentPlayers.ResetRuntimeState();
 
         WardAdminDebugAccess.ResetRuntimeState();
+        WardRemoteGroupAccess.Reset();
         ManagedWardReportService.ResetRuntimeState();
         WardOwnership.ResetRuntimeState();
 
@@ -44,6 +45,7 @@ internal static class ManagedWardRuntimeLifecycle
         }
 
         WardAdminDebugAccess.EnsureRuntimeBindings();
+        WardRemoteGroupAccess.RegisterRpcs(routedRpc);
         WardOwnership.RegisterRpcs();
         ManagedWardInteractionRpc.RegisterRoutedRpcs(routedRpc);
         WardSettings.RegisterRoutedRpcs(routedRpc);
@@ -76,6 +78,7 @@ internal static class ManagedWardRuntimeLifecycle
         WardSettings.UpdateLocalBoundaryFlash();
         GuildsCompat.Update();
         WardGroupCompat.Update();
+        WardRemoteGroupAccess.Update();
         ManagedWardPresenceService.Update();
 
         if (WardMinimapPinsManager.HasPendingRuntimeWork())

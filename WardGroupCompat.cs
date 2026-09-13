@@ -17,6 +17,8 @@ internal static class WardGroupCompat
 
     private static bool _providerConflictWarningLogged;
 
+    internal static bool HasActiveGroupProvider => GetActiveProvider() is ActiveProvider.Clan or ActiveProvider.Guilds;
+
     private enum ActiveProvider
     {
         None,
@@ -53,6 +55,7 @@ internal static class WardGroupCompat
 
     internal static void Shutdown()
     {
+        WardRemoteGroupAccess.Reset();
         ClanCompat.Shutdown();
     }
 
@@ -72,6 +75,11 @@ internal static class WardGroupCompat
             return default;
         }
 
+        if (ZNet.instance != null && !ZNet.instance.IsServer() && player != Player.m_localPlayer)
+        {
+            return GetRemotePlayerGroupIdentity(player.GetPlayerID());
+        }
+
         switch (GetActiveProvider())
         {
             case ActiveProvider.Guilds:
@@ -87,6 +95,11 @@ internal static class WardGroupCompat
 
     internal static WardGroupIdentity GetPlayerGroupIdentity(long playerId)
     {
+        if (ZNet.instance != null && !ZNet.instance.IsServer() && Player.m_localPlayer?.GetPlayerID() != playerId)
+        {
+            return GetRemotePlayerGroupIdentity(playerId);
+        }
+
         switch (GetActiveProvider())
         {
             case ActiveProvider.Guilds:
@@ -103,6 +116,32 @@ internal static class WardGroupCompat
     internal static string GetPlayerGroupName(long playerId)
     {
         return GetPlayerGroupIdentity(playerId).Name;
+    }
+
+    private static WardGroupIdentity GetRemotePlayerGroupIdentity(long playerId)
+    {
+        var provider = GetActiveProvider();
+        return provider is ActiveProvider.Clan or ActiveProvider.Guilds
+            ? WardRemoteGroupAccess.GetPlayerGroup(playerId, provider == ActiveProvider.Clan ? ClanProvider : GuildsProvider)
+            : default;
+    }
+
+    internal static bool TryResolveAuthoritativeGroupIdentity(long playerId, string accountId, string playerName,
+        out WardGroupIdentity group)
+    {
+        group = default;
+        if (ZNet.instance == null || !ZNet.instance.IsServer() || playerId == 0 || string.IsNullOrWhiteSpace(accountId)) return false;
+        switch (GetActiveProvider())
+        {
+            case ActiveProvider.Clan:
+                return TryResolveClan(playerId, accountId, out group);
+            case ActiveProvider.Guilds:
+                if (!GuildsCompat.TryResolveAuthoritativeGuildIdentity(playerId, accountId, playerName, out var guild)) return false;
+                group = FromGuild(guild);
+                return true;
+            default:
+                return false;
+        }
     }
 
     internal static WardGroupIdentity GetWardGroupIdentity(PrivateArea? area)

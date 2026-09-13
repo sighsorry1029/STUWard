@@ -259,25 +259,45 @@ internal static class ContainerCheckAccessManagedPatch
 {
     private static bool Prefix(Container __instance, long playerID, ref bool __result)
     {
-        if (__instance == null || playerID == 0L || !WardAccess.HasEnabledManagedWards())
-        {
-            return true;
-        }
+        return !WardAccessApi.TryCheckContainerAccess(__instance, playerID, out __result);
+    }
+}
 
-        var candidates = WardAccess.GetCandidateManagedWards(__instance.transform.position, 0f, requireEnabled: true);
-        var access = WardAccess.EvaluateRestrictionAccessAgainstCandidates(
-            WardRestrictionOptions.Containers,
-            __instance.transform.position,
-            0f,
-            playerID,
-            candidates,
-            flash: false);
-        if (access.Decision == WardAccess.AccessDecision.NoWard)
-        {
-            return true;
-        }
+[HarmonyPatch]
+internal static class ContainerManagedRequesterIdentityPatch
+{
+    private static IEnumerable<MethodBase> TargetMethods()
+    {
+        foreach (var name in new[] { "RPC_RequestOpen", "RPC_RequestStack", "RPC_RequestTakeAll" })
+            yield return AccessTools.DeclaredMethod(typeof(Container), name, new[] { typeof(long), typeof(long) });
+    }
 
-        __result = !access.IsDenied;
+    // Runs before InventorySlots' shared-view prefix. It may preserve concurrent
+    // viewing, but neither it nor vanilla may impersonate a different group member.
+    [HarmonyPriority(Priority.First + 100)]
+    private static bool Prefix(Container __instance, long uid, long playerID, ZNetView ___m_nview, MethodBase __originalMethod)
+    {
+        if (___m_nview == null || !___m_nview.IsValid() || !___m_nview.IsOwner()) return true;
+        var position = __instance.transform.position;
+        var candidates = WardAccess.GetCandidateManagedWards(position, 0f, requireEnabled: true);
+        var protectedContainer = false;
+        foreach (var area in candidates)
+        {
+            if (area != null && area.IsInside(position, 0f) &&
+                WardSettings.HasRestriction(WardSettings.GetConfiguration(area), WardRestrictionOptions.Containers))
+            {
+                protectedContainer = true;
+                break;
+            }
+        }
+        if (!protectedContainer || WardOwnership.TryResolveClaimedPlayerIdFromSender(uid, playerID, out _)) return true;
+        var response = __originalMethod.Name switch
+        {
+            "RPC_RequestStack" => "RPC_StackResponse",
+            "RPC_RequestTakeAll" => "RPC_TakeAllResponse",
+            _ => "RPC_OpenResponse"
+        };
+        if (uid != 0) ___m_nview.InvokeRPC(uid, response, false);
         return false;
     }
 }

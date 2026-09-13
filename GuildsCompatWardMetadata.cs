@@ -218,12 +218,14 @@ internal static partial class GuildsCompat
 
     internal static void RefreshAllWardGuildProjections(bool liveDisplayRefresh = false)
     {
+        WardRemoteGroupAccess.Invalidate();
         InvalidateAllSyncedGuildIdentities();
         QueueWardGuildProjectionRefreshForAll(liveDisplayRefresh);
     }
 
     private static void RefreshWardGuildProjectionForGuild(object? guild)
     {
+        WardRemoteGroupAccess.Invalidate();
         var resolvedGuildId = TryParseGuild(guild, out var resolvedGuild) ? resolvedGuild.Id : 0;
         InvalidateSyncedGuildIdentitiesForGuild(resolvedGuildId);
         var memberIdentities = CollectGuildMemberCharacterIdentities(guild, out var hadUnresolvedMembers);
@@ -246,6 +248,7 @@ internal static partial class GuildsCompat
         int affectedGuildId = 0,
         int previousGuildId = 0)
     {
+        WardRemoteGroupAccess.Invalidate();
         if (!identity.HasPlayerId && !identity.HasAccountAndName)
         {
             return;

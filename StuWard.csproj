@@ -157,6 +157,9 @@
         <Compile Include="ManagedWardProjectionService.cs"/>
         <Compile Include="Domain\ManagedWardAccessPolicy.cs"/>
         <Compile Include="Domain\WardGroupIdentity.cs"/>
+        <Compile Include="Domain\WardGroupSnapshotCache.cs"/>
+        <Compile Include="WardRemoteGroupAccess.cs"/>
+        <Compile Include="WardAccessApi.cs"/>
         <Compile Include="Domain\GuildIdentityPolicy.cs"/>
         <Compile Include="Domain\BuildingDamagePolicy.cs"/>
         <Compile Include="Domain\WardLimitPolicy.cs"/>

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.15
+
+- Fixed administrator debug access on dedicated servers when Server Devcommands or another server mod supplies the effective administrator decision. STUWard now validates the authenticated peer through Valheim's native administrator policy instead of comparing the raw administrator list itself.
+- Bound administrator debug approval to the current connection and character, with revalidation after permission changes, reconnects, character changes, and disconnects so stale approval cannot carry into another session.
+- Added reliable retry and focused `[admin-debug]` diagnostics for missing approval responses while preserving the existing RPC payloads, configuration, ward data, and requirement that actual debug mode and server approval are both active. Servers and clients must update together.
+
 ## 1.3.14
 
 - Fixed Clan and Guild members being denied access to managed containers owned by another client on dedicated servers. STUWard now distributes short-lived, server-authoritative group snapshots and validates the live player session and character before applying remote group access.

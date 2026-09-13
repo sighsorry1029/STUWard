@@ -134,9 +134,20 @@ internal static partial class WardMinimapPinsManager
 
     internal static void UpdatePendingRemoteState(Player? player)
     {
-        if (player == null ||
-            player != Player.m_localPlayer ||
-            !IsLargeMapOpen(Minimap.instance) ||
+        if (player == null || player != Player.m_localPlayer)
+        {
+            return;
+        }
+
+        // Approval can arrive after an ordinary snapshot has settled. Also
+        // discard privileged pins when debug is revoked while the map is closed.
+        if (_lastCanSeeAllWards != WardAdminDebugAccess.IsPlayerAdminDebugController(player.GetPlayerID()))
+        {
+            UpdateLocalState(player);
+            return;
+        }
+
+        if (!IsLargeMapOpen(Minimap.instance) ||
             (!_pendingForceRefresh &&
              (_snapshotState == ClientSnapshotState.Ready || _snapshotState == ClientSnapshotState.TooLarge) &&
              _pendingSnapshotRequestId == 0))

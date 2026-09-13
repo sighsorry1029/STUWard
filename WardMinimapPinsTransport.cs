@@ -239,6 +239,8 @@ internal static partial class WardMinimapPinsManager
         int requestId;
         WardPinsResponseKind responseKind;
         int viewerRevisionToken;
+        long viewerPlayerId;
+        bool canSeeAllWards;
         int visibleWardCount;
         int snapshotCount;
         try
@@ -249,8 +251,8 @@ internal static partial class WardMinimapPinsManager
                 return;
             }
             viewerRevisionToken = pkg.ReadInt();
-            _ = pkg.ReadLong();
-            _ = pkg.ReadBool();
+            viewerPlayerId = pkg.ReadLong();
+            canSeeAllWards = pkg.ReadBool();
             _ = pkg.ReadInt();
             _ = pkg.ReadInt();
             visibleWardCount = pkg.ReadInt();
@@ -276,6 +278,15 @@ internal static partial class WardMinimapPinsManager
 
         if (_pendingSnapshotRequestId == 0 || requestId != _pendingSnapshotRequestId)
         {
+            return;
+        }
+
+        if (!IsCurrentWardPinsViewer(viewerPlayerId, canSeeAllWards))
+        {
+            // A pre-approval response may still match the pending request while
+            // the next request is throttled. Do not let it settle the wrong view.
+            _pendingSnapshotRequestId = 0;
+            QueueRemoteSnapshotBootstrapRequest();
             return;
         }
 
@@ -365,6 +376,13 @@ internal static partial class WardMinimapPinsManager
         }
     }
 
+    private static bool IsCurrentWardPinsViewer(long playerId, bool canSeeAllWards)
+    {
+        var player = Player.m_localPlayer;
+        return player != null && playerId != 0 && player.GetPlayerID() == playerId &&
+               WardAdminDebugAccess.IsPlayerAdminDebugController(playerId) == canSeeAllWards;
+    }
+
     private static void HandlePushWardPins(long sender, ZPackage pkg)
     {
         if (!WardOwnership.IsAuthoritativeServerSender(sender) || pkg == null)
@@ -374,6 +392,8 @@ internal static partial class WardMinimapPinsManager
 
         WardPinsPushKind pushKind;
         int viewerRevisionToken;
+        long viewerPlayerId;
+        bool canSeeAllWards;
         int visibleWardCount;
         int snapshotCount;
         int removedWardCount;
@@ -385,8 +405,8 @@ internal static partial class WardMinimapPinsManager
                 return;
             }
             viewerRevisionToken = pkg.ReadInt();
-            _ = pkg.ReadLong();
-            _ = pkg.ReadBool();
+            viewerPlayerId = pkg.ReadLong();
+            canSeeAllWards = pkg.ReadBool();
             _ = pkg.ReadInt();
             _ = pkg.ReadInt();
             visibleWardCount = pkg.ReadInt();
@@ -405,6 +425,10 @@ internal static partial class WardMinimapPinsManager
         {
             return;
         }
+
+        // In particular, ignore late administrator pushes after debug is off.
+        // They must not replace pins or cancel a newer pending normal request.
+        if (!IsCurrentWardPinsViewer(viewerPlayerId, canSeeAllWards)) return;
 
         if (!TryReadSnapshotEntries(pkg, snapshotCount, out var snapshotEntries))
         {

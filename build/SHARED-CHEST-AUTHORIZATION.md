@@ -18,6 +18,10 @@ Guilds source: [API.cs at d9133c40ecbf842dcfc1ac617eeb476eb96771a9](https://gith
 
 ## Verification and remaining execution
 
+Administrator map updates now detect approval changes before ready/closed-map early returns. Existing response/push headers must match the current player and approved debug state. A mismatched current response schedules a fresh snapshot; a mismatched push is ignored without canceling a newer request. No map packet format or server visibility policy is changed.
+
+An additional standalone Harmony execution attempt for map receivers could not run: preparing Player-dependent helpers initialized ZSyncAnimation/Animator and required Unity native StringToHash. That temporary harness addition was removed; game DLLs were not altered to bypass this boundary. Map receive races are reviewed in source and remain actual-game validation items.
+
 Both Debug builds use DeployToGame=true and final merged DLL hashes match local plugins. STUWard passes 55 domain cases, including replacement/revocation, session/character/provider mismatch, expiry, stale/duplicate responses and malformed rows. Its original 1.0.7/1.0.12 client/server verifier also executes the production packet parser with original ZPackage, without Unity initialization.
 
 InventorySlots passes 167 checks. The production adapter/requester gate is linked into tests with engine/plugin stand-ins covering missing dependency, delegated trust, privacy denial, managed denial precedence, vanilla overlap and API exceptions. Original 1.0.12 client/server metadata checks cover 1,014 references, 134 Harmony targets and 40 reflection contracts without failures; eight pre-existing manual entries remain.

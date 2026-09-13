@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.14
+
+- Fixed Clan and Guild members being denied access to managed containers owned by another client on dedicated servers. STUWard now distributes short-lived, server-authoritative group snapshots and validates the live player session and character before applying remote group access.
+- Added an optional container-access API for multi-user container mods and protected managed container RPCs against claimed-player identity spoofing. Existing ward restrictions, role policies, direct permitted-player access, and item ownership safeguards remain in effect.
+- Fixed administrator debug map visibility not refreshing when approval changes, and rejected delayed map responses or pushes created for an outdated player or administrator state.
+- InventorySlots 1.4.15 or later is required for Clan, Guild, and administrator grants to pass through its built-in multi-user chest requester checks. Servers and clients must update STUWard together.
+
 ## 1.3.13
 
 - Simplified managed-ward initialization and placement validation while preserving Harmony targets, placement results, marker setup, overlap rules, and player feedback.

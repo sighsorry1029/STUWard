@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.17
+
+- Re-release of 1.3.16 with no functional changes, retaining the Jotunn AssetManager load-order compatibility fix.
+- Servers and clients must update STUWard together to satisfy the synchronized version requirement.
+
 ## 1.3.16
 
 - Fixed a load-order conflict with Jotunn's AssetManager that could break initialization of ValheimRAFT and other Jotunn-based mods. STUWard's asset-path transpiler now runs after Jotunn's, including when AssetManager initializes later in startup.

@@ -6,14 +6,14 @@ using System.Reflection.Emit;
 
 // Managed compatibility checks against the final merged mod and unmodified game
 // DLLs. This does not start Unity, instantiate prefabs, or prove multiplayer behavior.
-if (args.Length != 3) throw new ArgumentException("Usage: mod.dll game-managed-directory BepInEx-core-directory");
+if (args.Length is not (3 or 4)) throw new ArgumentException("Usage: mod.dll game-managed-directory BepInEx-core-directory [Jotunn.dll: asset-path checks only]");
 var modPath = Path.GetFullPath(args[0]);
 var managed = Path.GetFullPath(args[1]);
 var core = Path.GetFullPath(args[2]);
 AppDomain.CurrentDomain.AssemblyResolve += (_, eventArgs) =>
 {
     var name = new AssemblyName(eventArgs.Name);
-    foreach (var dir in new[] { managed, core, Path.GetDirectoryName(modPath)! })
+    foreach (var dir in new[] { managed, core, Path.GetDirectoryName(modPath)!, args.Length == 4 ? Path.GetDirectoryName(Path.GetFullPath(args[3]))! : core })
     {
         var path = Path.Combine(dir, name.Name + ".dll");
         if (File.Exists(path)) return Assembly.LoadFrom(path);
@@ -27,6 +27,82 @@ void Check(bool condition, string message)
     checks++;
 }
 IEnumerable<TypeDefinition> Flatten(IEnumerable<TypeDefinition> types) => types.SelectMany(t => new[] { t }.Concat(Flatten(t.NestedTypes)));
+if (args.Length == 4)
+{
+    // Separate mode: actual Harmony installation without the full game's type
+    // initialization. Run in its own process; never invoke the game target.
+    foreach (var name in new[] { "assembly_valheim.dll", "assembly_guiutils.dll", "SoftReferenceableAssets.dll" })
+        Assembly.LoadFrom(Path.Combine(managed, name));
+    var softAssembly = Assembly.LoadFrom(Path.Combine(managed, "SoftReferenceableAssets.dll"));
+    Check(string.Equals(softAssembly.Location, Path.Combine(managed, "SoftReferenceableAssets.dll"), StringComparison.OrdinalIgnoreCase), "Wrong asset assembly loaded");
+    var modAssembly = Assembly.LoadFrom(modPath);
+    var jotunnAssembly = Assembly.LoadFrom(Path.GetFullPath(args[3]));
+    const BindingFlags flags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+    var patchType = modAssembly.GetType("STUWard.WardUiResources+AssetPathsPatch", true)!;
+    var jotunnPatchType = jotunnAssembly.GetType("Jotunn.Managers.AssetManager+Patches", true)!;
+    Check(jotunnPatchType.TypeInitializer == null, "Jotunn patch class now requires runtime initialization");
+    var target = (MethodBase)patchType.GetMethod("TargetMethod", flags)!.Invoke(null, null)!;
+    var stuAdd = patchType.GetMethod("AddPath", flags)!;
+    var jotunnAdd = jotunnPatchType.GetMethod("AddSafe", flags)!;
+    var jotunnTranspiler = jotunnPatchType.GetMethod("AssetBundleLoader_GetAllAssetPathsMappedToAssetID", flags)!;
+    var assetId = softAssembly.GetType("SoftReferenceableAssets.AssetID", true)!;
+    var dictionary = typeof(Dictionary<,>).MakeGenericType(typeof(string), assetId);
+    var nativeAdd = dictionary.GetMethod("Add")!;
+    Check(PatchProcessor.GetOriginalInstructions(target).Count(i => i.Calls(nativeAdd)) == 1, "Unexpected original asset lookup body");
+    void CheckGuard(MethodInfo expected)
+    {
+        var code = PatchProcessor.GetCurrentInstructions(target);
+        var other = expected == stuAdd ? jotunnAdd : stuAdd;
+        Check(code.Count(i => i.Calls(expected)) == 1 && !code.Any(i => i.Calls(other) || i.Calls(nativeAdd)), "Wrong asset guard after Harmony reconstruction: " + expected.Name);
+    }
+    foreach (var stuFirst in new[] { true, false })
+    {
+        var stuHarmony = new Harmony("sighsorry.STUWard");
+        var jotunnHarmony = new Harmony("com.jotunn.jotunn");
+        try
+        {
+            if (stuFirst)
+            {
+                // Read production attributes through the same class processor
+                // as WardPatchRegistry; do not supply test-only ordering.
+                stuHarmony.CreateClassProcessor(patchType).Patch();
+                CheckGuard(stuAdd);
+                jotunnHarmony.Patch(target, transpiler: new HarmonyMethod(jotunnTranspiler));
+            }
+            else
+            {
+                jotunnHarmony.Patch(target, transpiler: new HarmonyMethod(jotunnTranspiler));
+                stuHarmony.CreateClassProcessor(patchType).Patch();
+            }
+            CheckGuard(jotunnAdd);
+            jotunnHarmony.Unpatch(target, jotunnTranspiler);
+            CheckGuard(stuAdd);
+            jotunnHarmony.Patch(target, transpiler: new HarmonyMethod(jotunnTranspiler));
+            CheckGuard(jotunnAdd);
+            stuHarmony.UnpatchSelf();
+            CheckGuard(jotunnAdd);
+            System.Console.WriteLine($"PASS: {(stuFirst ? "STUWard first" : "Jotunn first")}; late registration, removal and re-registration.");
+        }
+        finally
+        {
+            stuHarmony.UnpatchSelf();
+            jotunnHarmony.Unpatch(target, jotunnTranspiler);
+        }
+    }
+    var firstId = Activator.CreateInstance(assetId, new object[] { 1u, 2u, 3u, 4u });
+    var secondId = Activator.CreateInstance(assetId, new object[] { 5u, 6u, 7u, 8u });
+    foreach (var helper in new[] { stuAdd, jotunnAdd })
+    {
+        var entries = (System.Collections.IDictionary)Activator.CreateInstance(dictionary)!;
+        helper.Invoke(null, new[] { entries, "same/path", firstId });
+        helper.Invoke(null, new[] { entries, "same/path", secondId });
+        helper.Invoke(null, new object?[] { entries, null, secondId });
+        Check(entries.Count == 1 && entries["same/path"]!.Equals(firstId), helper.Name + " changed duplicate/null handling");
+    }
+    Check(PatchProcessor.GetCurrentInstructions(target).Count(i => i.Calls(nativeAdd)) == 1, "Asset target not restored after cleanup");
+    System.Console.WriteLine($"PASS: {checks} asset-path checks against {jotunnAssembly.GetName()}. Unity initialization and the game target were NOT executed.");
+    return;
+}
 using (var module = ModuleDefinition.ReadModule(modPath))
 {
     Check(!module.AssemblyReferences.Any(r => r.Name == "Jotunn"), "Jotunn assembly reference remains");

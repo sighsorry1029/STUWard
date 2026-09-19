@@ -327,6 +327,9 @@ internal sealed class WardUiResources
             // Preserve the first mapping, as the former Jotunn asset lookup did.
             if (path != null && !paths.ContainsKey(path)) paths.Add(path, id);
         }
+        // Jotunn's lazily registered transpiler needs the original Add call.
+        // It applies the same guard; let it run first whenever both are present.
+        [HarmonyAfter("com.jotunn.jotunn")]
         private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
         {
             var add = AccessTools.DeclaredMethod(typeof(Dictionary<string, AssetID>), "Add");

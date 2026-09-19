@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.16
+
+- Fixed a load-order conflict with Jotunn's AssetManager that could break initialization of ValheimRAFT and other Jotunn-based mods. STUWard's asset-path transpiler now runs after Jotunn's, including when AssetManager initializes later in startup.
+- Preserved duplicate-path protection when Jotunn is absent and added regression checks for both patch registration orders and patch removal/re-registration. Jotunn remains optional; ward permissions, settings, and stored data are unchanged.
+- Servers and clients must update STUWard together. Fully restart the game or server after updating.
+
 ## 1.3.15
 
 - Fixed administrator debug access on dedicated servers when Server Devcommands or another server mod supplies the effective administrator decision. STUWard now validates the authenticated peer through Valheim's native administrator policy instead of comparing the raw administrator list itself.

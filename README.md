@@ -123,6 +123,9 @@ Players normally see wards they are allowed to see. Admin debug control can show
 
 ## Important Details
 
+- Compatible PortalRules builds defer portal damage and dismantling protection to STUWard inside enabled wards. Unsupported collapse remains normal there. Outside active coverage, PortalRules applies its own portal protection setting. Both mods must be updated on the server and clients; portal travel permissions are unchanged.
+- Optional integrations can query `WardAccessApi.IsInsideActiveWard(Vector3)` for current, locally loaded active coverage. This is a coverage query, not a player permission grant; callers must preserve STUWard's action and RPC checks.
+
 - Ownership metadata is based on the ward creator player id.
 - Account identity is used for limits and reporting, not as a separate permission tier.
 - A ward's provider-qualified group identity is projected from its owner's authoritative Guilds or Clan membership. Clan Guest membership is excluded.

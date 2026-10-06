@@ -20,7 +20,7 @@ internal sealed class ConfigurationManagerAttributes
 public sealed class Plugin : BaseUnityPlugin
 {
     internal const string ModName = "STUWard";
-    internal const string ModVersion = "1.3.17";
+    internal const string ModVersion = "1.3.18";
     internal const string Author = "sighsorry";
     internal const string ModGuid = $"{Author}.{ModName}";
 
@@ -36,6 +36,7 @@ public sealed class Plugin : BaseUnityPlugin
 
     private Harmony _harmony = null!;
     private bool _ready;
+    internal static bool IsReady => Instance != null && Instance._ready && Instance.isActiveAndEnabled;
 
     internal static ManualLogSource Log = null!;
     internal static Plugin Instance = null!;

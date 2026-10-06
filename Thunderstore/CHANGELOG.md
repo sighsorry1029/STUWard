@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.18
+
+- Added an optional active-ward coverage API for PortalRules 1.1.6. Portals inside an enabled ward can follow STUWard's damage and dismantling rules, with normal unsupported collapse, while PortalRules protects portals outside active coverage.
+- Coverage uses the existing local ward index and checks current validity, activation and actual range. The API does not grant player access or change STUWard's existing permission, damage, configuration or save-data rules.
+- Updated the required BepInExPack Valheim dependency to 5.4.2351. Update STUWard on the server and clients together; update PortalRules too when using the integration.
+
 ## 1.3.17
 
 - Re-release of 1.3.16 with no functional changes, retaining the Jotunn AssetManager load-order compatibility fix.

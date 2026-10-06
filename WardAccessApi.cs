@@ -1,8 +1,29 @@
+using UnityEngine;
+
 namespace STUWard;
 
-/// <summary>Optional integration with STUWard's requester-specific container policy.</summary>
+/// <summary>Optional integration with STUWard's coverage and container policies.</summary>
 public static class WardAccessApi
 {
+    /// <summary>
+    /// Tests current, locally loaded active STUWard coverage using the spatial index.
+    /// This is not an access grant or a promise to block every kind of damage.
+    /// Callers delegating protection must leave STUWard's action/RPC checks in place.
+    /// </summary>
+    public static bool IsInsideActiveWard(Vector3 point)
+    {
+        if (!Plugin.IsReady || ZNet.instance == null) return false;
+        var candidates = WardAccess.GetCandidateManagedWards(point, 0f, requireEnabled: true);
+        for (int i = 0; i < candidates.Count; i++)
+        {
+            var area = candidates[i];
+            // Membership may lag a received ZDO change until UpdateStatus runs.
+            if (area != null && WardAccess.IsManagedWard(area, requireEnabled: true) && area.IsInside(point, 0f))
+                return true;
+        }
+        return false;
+    }
+
     /// <summary>Identifies a STUWard-managed area without treating other wards as ours.</summary>
     public static bool IsManagedWard(PrivateArea area) => area != null && WardAccess.IsManagedWard(area, false);
 

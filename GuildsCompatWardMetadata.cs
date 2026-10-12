@@ -30,49 +30,6 @@ internal static partial class GuildsCompat
         PendingWardGuildProjectionRefresh.FlushAtUtc = DateTime.MinValue;
     }
 
-    internal static int GetWardGuildId(PrivateArea? area)
-    {
-        var zdo = GetWardZdo(area);
-        if (TryGetStoredWardGuildIdentity(zdo, out var storedGuild))
-        {
-            return storedGuild.Id;
-        }
-
-        return TryResolveWardGuildIdentity(area, out var guild) ? guild.Id : 0;
-    }
-
-    internal static string GetWardGuildName(PrivateArea? area)
-    {
-        var zdo = GetWardZdo(area);
-        if (TryGetStoredWardGuildIdentity(zdo, out var storedGuild) &&
-            !string.IsNullOrWhiteSpace(storedGuild.Name))
-        {
-            return storedGuild.Name;
-        }
-
-        if (TryResolveWardGuildIdentity(area, out var guild))
-        {
-            return guild.Name;
-        }
-
-        var storedGuildId = storedGuild.Id;
-        if (storedGuildId != 0 && TryGetGuildById(storedGuildId, out guild))
-        {
-            return guild.Name;
-        }
-
-        var localPlayer = Player.m_localPlayer;
-        if (storedGuildId != 0 &&
-            localPlayer != null &&
-            TryGetGuild(localPlayer, out guild) &&
-            guild.Id == storedGuildId)
-        {
-            return guild.Name;
-        }
-
-        return string.Empty;
-    }
-
     internal static WardGuildIdentity ResolveWardGuildIdentityReadOnly(ZDO? zdo)
     {
         if (TryGetStoredWardGuildIdentity(zdo, out var storedGuild) && storedGuild.Id != 0)
@@ -115,38 +72,6 @@ internal static partial class GuildsCompat
 
         guild = new WardGuildIdentity(guildId, guildName.Trim());
         return true;
-    }
-
-    private static ZDO? GetWardZdo(PrivateArea? area)
-    {
-        return WardPrivateAreaSafeAccess.GetZdo(area);
-    }
-
-    private static bool TryResolveWardGuildIdentity(
-        PrivateArea? area,
-        out WardGuildIdentity guild)
-    {
-        guild = default;
-        if (area == null)
-        {
-            return false;
-        }
-
-        var zdo = GetWardZdo(area);
-        var ownerPlayerId = WardAccess.GetCanonicalCreatorPlayerId(area);
-        var wardSteamAccountId = WardOwnership.ResolveWardSteamAccountId(zdo, ownerPlayerId);
-        var ownerName = GetWardOwnerNameForProjection(zdo);
-        if (TryResolveWardGuildIdentityReadOnly(
-                ownerPlayerId,
-                wardSteamAccountId,
-                ownerName,
-                treatResolvedNoGuildAsResolved: true,
-                out guild))
-        {
-            return true;
-        }
-
-        return false;
     }
 
     internal static string GetWardOwnerNameForProjection(ZDO? zdo)

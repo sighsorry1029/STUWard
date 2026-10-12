@@ -299,25 +299,6 @@ internal static partial class GuildsCompat
         }
     }
 
-    private static bool TryGetGuildById(int guildId, out WardGuildIdentity guild)
-    {
-        guild = default;
-        if (guildId == 0 || GetGuildByIdMethod == null || !IsAvailable())
-        {
-            return false;
-        }
-
-        try
-        {
-            var guildObject = GetGuildByIdMethod.Invoke(null, new object[] { guildId });
-            return TryParseGuild(guildObject, out guild);
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
     private static bool TryGetUnexpiredCachedGuild(long playerId, out CachedWardGuildIdentity cached)
     {
         if (!PlayerGuildCache.TryGetValue(playerId, out cached))

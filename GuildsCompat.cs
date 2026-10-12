@@ -72,21 +72,6 @@ internal static partial class GuildsCompat
         return TryGetGuild(playerId, out var guild) ? guild : default;
     }
 
-    internal static int GetPlayerGuildId(Player? player)
-    {
-        return TryGetGuild(player, out var guild) ? guild.Id : 0;
-    }
-
-    internal static int GetPlayerGuildId(long playerId)
-    {
-        return TryGetGuild(playerId, out var guild) ? guild.Id : 0;
-    }
-
-    internal static string GetPlayerGuildName(long playerId)
-    {
-        return TryGetGuild(playerId, out var guild) ? guild.Name : string.Empty;
-    }
-
     internal static int GetWardGuildId(ZDO? zdo)
     {
         return zdo?.GetInt(GuildIdKey, 0) ?? 0;

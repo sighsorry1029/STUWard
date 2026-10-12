@@ -30,6 +30,8 @@ internal static class WardPluginConfigBindings
 
         UnbindHandler(Plugin.MaxWardRadius, HandleMaxWardRadiusChanged);
         UnbindHandler(Plugin.WardRangeConfiguration, HandleWardRangeConfigurationChanged);
+        UnbindHandler(Plugin.GuildsIntegration, HandleGroupIntegrationChanged);
+        UnbindHandler(Plugin.ClanIntegration, HandleGroupIntegrationChanged);
         UnbindHandler(Plugin.HostileCreatureStructureProtection, HandleWardPresenceConfigChanged);
         UnbindHandler(Plugin.DisableVanillaGuardStoneRecipe, HandleRecipeSettingsChanged);
         UnbindHandler(Plugin.StuWardRecipe, HandleRecipeSettingsChanged);
@@ -105,6 +107,22 @@ internal static class WardPluginConfigBindings
             "STUWard recipe override. Format: ItemPrefab:Amount[:Recover], ...",
             configManagerOrder: GeneralOrderStart - OrderStep * 7
         );
+
+        Plugin.GuildsIntegration = Plugin.BindConfigEntry(
+            "1 - General",
+            "Guilds Integration",
+            Plugin.Toggle.On,
+            "Grants automatic ward trust and same-guild ward overlap through Guilds. Off requires individual registration; owner and admin-debug access remain. Existing overlapping wards keep their radius, but shared areas require access to every covering ward. Does not disable the Guilds mod itself.",
+            configManagerOrder: GeneralOrderStart - OrderStep * 8
+        );
+
+        Plugin.ClanIntegration = Plugin.BindConfigEntry(
+            "1 - General",
+            "Clan Integration",
+            Plugin.Toggle.On,
+            "Grants automatic ward trust and same-clan ward overlap through Clan's authorized primary membership; Guests are excluded. Off requires individual registration; owner and admin-debug access remain. Existing overlapping wards keep their radius, but shared areas require access to every covering ward. Does not disable the Clan mod itself.",
+            configManagerOrder: GeneralOrderStart - OrderStep * 9
+        );
     }
 
     private static void BindRestrictions()
@@ -175,6 +193,8 @@ internal static class WardPluginConfigBindings
     {
         BindHandler(Plugin.MaxWardRadius, HandleMaxWardRadiusChanged);
         BindHandler(Plugin.WardRangeConfiguration, HandleWardRangeConfigurationChanged);
+        BindHandler(Plugin.GuildsIntegration, HandleGroupIntegrationChanged);
+        BindHandler(Plugin.ClanIntegration, HandleGroupIntegrationChanged);
         BindHandler(Plugin.HostileCreatureStructureProtection, HandleWardPresenceConfigChanged);
         BindHandler(Plugin.DisableVanillaGuardStoneRecipe, HandleRecipeSettingsChanged);
         BindHandler(Plugin.StuWardRecipe, HandleRecipeSettingsChanged);
@@ -197,6 +217,11 @@ internal static class WardPluginConfigBindings
     private static void HandleWardPresenceConfigChanged(object? _, EventArgs __)
     {
         ManagedWardPresenceService.Invalidate();
+    }
+
+    private static void HandleGroupIntegrationChanged(object? _, EventArgs __)
+    {
+        WardGroupCompat.HandleIntegrationChanged();
     }
 
     private static void HandleRecipeSettingsChanged(object? _, EventArgs __)

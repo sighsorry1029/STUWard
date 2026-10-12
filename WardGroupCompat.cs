@@ -59,6 +59,25 @@ internal static class WardGroupCompat
         ClanCompat.Shutdown();
     }
 
+    internal static void HandleIntegrationChanged()
+    {
+        WardRemoteGroupAccess.Reset();
+        ClanCompat.ResetRuntimeState();
+        // Invalidate both server and local Guilds lookups before allowing a
+        // newly enabled provider to contribute trust again.
+        GuildsCompat.RefreshAllWardGuildProjections();
+        if (ZNet.instance != null)
+        {
+            EnsureRuntimeBindings();
+        }
+
+        ManagedWardPlacementPreviewService.Invalidate();
+        ManagedWardPresenceService.Invalidate();
+        WardMinimapPinsManager.HandleGroupIntegrationChanged();
+        ManagedWardMapStateService.InvalidateProjection(liveDisplayRefresh: true);
+        WardGuiController.Instance?.RefreshGroupMetadata();
+    }
+
     internal static void OnLocalPlayerStarted(Player player)
     {
         GuildsCompat.OnLocalPlayerStarted(player);
@@ -149,7 +168,7 @@ internal static class WardGroupCompat
         var zdo = WardPrivateAreaSafeAccess.GetZdo(area);
         var stored = ResolveWardGroupIdentityReadOnly(zdo);
         if (stored.IsValid ||
-            GetActiveProvider() == ActiveProvider.Clan &&
+            HasActiveGroupProvider &&
             ZNet.instance != null &&
             ZNet.instance.IsServer())
         {
@@ -179,12 +198,12 @@ internal static class WardGroupCompat
 
     internal static string GetGroupLabelFallback()
     {
-        return GetActiveProvider() == ActiveProvider.Clan ? "Clan: {0}" : "Guild: {0}";
+        return ClanCompat.IsInstalled && !GuildsCompat.IsInstalled() ? "Clan: {0}" : "Guild: {0}";
     }
 
     internal static string GetGroupLabelToken()
     {
-        return GetActiveProvider() == ActiveProvider.Clan
+        return ClanCompat.IsInstalled && !GuildsCompat.IsInstalled()
             ? WardLocalization.UiClanToken
             : WardLocalization.UiGuildToken;
     }
@@ -207,12 +226,15 @@ internal static class WardGroupCompat
             return default;
         }
 
-        if (activeProvider == ActiveProvider.Clan && ZNet.instance != null && ZNet.instance.IsServer())
+        if (ZNet.instance != null && ZNet.instance.IsServer())
         {
             var ownerPlayerId = zdo.GetLong(ZDOVars.s_creator, 0L);
             var ownerAccountId = WardOwnership.ResolveWardSteamAccountId(zdo, ownerPlayerId);
-            return TryResolveClan(ownerPlayerId, ownerAccountId, out var authoritativeClan)
-                ? authoritativeClan
+            // Off preserves the stored projection. On must validate current
+            // membership before that old display metadata can grant access.
+            return TryResolveCachedAuthoritativeGroupIdentity(
+                ownerPlayerId, ownerAccountId, GuildsCompat.GetWardOwnerNameForProjection(zdo), out var authoritativeGroup)
+                ? authoritativeGroup
                 : default;
         }
 
@@ -360,10 +382,12 @@ internal static class WardGroupCompat
 
         if (guildsInstalled)
         {
-            return ActiveProvider.Guilds;
+            return Plugin.GuildsIntegration?.Value == Plugin.Toggle.On ? ActiveProvider.Guilds : ActiveProvider.None;
         }
 
-        return clanInstalled ? ActiveProvider.Clan : ActiveProvider.None;
+        return clanInstalled && Plugin.ClanIntegration?.Value == Plugin.Toggle.On
+            ? ActiveProvider.Clan
+            : ActiveProvider.None;
     }
 
     private static void LogProviderConflictIfNeeded()

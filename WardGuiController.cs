@@ -330,6 +330,7 @@ internal sealed class WardGuiController : MonoBehaviour
 
         RefreshStaticTexts();
         RefreshPermittedPlayers(force: true);
+        RefreshRadiusAdvisoryVisuals();
         RequestRecentPlayersSnapshot();
     }
 
@@ -2236,7 +2237,7 @@ internal sealed class WardGuiController : MonoBehaviour
 
     private static string BuildPlayerDisplayText(string playerName, string guildName, string accountId)
     {
-        var guildDisplay = string.IsNullOrWhiteSpace(guildName) ? "-" : guildName;
+        var guildDisplay = !WardGroupCompat.HasActiveGroupProvider || string.IsNullOrWhiteSpace(guildName) ? "-" : guildName;
         var accountDisplay = string.IsNullOrWhiteSpace(accountId)
             ? "-"
             : GetCompactAccountIdDisplay(accountId);
@@ -2263,6 +2264,7 @@ internal sealed class WardGuiController : MonoBehaviour
 
     private static string BuildPlayerSearchText(string playerName, string guildName, string accountId, long playerId)
     {
+        if (!WardGroupCompat.HasActiveGroupProvider) guildName = string.Empty;
         return $"{playerName}\n{guildName}\n{accountId}\n{playerId}";
     }
 

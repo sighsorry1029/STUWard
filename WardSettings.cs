@@ -993,7 +993,7 @@ internal static class WardSettings
         var zdo = area != null ? GetZdo(area) : null;
         return zdo == null || !zdo.IsValid()
             ? MaxRadius
-            : Mathf.Clamp(GetMaxNonOverlappingRadius(zdo), MinRadius, MaxRadius);
+            : Mathf.Clamp(Mathf.Max(GetStoredRadius(zdo), GetMaxNonOverlappingRadius(zdo)), MinRadius, MaxRadius);
     }
 
     internal static float GetStoredRadiusOrMin(PrivateArea area)
@@ -1479,11 +1479,13 @@ internal static class WardSettings
 
     private static WardConfiguration ClampConfiguration(ZDO zdo, WardConfiguration configuration)
     {
-        var maxRadius = GetMaxNonOverlappingRadius(zdo);
+        var currentRadius = GetStoredRadius(zdo);
         var requestedRadius = IsWardRangeConfigurationEnabled()
             ? configuration.Radius
-            : GetStoredRadius(zdo);
-        var clampedRadius = Mathf.Clamp(Mathf.Min(requestedRadius, maxRadius), MinRadius, MaxRadius);
+            : currentRadius;
+        var maxRadius = requestedRadius > currentRadius ? GetMaxNonOverlappingRadius(zdo) : currentRadius;
+        var clampedRadius = WardOverlapPolicy.ClampRequestedRadius(
+            currentRadius, requestedRadius, MinRadius, MaxRadius, maxRadius);
         return CopyConfiguration(
             configuration,
             radius: clampedRadius,

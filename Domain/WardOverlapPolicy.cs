@@ -98,6 +98,22 @@ internal static class WardOverlapPolicy
         return radius >= minimumRadius;
     }
 
+    internal static float ClampRequestedRadius(
+        float currentRadius,
+        float requestedRadius,
+        float minimumRadius,
+        float maximumRadius,
+        float maximumNonOverlappingRadius)
+    {
+        currentRadius = Clamp(currentRadius, minimumRadius, maximumRadius);
+        requestedRadius = Clamp(requestedRadius, minimumRadius, maximumRadius);
+        // Losing group trust must not shrink an existing ward. Only an expansion
+        // needs free space; explicit reductions and unrelated edits remain valid.
+        return requestedRadius <= currentRadius
+            ? requestedRadius
+            : Math.Min(requestedRadius, Math.Max(currentRadius, maximumNonOverlappingRadius));
+    }
+
     internal static bool Overlaps(WardOverlapQuery query, WardOverlapArea area)
     {
         return DistanceXZ(query.X, query.Z, area.X, area.Z) < area.Radius + query.Radius;

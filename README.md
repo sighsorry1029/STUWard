@@ -1,6 +1,6 @@
 # STU Ward
 
-The current source targets Valheim **1.0.7** and BepInExPack **5.4.2350**. Jotunn is no longer required by STUWard. Guilds and Clan remain optional integrations; other installed mods may still require Jotunn.
+The current source targets Valheim **1.0.7** and BepInExPack **5.4.2351**. Jotunn is no longer required by STUWard. Guilds and Clan remain optional integrations; other installed mods may still require Jotunn.
 
 Simple, Tidy, and Unique Ward for Valheim servers. <br>
 It adds a clone of vanilla ward but with more server-side features such as diverse protections, permission control, Guilds/Clan integration, ward count limits, and compatibility handling for common utility mods.
@@ -55,7 +55,7 @@ STU Ward uses one trusted-player permission level for existing wards. Trust is g
 
 - The ward owner
 - Individually registered players
-- Players matching the ward's authorized Guild or primary Clan identity
+- Players matching the ward's authorized Guild or primary Clan identity while that integration is enabled
 - Server admins using effective debug control
 
 All trusted players can use the protected area, open and change ward settings, toggle the ward, add or remove players from its individual registration list, and dismantle the ward. Authorized changes apply immediately without confirmation popups.
@@ -63,6 +63,10 @@ All trusted players can use the protected area, open and change ward settings, t
 The owner identity is still retained for ward limits, reporting, and group metadata; it does not grant a higher permission tier on an existing ward.
 
 STUWard supports either `Guilds` or `Clan 1.0.0+` (`sighsorry.Clan`, public API v4) as its group provider. Clan `Leader`, `Officer`, and `Member` roles are authorized through the primary Clan; `Guest` connections never grant automatic ward access. Individually registered, owner, and admin-debug trust continue to work independently of group membership. An older or incompatible Clan API fails closed for automatic group authorization.
+
+The server-synchronized `Guilds Integration` and `Clan Integration` settings in `1 - General` independently control automatic group trust. Both default to `On` and use the existing configuration lock. Turning one `Off` disables that provider's automatic access, ward management, map visibility, and same-group overlap allowance in STUWard; the Guilds or Clan mod itself continues working normally. Players who are individually registered, own the ward, or have effective admin-debug control keep their access. Group labels show `-` while integration is disabled. Stored ownership, registrations, and group metadata are retained; enabling integration again rechecks membership.
+
+Before disabling integration in a shared base, register the intended users on every ward covering that base. Already overlapping wards keep their radius, but access to the shared area requires permission from every covering ward. Disabling integration does not revoke an existing individual registration. No automatic registration copying or data migration is performed.
 
 ## Registration
 
@@ -85,10 +89,12 @@ Ward overlap is strict.
 
 - Foreign wards cannot overlap.
 - Same-owner wards can overlap.
-- Wards with the same exact provider-qualified Guild/Clan identity can overlap.
+- Wards with the same exact provider-qualified Guild/Clan identity can overlap while that integration is enabled.
 - Registered-player access does not bypass overlap rules.
 
 When placing a new ward, older foreign wards keep their radius and the new ward automatically yields to the largest non-overlapping radius. `Ward Range Configuration` is a synchronized server setting that defaults to `Off`. When enabled, trusted players can explicitly shrink or re-expand a ward from Ward Settings, but the server clamps expansion to the currently available non-overlapping radius without changing neighboring wards. Removing a neighboring ward or increasing the server maximum does not silently expand it. Lowering the server maximum clamps existing wards.
+
+Losing group access does not automatically shrink existing wards. Saving unrelated settings preserves their radius, explicit reductions remain allowed, and an expansion without enough free space leaves the current radius unchanged. The server maximum still applies.
 
 In overlapping coverage, access is additive: if any enabled foreign ward denies the player, the action is denied.
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.19
+
+- Added independent server-synchronized `Guilds Integration` and `Clan Integration` On/Off settings, both defaulting to On. Off removes that provider's automatic ward trust and same-group overlap allowance, while preserving owner, registered-player, and admin-debug access. The group mods themselves remain usable.
+- Refresh group access, map visibility, placement previews, and open settings when integration changes. Preserve stored registrations and group metadata, and revalidate membership when integration is enabled again.
+- Preserve existing ward radii after group access is disabled, including when saving alerts or other unrelated settings. Only radius expansion requires new overlap clearance; explicit shrinking and the server maximum still apply. Shared overlapping areas still require permission from every covering ward, so register intended users on each ward before disabling automatic group access.
+- Consolidated identical Guilds event handling and trusted-player presence refresh paths, and removed unused Guild-only lookup code. Existing permission policies, presence timing, save formats, RPC payloads, and public integration APIs are preserved; added regression tests for presence behavior.
+- Servers and clients must update STUWard together. Existing ward ownership and registrations are preserved; no data migration is required.
+
 ## 1.3.18
 
 - Added an optional active-ward coverage API for PortalRules 1.1.6. Portals inside an enabled ward can follow STUWard's damage and dismantling rules, with normal unsupported collapse, while PortalRules protects portals outside active coverage.

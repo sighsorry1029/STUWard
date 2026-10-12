@@ -62,6 +62,28 @@ public sealed class ManagedWardAccessPolicyTests
             Group("clan", "abc")));
     }
 
+    [Theory]
+    [InlineData("guilds", false, false, false, false)]
+    [InlineData("guilds", true, false, false, true)]
+    [InlineData("guilds", false, true, false, true)]
+    [InlineData("guilds", false, false, true, true)]
+    [InlineData("clan", false, false, false, false)]
+    [InlineData("clan", true, false, false, true)]
+    [InlineData("clan", false, true, false, true)]
+    [InlineData("clan", false, false, true, true)]
+    public void Withdrawing_group_identity_preserves_only_independent_trust(
+        string provider, bool owner, bool registered, bool admin, bool expected)
+    {
+        var retainedWardGroup = Group(provider, "shared");
+        var subject = new ManagedWardAccessSubject(42, retainedWardGroup, registered);
+        var playerId = owner ? 42L : 100L;
+        Assert.True(ManagedWardAccessPolicy.CanAccess(new(playerId, retainedWardGroup, admin), subject));
+
+        // A disabled provider supplies no actor identity even if the ward still
+        // retains its group metadata for later reactivation.
+        Assert.Equal(expected, ManagedWardAccessPolicy.CanAccess(new(playerId, default, admin), subject));
+    }
+
     [Fact]
     public void Dedicated_server_clan_member_access_is_allowed_by_matching_clan_projection()
     {

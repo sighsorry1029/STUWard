@@ -111,6 +111,44 @@ public sealed class WardOverlapPolicyTests
         Assert.Equal(7f, radius);
     }
 
+    [Theory]
+    [InlineData(32f, 32f)]
+    [InlineData(48f, 32f)]
+    [InlineData(24f, 24f)]
+    [InlineData(8f, 8f)]
+    public void ClampRequestedRadius_preserves_existing_overlap_after_group_access_is_disabled(
+        float requestedRadius, float expectedRadius)
+    {
+        var query = new WardOverlapQuery(0f, 0f, 32f, 10L, default);
+        var areas = new[] { new WardOverlapArea(1, 48f, 0f, 32f, 20L, default) };
+        var maximumNonOverlappingRadius = WardOverlapPolicy.GetMaxNonOverlappingRadius(64f, query, areas);
+
+        Assert.Equal(16f, maximumNonOverlappingRadius);
+        Assert.Equal(expectedRadius, WardOverlapPolicy.ClampRequestedRadius(
+            32f, requestedRadius, 8f, 64f, maximumNonOverlappingRadius));
+    }
+
+    [Theory]
+    [InlineData(24f, 24f)]
+    [InlineData(40f, 32f)]
+    public void ClampRequestedRadius_allows_expansion_only_within_free_space(
+        float requestedRadius, float expectedRadius)
+    {
+        Assert.Equal(expectedRadius, WardOverlapPolicy.ClampRequestedRadius(
+            16f, requestedRadius, 8f, 64f, 32f));
+    }
+
+    [Theory]
+    [InlineData(32f, 0f, 64f, 8f)]
+    [InlineData(32f, 32f, 16f, 16f)]
+    [InlineData(32f, 100f, 64f, 64f)]
+    public void ClampRequestedRadius_keeps_server_minimum_and_maximum_authoritative(
+        float currentRadius, float requestedRadius, float serverMaximum, float expectedRadius)
+    {
+        Assert.Equal(expectedRadius, WardOverlapPolicy.ClampRequestedRadius(
+            currentRadius, requestedRadius, 8f, serverMaximum, 100f));
+    }
+
     private static WardOverlapQuery Query(long owner, WardGroupIdentity group)
     {
         return new WardOverlapQuery(0f, 0f, 8f, owner, group);

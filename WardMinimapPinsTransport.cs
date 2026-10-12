@@ -316,6 +316,7 @@ internal static partial class WardMinimapPinsManager
             }
 
             MarkLocalSnapshotTooLarge(viewerRevisionToken, visibleWardCount);
+            _awaitingGroupConfigurationSnapshot = false;
             UpdateLocalState(Player.m_localPlayer, force: false);
             return;
         }
@@ -353,6 +354,7 @@ internal static partial class WardMinimapPinsManager
         }
 
         ReplaceLocalSnapshot(snapshotEntries);
+        _awaitingGroupConfigurationSnapshot = false;
         ClearPendingForceRefresh();
         ClearPendingRemoteSnapshotBootstrapRequest();
         _pendingSnapshotRequestId = 0;
@@ -385,7 +387,7 @@ internal static partial class WardMinimapPinsManager
 
     private static void HandlePushWardPins(long sender, ZPackage pkg)
     {
-        if (!WardOwnership.IsAuthoritativeServerSender(sender) || pkg == null)
+        if (!WardOwnership.IsAuthoritativeServerSender(sender) || pkg == null || _awaitingGroupConfigurationSnapshot)
         {
             return;
         }

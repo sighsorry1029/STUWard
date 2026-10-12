@@ -16,6 +16,7 @@ internal static partial class WardMinimapPinsManager
     private static readonly Dictionary<ZDOID, Minimap.PinData> ActiveRangePins = new();
 
     private static bool _pendingForceRefresh;
+    private static bool _awaitingGroupConfigurationSnapshot;
     private static bool? _lastCanSeeAllWards;
     private static ClientSnapshotState _snapshotState = ClientSnapshotState.Uninitialized;
     private static int _lastViewerRevisionToken;
@@ -39,6 +40,7 @@ internal static partial class WardMinimapPinsManager
         WardMapRangeSprites.Reset();
         ClearLocalPins(clearSnapshot: true);
         _pendingForceRefresh = false;
+        _awaitingGroupConfigurationSnapshot = false;
         _snapshotState = ClientSnapshotState.AwaitingFullSnapshot;
         _lastCanSeeAllWards = null;
         _lastViewerRevisionToken = 0;
@@ -58,6 +60,16 @@ internal static partial class WardMinimapPinsManager
     internal static void HandleLocalConfigChanged()
     {
         UpdateLocalState(Player.m_localPlayer, force: false, allowClosedMapRefresh: true);
+    }
+
+    internal static void HandleGroupIntegrationChanged()
+    {
+        ClearLocalPins(clearSnapshot: true);
+        // A pre-change push carries no request id. Wait for a response to a new
+        // request before accepting pushes under the changed group policy.
+        _awaitingGroupConfigurationSnapshot = ZNet.instance != null && !ZNet.instance.IsServer();
+        _lastRemoteSnapshotRequestUtc = DateTime.MinValue;
+        QueueForceRefresh();
     }
 
     internal static void NotifyLocalWardDataMayHaveChanged(bool refreshImmediatelyIfVisible = false)
@@ -136,6 +148,12 @@ internal static partial class WardMinimapPinsManager
     {
         if (player == null || player != Player.m_localPlayer)
         {
+            return;
+        }
+
+        if (_awaitingGroupConfigurationSnapshot)
+        {
+            UpdateLocalState(player, force: false, allowClosedMapRefresh: true);
             return;
         }
 

@@ -42,10 +42,10 @@ internal static partial class GuildsCompat
             return;
         }
 
-        RegisterGuildHook(RegisterOnGuildJoinedMethod, GuildJoinedDelegateType, nameof(HandleGuildJoinedEvent));
-        RegisterGuildHook(RegisterOnGuildLeftMethod, GuildLeftDelegateType, nameof(HandleGuildLeftEvent));
-        RegisterGuildHook(RegisterOnGuildCreatedMethod, GuildCreatedDelegateType, nameof(HandleGuildCreatedEvent));
-        RegisterGuildHook(RegisterOnGuildDeletedMethod, GuildDeletedDelegateType, nameof(HandleGuildDeletedEvent));
+        RegisterGuildHook(RegisterOnGuildJoinedMethod, GuildJoinedDelegateType, nameof(HandleGuildMembershipChanged));
+        RegisterGuildHook(RegisterOnGuildLeftMethod, GuildLeftDelegateType, nameof(HandleGuildMembershipChanged));
+        RegisterGuildHook(RegisterOnGuildCreatedMethod, GuildCreatedDelegateType, nameof(HandleGuildSetChanged));
+        RegisterGuildHook(RegisterOnGuildDeletedMethod, GuildDeletedDelegateType, nameof(HandleGuildSetChanged));
         _guildHooksRegistered = true;
         _guildHooksActive = true;
     }
@@ -108,7 +108,7 @@ internal static partial class GuildsCompat
         return Expression.Lambda(delegateType, body, lambdaParameters).Compile();
     }
 
-    private static void HandleGuildJoinedEvent(object guild, object playerReference)
+    private static void HandleGuildMembershipChanged(object guild, object playerReference)
     {
         if (!_guildHooksActive)
         {
@@ -125,40 +125,10 @@ internal static partial class GuildsCompat
         RefreshWardGuildProjectionForCharacter(
             identity,
             liveDisplayRefresh: true,
-            affectedGuildId: TryParseGuild(guild, out var joinedGuild) ? joinedGuild.Id : 0);
+            affectedGuildId: TryParseGuild(guild, out var changedGuild) ? changedGuild.Id : 0);
     }
 
-    private static void HandleGuildLeftEvent(object guild, object playerReference)
-    {
-        if (!_guildHooksActive)
-        {
-            return;
-        }
-
-        if (!TryCreateCharacterIdentityFromPlayerReference(playerReference, out var identity))
-        {
-            RefreshAllWardGuildProjections(liveDisplayRefresh: true);
-            return;
-        }
-
-        InvalidateSyncedGuildIdentity(identity);
-        RefreshWardGuildProjectionForCharacter(
-            identity,
-            liveDisplayRefresh: true,
-            affectedGuildId: TryParseGuild(guild, out var leftGuild) ? leftGuild.Id : 0);
-    }
-
-    private static void HandleGuildCreatedEvent(object guild)
-    {
-        if (!_guildHooksActive)
-        {
-            return;
-        }
-
-        RefreshAllWardGuildProjections(liveDisplayRefresh: true);
-    }
-
-    private static void HandleGuildDeletedEvent(object guild)
+    private static void HandleGuildSetChanged(object guild)
     {
         if (!_guildHooksActive)
         {

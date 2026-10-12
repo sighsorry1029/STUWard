@@ -16,5 +16,6 @@
     <ItemGroup>
         <Compile Include="..\Domain\*.cs" Link="Domain\%(Filename)%(Extension)"/>
         <Compile Include="..\WardAdminDebugAccess.cs" Link="WardAdminDebugAccess.cs"/>
+        <Compile Include="..\ManagedWardPresenceService.cs" Link="ManagedWardPresenceService.cs"/>
     </ItemGroup>
 </Project>

@@ -71,7 +71,7 @@ internal static class ManagedWardPresenceService
             return;
         }
 
-        SweepTrustedPlayerPresence(now);
+        RefreshTrustedPlayerPresence(now);
         _nextTrustedPresenceSweepTime = now + PresenceRefreshIntervalSeconds;
     }
 
@@ -159,7 +159,7 @@ internal static class ManagedWardPresenceService
         var isCurrentlyActive = _trustedPresenceSweepWasActive && now <= _trustedPresenceSweepActiveUntilTime;
         if (!isCurrentlyActive || HasUnattendedPresenceState(coveringAreas, now, graceSeconds))
         {
-            RefreshTrustedPlayerPresenceForAreas(now, coveringAreas);
+            RefreshTrustedPlayerPresence(now, coveringAreas);
             _nextTrustedPresenceSweepTime = now + PresenceRefreshIntervalSeconds;
         }
 
@@ -167,17 +167,19 @@ internal static class ManagedWardPresenceService
         _trustedPresenceSweepActiveUntilTime = now + TrustedPresenceSweepActiveDurationSeconds;
     }
 
-    private static void SweepTrustedPlayerPresence(float now)
+    private static void RefreshTrustedPlayerPresence(float now, IReadOnlyList<PrivateArea>? coveringAreas = null)
     {
+        if (coveringAreas?.Count == 0)
+        {
+            return;
+        }
+
         var players = Player.GetAllPlayers();
         if (players == null || players.Count == 0)
         {
             return;
         }
 
-        // Each ward already occupies every spatial cell touched by its configured radius.
-        // Only the extra trusted-player range must expand this point query.
-        var candidateQueryRadius = TrustedPlayerRangeBuffer;
         for (var index = 0; index < players.Count; index++)
         {
             var player = players[index];
@@ -194,58 +196,20 @@ internal static class ManagedWardPresenceService
 
             var playerPosition = player.transform.position;
             var actor = ManagedWardAccessEvaluator.CreateActor(playerId);
-            WardAccess.FillCandidateManagedWards(
-                playerPosition,
-                candidateQueryRadius,
-                requireEnabled: true,
-                TrustedPresenceCandidateBuffer);
-            for (var areaIndex = 0; areaIndex < TrustedPresenceCandidateBuffer.Count; areaIndex++)
+            var areas = coveringAreas;
+            if (areas == null)
             {
-                var area = TrustedPresenceCandidateBuffer[areaIndex];
-                if (area == null || !area.IsInside(playerPosition, TrustedPlayerRangeBuffer))
-                {
-                    continue;
-                }
-
-                if (!ManagedWardAccessEvaluator.HasPlayerAccess(area, actor))
-                {
-                    continue;
-                }
-
-                ManagedWardRuntimeContexts.GetOrCreate(area).PresenceLastTrustedNearbyTime = now;
-            }
-        }
-    }
-
-    private static void RefreshTrustedPlayerPresenceForAreas(float now, IReadOnlyList<PrivateArea> areas)
-    {
-        if (areas.Count == 0)
-        {
-            return;
-        }
-
-        var players = Player.GetAllPlayers();
-        if (players == null || players.Count == 0)
-        {
-            return;
-        }
-
-        for (var playerIndex = 0; playerIndex < players.Count; playerIndex++)
-        {
-            var player = players[playerIndex];
-            if (player == null)
-            {
-                continue;
+                // A damage check already has exact coverage; a periodic sweep
+                // queries candidates per player. Wards occupy all cells touched
+                // by their radius, so only the extra presence range is needed.
+                WardAccess.FillCandidateManagedWards(
+                    playerPosition,
+                    TrustedPlayerRangeBuffer,
+                    requireEnabled: true,
+                    TrustedPresenceCandidateBuffer);
+                areas = TrustedPresenceCandidateBuffer;
             }
 
-            var playerId = player.GetPlayerID();
-            if (playerId == 0L)
-            {
-                continue;
-            }
-
-            var playerPosition = player.transform.position;
-            var actor = ManagedWardAccessEvaluator.CreateActor(playerId);
             for (var areaIndex = 0; areaIndex < areas.Count; areaIndex++)
             {
                 var area = areas[areaIndex];

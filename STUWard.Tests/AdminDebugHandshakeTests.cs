@@ -5,6 +5,7 @@ namespace STUWard.Tests
 {
     // Runs the production handshake against transport/engine stand-ins. The
     // native IsAdmin policy is an external decision, not reimplemented here.
+    [Collection("Engine state")]
     public sealed class AdminDebugHandshakeTests : IDisposable
     {
         private const string Request = "STUWard_RequestAdminDebugState";
@@ -301,11 +302,34 @@ namespace STUWard
     {
         public static Player? m_localPlayer;
         public static bool m_debugMode;
+        public static readonly List<Player> Players = new();
+        public static List<Player> GetAllPlayers() => Players;
+        public readonly UnityEngine.Transform transform = new();
         public long Id;
         public long GetPlayerID() => Id;
     }
-    internal sealed class PrivateArea { }
-    internal static class WardAccess { public static bool IsManagedWard(PrivateArea area, bool enabled) => true; }
+    internal sealed class PrivateArea
+    {
+        public bool Enabled = true;
+        public float Center;
+        public float Radius = 10f;
+        public readonly HashSet<long> AllowedPlayers = new();
+        public bool IsInside(UnityEngine.Vector3 point, float buffer) => Math.Abs(point.x - Center) < Radius + buffer;
+    }
+    internal static class WardAccess
+    {
+        public static readonly List<PrivateArea> Areas = new();
+        public static readonly List<float> QueryRadii = new();
+        public static bool IsManagedWard(PrivateArea area, bool enabled) => true;
+        public static bool HasEnabledManagedWards() => Areas.Any(area => area.Enabled);
+        public static void FillCandidateManagedWards(UnityEngine.Vector3 point, float radius, bool requireEnabled, List<PrivateArea> output)
+        {
+            QueryRadii.Add(radius);
+            output.Clear();
+            // Deliberately over-inclusive: exact coverage belongs to the service.
+            output.AddRange(Areas.Where(area => !requireEnabled || area.Enabled));
+        }
+    }
     internal sealed class TestSocket { public string Host = ""; public string GetHostName() => Host; }
     internal sealed class ZNetPeer
     {
@@ -355,7 +379,37 @@ namespace STUWard
         public static bool IsAuthoritativeServerSender(long sender) => sender != 0 && sender == ZRoutedRpc.instance?.ServerId;
         public static string NormalizeAccountIdValue(string? account) => GuildIdentityPolicy.NormalizeAccountId(account);
     }
-    internal static class Plugin { public static readonly TestLog Log = new(); }
+    internal static class Plugin
+    {
+        public static readonly TestLog Log = new();
+        public enum HostileCreatureStructureProtectionMode { Off, UnattendedOnly, Always }
+        public static TestConfig<HostileCreatureStructureProtectionMode>? HostileCreatureStructureProtection;
+    }
+    internal sealed class TestConfig<T> { public T Value { get; set; } = default!; }
+    internal static class ManagedWardAccessEvaluator
+    {
+        public static ManagedWardAccessActor CreateActor(long playerId) => new(playerId, default, false);
+        // Authorization is an input to the presence service; its policy has its own tests.
+        public static bool HasPlayerAccess(PrivateArea area, ManagedWardAccessActor actor) => area.AllowedPlayers.Contains(actor.PlayerId);
+    }
+    internal sealed class ManagedWardRuntimeContext
+    {
+        public float PresenceLastTrustedNearbyTime = float.NegativeInfinity;
+    }
+    internal static class ManagedWardRuntimeContexts
+    {
+        public static readonly Dictionary<PrivateArea, ManagedWardRuntimeContext> Entries = new();
+        public static ManagedWardRuntimeContext GetOrCreate(PrivateArea area)
+        {
+            if (!Entries.TryGetValue(area, out var context)) Entries[area] = context = new();
+            return context;
+        }
+        public static bool TryGet(PrivateArea area, out ManagedWardRuntimeContext context) => Entries.TryGetValue(area, out context!);
+        public static void ResetPresenceStates()
+        {
+            foreach (var context in Entries.Values) context.PresenceLastTrustedNearbyTime = float.NegativeInfinity;
+        }
+    }
     internal sealed class TestLog
     {
         public readonly List<string> Messages = new();
@@ -368,4 +422,15 @@ namespace HarmonyLib
 {
     [AttributeUsage(AttributeTargets.Class)]
     internal sealed class HarmonyPatch : Attribute { public HarmonyPatch(Type type, string method) { } }
+}
+
+namespace UnityEngine
+{
+    internal readonly struct Vector3
+    {
+        public readonly float x;
+        public Vector3(float x) { this.x = x; }
+    }
+    internal sealed class Transform { public Vector3 position; }
+    internal static class Time { public static float time; }
 }

@@ -17,10 +17,11 @@ internal sealed class ConfigurationManagerAttributes
 [BepInPlugin(ModGuid, ModName, ModVersion)]
 [BepInDependency("org.bepinex.plugins.guilds", BepInDependency.DependencyFlags.SoftDependency)]
 [BepInDependency(WardGroupCompat.ClanPluginGuid, BepInDependency.DependencyFlags.SoftDependency)]
+[BepInDependency(EpicLootCompat.PluginGuid, BepInDependency.DependencyFlags.SoftDependency)]
 public sealed class Plugin : BaseUnityPlugin
 {
     internal const string ModName = "STUWard";
-    internal const string ModVersion = "1.3.19";
+    internal const string ModVersion = "1.4.0";
     internal const string Author = "sighsorry";
     internal const string ModGuid = $"{Author}.{ModName}";
 

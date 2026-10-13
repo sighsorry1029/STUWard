@@ -43,6 +43,7 @@ internal static class WardPatchRegistry
 
         PatchOptionalCompat("GuildsCompat", () => GuildsCompat.TryPatch(harmony));
         PatchOptionalCompat("TargetPortalCompat", () => TargetPortalCompat.TryPatch(harmony));
+        PatchOptionalCompat("EpicLootCompat", () => EpicLootCompat.TryPatch(harmony));
     }
 
     private static void ApplyPatch(

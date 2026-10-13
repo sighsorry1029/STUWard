@@ -2,9 +2,29 @@ using UnityEngine;
 
 namespace STUWard;
 
-/// <summary>Optional integration with STUWard's coverage and container policies.</summary>
+/// <summary>Optional integration with STUWard's coverage and action policies.</summary>
 public static class WardAccessApi
 {
+    /// <summary>
+    /// Checks the blocked-item policy at both the actor and effect positions.
+    /// Callers must authenticate playerId against the RPC sender, supply current
+    /// positions, and keep their own distance and transaction validation.
+    /// Coverage is limited to currently loaded wards, as with normal item checks.
+    /// </summary>
+    public static bool IsItemUseAllowed(string itemPrefab, long playerId, Vector3 playerPosition, Vector3 targetPosition)
+    {
+        if (!Plugin.IsReady || ZNet.instance == null || playerId == 0 ||
+            !IsFinite(playerPosition) || !IsFinite(targetPosition)) return false;
+        if (!WardItemPrefabPolicy.IsBlockedItem(itemPrefab)) return true;
+        return !WardAccess.EvaluateAccess(playerPosition, 0f, playerId, flash: false).IsDenied &&
+               !WardAccess.EvaluateAccess(targetPosition, 0f, playerId, flash: false).IsDenied;
+    }
+
+    private static bool IsFinite(Vector3 point) =>
+        !float.IsNaN(point.x) && !float.IsInfinity(point.x) &&
+        !float.IsNaN(point.y) && !float.IsInfinity(point.y) &&
+        !float.IsNaN(point.z) && !float.IsInfinity(point.z);
+
     /// <summary>
     /// Tests current, locally loaded active STUWard coverage using the spatial index.
     /// This is not an access grant or a promise to block every kind of damage.

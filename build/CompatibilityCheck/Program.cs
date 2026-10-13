@@ -6,14 +6,14 @@ using System.Reflection.Emit;
 
 // Managed compatibility checks against the final merged mod and unmodified game
 // DLLs. This does not start Unity, instantiate prefabs, or prove multiplayer behavior.
-if (args.Length is not (3 or 4)) throw new ArgumentException("Usage: mod.dll game-managed-directory BepInEx-core-directory [Jotunn.dll: asset-path checks only]");
+if (args.Length is not (3 or 4 or 5)) throw new ArgumentException("Usage: mod.dll game-managed-directory BepInEx-core-directory [Jotunn.dll | --epicloot EpicLoot.dll]");
 var modPath = Path.GetFullPath(args[0]);
 var managed = Path.GetFullPath(args[1]);
 var core = Path.GetFullPath(args[2]);
 AppDomain.CurrentDomain.AssemblyResolve += (_, eventArgs) =>
 {
     var name = new AssemblyName(eventArgs.Name);
-    foreach (var dir in new[] { managed, core, Path.GetDirectoryName(modPath)!, args.Length == 4 ? Path.GetDirectoryName(Path.GetFullPath(args[3]))! : core })
+    foreach (var dir in new[] { managed, core, Path.GetDirectoryName(modPath)!, args.Length >= 4 ? Path.GetDirectoryName(Path.GetFullPath(args[args.Length - 1]))! : core })
     {
         var path = Path.Combine(dir, name.Name + ".dll");
         if (File.Exists(path)) return Assembly.LoadFrom(path);
@@ -27,6 +27,49 @@ void Check(bool condition, string message)
     checks++;
 }
 IEnumerable<TypeDefinition> Flatten(IEnumerable<TypeDefinition> types) => types.SelectMany(t => new[] { t }.Concat(Flatten(t.NestedTypes)));
+if (args.Length == 5)
+{
+    if (args[3] != "--epicloot") throw new ArgumentException("Unknown mode: " + args[3]);
+    // Load the selected originals before LoadFrom can pick copied references
+    // beside the mod (especially when checking a dedicated-server snapshot).
+    foreach (var name in new[] { "UnityEngine.CoreModule.dll", "assembly_utils.dll", "assembly_guiutils.dll", "assembly_valheim.dll", "SoftReferenceableAssets.dll" })
+    {
+        var path = Path.Combine(managed, name);
+        var selected = Assembly.LoadFrom(path);
+        Check(string.Equals(selected.Location, path, StringComparison.OrdinalIgnoreCase), "Wrong original loaded: " + name);
+    }
+    var modAssembly = Assembly.LoadFrom(modPath);
+    var epicAssembly = Assembly.LoadFrom(Path.GetFullPath(args[4]));
+    Check(!modAssembly.GetReferencedAssemblies().Any(a => a.Name == "EpicLoot"), "EpicLoot must remain optional");
+    var compat = modAssembly.GetType("STUWard.EpicLootCompat", true)!;
+    const BindingFlags flags = BindingFlags.NonPublic | BindingFlags.Static;
+    var resolve = compat.GetMethod("ResolveHooks", flags)!;
+    try
+    {
+        resolve.Invoke(null, new object[] { modAssembly });
+        throw new InvalidOperationException("Accepted an incompatible optional assembly");
+    }
+    catch (TargetInvocationException) { checks++; }
+    var hooks = (IEnumerable<(MethodInfo Target, MethodInfo Prefix)>)resolve.Invoke(null, new object[] { epicAssembly })!;
+    Check(hooks.Count() == 9, "Expected Show, seven actions and the upgrade RPC");
+    foreach (var hook in hooks)
+    {
+        Check(hook.Target.DeclaringType!.Assembly == epicAssembly, "Target is not from the supplied EpicLoot DLL");
+        foreach (var parameter in hook.Prefix.GetParameters())
+        {
+            if (parameter.Name == "__runOriginal") Check(parameter.ParameterType == typeof(bool), "Wrong skip flag type");
+            else if (parameter.Name == "__instance")
+                Check(!hook.Target.IsStatic && parameter.ParameterType.IsAssignableFrom(hook.Target.DeclaringType), "Wrong instance binding");
+            else
+            {
+                var index = int.Parse(parameter.Name!.Substring(2));
+                Check(parameter.ParameterType.IsAssignableFrom(hook.Target.GetParameters()[index].ParameterType), "Wrong indexed argument binding");
+            }
+        }
+    }
+    Console.WriteLine($"PASS: {checks} EpicLoot target/prefix binding checks, using {epicAssembly.Location}. No detours, Unity, UI or RPC execution.");
+    return;
+}
 if (args.Length == 4)
 {
     // Separate mode: actual Harmony installation without the full game's type

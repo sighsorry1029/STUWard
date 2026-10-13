@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.4.0
+
+- Added optional EpicLoot enchanting-table protection through the existing Crafting Stations restriction. Check access when opening the table, before starting an action, and when handling table-upgrade requests, while preserving completion of already-paid actions.
+- Added an item-use permission API for FeedLikeGrandma 1.1.7. With `FLG_TamingOrb` in `item_prefab_policy.blocked_item_prefabs`, Orb capture and release check both the player and target positions, including use from outside a ward.
+- Preserved existing owner, registered-player, Guild, Clan, and admin-debug access rules. No new ward settings or save-data migration are required; both integrations remain optional.
+- Rewrote the README and package description around player-facing features, with detailed settings and integration notes in a separate user guide. Added focused item-access checks and EpicLoot binding validation; actual game and multiplayer verification remains pending.
+- Update STUWard on the server and every client together. When using Taming Orbs, also update FeedLikeGrandma to 1.1.7 or later on all of them.
+
 ## 1.3.19
 
 - Added independent server-synchronized `Guilds Integration` and `Clan Integration` On/Off settings, both defaulting to On. Off removes that provider's automatic ward trust and same-group overlap allowance, while preserving owner, registered-player, and admin-debug access. The group mods themselves remain usable.

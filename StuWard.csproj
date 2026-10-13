@@ -140,6 +140,7 @@
         <Compile Include="Properties\AssemblyInfo.cs"/>
         <Compile Include="StuWardPrefab.cs"/>
         <Compile Include="GuildsCompat.cs"/>
+        <Compile Include="EpicLootCompat.cs"/>
         <Compile Include="GuildsCompatSync.cs"/>
         <Compile Include="GuildsCompatApi.cs"/>
         <Compile Include="LocalizationManager.cs"/>

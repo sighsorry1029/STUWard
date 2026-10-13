@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4.1
+
+- Allow players to recover their own tombstones inside STU Wards without ward access, through both automatic Take All and the grave inventory window. Ordinary chests and other players' graves keep their existing permission restrictions.
+- Identify the grave owner by the stored character ID, independently of network ownership. Another character on the same account does not receive this exception. Existing RPC requester validation, busy checks, item transfers, and grave cleanup are preserved.
+- Added regression checks for grave ownership, container access, and temporary permission cleanup. No new setting or save-data migration is required. Actual game and multiplayer verification remains pending.
+- Update STUWard to 1.4.1 on the server and every client together.
+
 ## 1.4.0
 
 - Added optional EpicLoot enchanting-table protection through the existing Crafting Stations restriction. Check access when opening the table, before starting an action, and when handling table-upgrade requests, while preserving completion of already-paid actions.

@@ -57,6 +57,8 @@ Use either **Guilds or Clan**, with only one installed. Clan Leader, Officer, an
 
 Enabled wards also block player and tamed-creature damage to protected building pieces, including attacks by trusted players. Trust does not disable this damage protection.
 
+STUWard lets you recover your own tombstone without ward access. Ordinary chests and other players' graves keep their normal restrictions.
+
 ## Installation
 
 Install with a Valheim mod manager, or place `STUWard.dll` in `BepInEx/plugins`. Requires **BepInExPack Valheim 5.4.2351**. Jotunn is not required.

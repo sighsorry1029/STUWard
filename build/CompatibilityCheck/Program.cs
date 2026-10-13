@@ -315,6 +315,44 @@ Check(!ReadGroupPacket(new byte[512 * 1024 + 1], out _), "Oversized group payloa
 var requesterGuard = mod.GetType("STUWard.ContainerManagedRequesterIdentityPatch", true)!.GetMethod("Prefix", hiddenStatic)!;
 Check(requesterGuard.GetCustomAttribute<HarmonyPriority>()!.info.priority > Priority.First,
     "Requester identity must be checked before shared-container state-changing prefixes");
+// Exercise the actual compiled skip/finalizer paths without creating Unity objects.
+// Both grave entry points must preserve prior patch decisions and release only
+// their own temporary permission scope, even on exceptions or repeated cleanup.
+var accessType = mod.GetType("STUWard.WardAccess", true)!;
+var scopeType = mod.GetType("STUWard.WardCheckScopeState", true)!;
+var enterAllow = scopeType.GetMethod("EnterManagedWardAllow", BindingFlags.Instance | BindingFlags.NonPublic)!;
+var isAllowActive = accessType.GetProperty("IsManagedWardAllowScopeActive", hiddenStatic)!;
+bool AllowActive() => (bool)isAllowActive.GetValue(null)!;
+foreach (var patchName in new[] { "DirectInteractionPatches", "ContainerTakeAllOwnTombstonePatch" })
+{
+    var patchType = mod.GetType("STUWard." + patchName, true)!;
+    var prefix = patchType.GetMethod("Prefix", hiddenStatic)!;
+    var finalizer = patchType.GetMethod("Finalizer", hiddenStatic)!;
+    object?[] skippedArgs = patchName == "DirectInteractionPatches"
+        ? new object?[] { null, null, false, null, false }
+        : new object?[] { null, null, null, false };
+    prefix.Invoke(null, skippedArgs);
+    Check(!AllowActive(), patchName + " entered a scope after another patch denied the call");
+    if (patchName == "DirectInteractionPatches")
+        Check(!(bool)skippedArgs[2]!, "Skipped direct interaction replaced the previous result");
+    var skippedState = skippedArgs[patchName == "DirectInteractionPatches" ? 3 : 2];
+    var failure = new InvalidOperationException("grave scope cleanup fixture");
+    Check(ReferenceEquals(finalizer.Invoke(null, new[] { skippedState, failure }), failure), "Skipped call swallowed an exception");
+    Check(!AllowActive(), "Skipped call cleanup leaked permission");
+
+    var outer = Activator.CreateInstance(scopeType)!;
+    var inner = Activator.CreateInstance(scopeType)!;
+    enterAllow.Invoke(outer, null);
+    enterAllow.Invoke(inner, null);
+    Check(AllowActive(), "Nested fixture did not enter permission scopes");
+    object?[] cleanupArgs = { inner, failure };
+    Check(ReferenceEquals(finalizer.Invoke(null, cleanupArgs), failure), patchName + " swallowed an exception");
+    Check(AllowActive(), patchName + " cleared the enclosing permission scope");
+    finalizer.Invoke(null, cleanupArgs);
+    Check(AllowActive(), patchName + " double cleanup cleared the enclosing scope");
+    Check(finalizer.Invoke(null, new object?[] { outer, null }) == null, "Successful cleanup produced an exception");
+    Check(!AllowActive(), patchName + " leaked permission beyond the container call");
+}
 Console.WriteLine($"PASS: {checks} managed/IL checks; {targetCount} required target lookups. Unity native accessor initialization, rendering, prefab lifetime and networking were NOT executed.");
 // Unity's managed assemblies can enter unavailable native teardown paths when
 // this standalone verifier unloads under the Editor Mono runtime. All checks

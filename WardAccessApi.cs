@@ -49,6 +49,7 @@ public static class WardAccessApi
 
     /// <summary>
     /// Returns whether STUWard handles this location, with its decision in allowed.
+    /// A tombstone's stored character owner can recover it without ward trust.
     /// Callers must authenticate playerId against the RPC sender and keep their own
     /// distance, vanilla ward, ownership and inventory mutation checks.
     /// </summary>
@@ -60,7 +61,19 @@ public static class WardAccessApi
         var access = WardAccess.EvaluateRestrictionAccessAgainstCandidates(
             WardRestrictionOptions.Containers, container.transform.position, 0f, playerId, candidates, flash: false);
         if (access.Decision == WardAccess.AccessDecision.NoWard) return false;
-        allowed = !access.IsDenied;
+        allowed = !access.IsDenied || IsOwnTombstone(container, playerId);
         return true;
+    }
+
+    internal static bool IsOwnTombstone(Container container, long playerId)
+    {
+        if (container == null || playerId == 0) return false;
+        var tombstone = container.GetComponent<TombStone>();
+        // Match the exact inventory used by TombStone.Awake, not a container in
+        // its parent/children or a second container attached by another mod.
+        if (tombstone == null || tombstone.GetComponent<Container>() != container) return false;
+        var view = tombstone.GetComponent<ZNetView>();
+        // This is the deceased character ID, independent of the current ZDO owner.
+        return view != null && view.IsValid() && view.GetZDO().GetLong(ZDOVars.s_owner, 0L) == playerId;
     }
 }

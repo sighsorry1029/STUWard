@@ -32,6 +32,8 @@ All trusted players can use the protected area, open and change ward settings, t
 
 The owner identity is still retained for ward limits, reporting, and group metadata; it does not grant a higher permission tier on an existing ward.
 
+You can recover your own tombstone inside an STU Ward without being trusted by that ward. This applies to opening the grave and taking all its contents. Ownership uses the deceased character's stored ID, so another character on the same account does not receive the exception. Ordinary chests and other players' graves keep their existing access restrictions.
+
 STUWard supports either `Guilds` or `Clan 1.0.0+` (`sighsorry.Clan`, public API v4) as its group provider. Clan `Leader`, `Officer`, and `Member` roles are authorized through the primary Clan; `Guest` connections never grant automatic ward access. Individually registered, owner, and admin-debug trust continue to work independently of group membership. An older or incompatible Clan API fails closed for automatic group authorization.
 
 The server-synchronized `Guilds Integration` and `Clan Integration` settings in `1 - General` independently control automatic group trust. Both default to `On` and use the existing configuration lock. Turning one `Off` disables that provider's automatic access, ward management, map visibility, and same-group overlap allowance in STUWard; the Guilds or Clan mod itself continues working normally. Players who are individually registered, own the ward, or have effective admin-debug control keep their access. Group labels show `-` while integration is disabled. Stored ownership, registrations, and group metadata are retained; enabling integration again rechecks membership.

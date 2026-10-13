@@ -118,9 +118,10 @@ internal static class DirectInteractionPatches
         return WardInteractionPatchTargets.GetDirectInteractTargets();
     }
 
-    private static bool Prefix(Component __instance, Humanoid __0, ref bool __result, out WardCheckScopeState __state)
+    private static bool Prefix(Component __instance, Humanoid __0, ref bool __result, out WardCheckScopeState __state, bool __runOriginal)
     {
         __state = default;
+        if (!__runOriginal) return true;
         var player = WardAccess.GetPlayer(__0);
         return TryHandleDirectInteraction(__instance, player, ref __result, ref __state);
     }
@@ -133,6 +134,12 @@ internal static class DirectInteractionPatches
 
     private static bool TryHandleDirectInteraction(Component target, Player? player, ref bool result, ref WardCheckScopeState scopeState)
     {
+        if (target is Container container && player != null && WardAccessApi.IsOwnTombstone(container, player.GetPlayerID()))
+        {
+            scopeState.EnterManagedWardAllow();
+            return true;
+        }
+
         if (target is ItemDrop itemDrop)
         {
             if (WardAccess.IsPlacedConsumable(itemDrop))
@@ -260,6 +267,25 @@ internal static class ContainerCheckAccessManagedPatch
     private static bool Prefix(Container __instance, long playerID, ref bool __result)
     {
         return !WardAccessApi.TryCheckContainerAccess(__instance, playerID, out __result);
+    }
+}
+
+[HarmonyPatch(typeof(Container), nameof(Container.TakeAll), new[] { typeof(Humanoid) })]
+internal static class ContainerTakeAllOwnTombstonePatch
+{
+    private static void Prefix(Container __instance, Humanoid character, out WardCheckScopeState __state, bool __runOriginal)
+    {
+        __state = default;
+        if (!__runOriginal) return;
+        var player = WardAccess.GetPlayer(character);
+        if (player != null && WardAccessApi.IsOwnTombstone(__instance, player.GetPlayerID()))
+            __state.EnterManagedWardAllow();
+    }
+
+    private static Exception? Finalizer(ref WardCheckScopeState __state, Exception? __exception)
+    {
+        __state.Dispose();
+        return __exception;
     }
 }
 

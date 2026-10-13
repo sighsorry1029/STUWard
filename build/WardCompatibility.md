@@ -77,3 +77,39 @@ The managed/IL and EpicLoot binding checks also passed against the final merged
 Release 1.4.0 DLL. Manifest, assembly, plugin and file versions were verified;
 both Release ZIPs contain the matching DLL and expected package files.
 No game, host, dedicated-server session or multiplayer transport was executed.
+
+## Own-tombstone recovery follow-up (1.4.1, 2026-10-13)
+
+The tombstone's stored `ZDOVars.s_owner` character ID now grants recovery through
+STUWard restrictions. The check requires the exact `Container` used by the
+same-object `TombStone` and a valid network view; a network owner, matching chest
+owner field, parent/child container, or second container does not qualify.
+Outside managed coverage, the public container API still defers to its caller.
+
+Both `Container.Interact` and the automatic `Container.TakeAll` path enter a
+temporary managed-ward allowance for the matching grave owner. Their finalizers
+preserve exceptions and clear their own scope. `Container.CheckAccess` uses the
+same ownership rule, including on the RPC receiver. Existing RPC requester
+authentication, busy checks, TakeAll throttling, ownership transfer, item movement
+and tombstone cleanup are unchanged. No new setting or saved field was added.
+
+- Baseline and patched Debug builds/deploys, and Release 1.4.1: zero warnings/errors;
+  deployed Debug DLL SHA-256 matches the build output. Both Release ZIPs contain
+  the matching final DLL and expected package files; manifest, assembly, file and
+  plugin versions agree on 1.4.1. Embedded library and optional dependency checks passed.
+- Existing xUnit suite: 110 passed. Source-linked API checks: 13 existing item-use
+  cases and 20 grave/container cases passed, using component/ZDO/ward fixtures.
+- Original client 1.0.17 and dedicated-server 1.0.16 API/IL checks: 3,337 checks
+  and 122 target lookups per role, including the final merged Release DLL. The compiled skip/finalizer paths also passed
+  prior-denial, exception, nested-scope and repeated-cleanup checks without Unity.
+- Original metadata confirms `TombStone.GetOwner` is private; the patch uses
+  public ZNetView/ZDO access instead. The native interaction, owner ID and
+  container retrieval methods inspected in both original DLLs have identical IL.
+
+Actual game acceptance remains required with the patched DLL on server and all
+clients: recover an own grave with space for TakeAll and with a full/overweight
+inventory requiring the grave UI; verify ordinary chests and other graves stay
+blocked. Repeat with overlapping wards, another peer owning the grave ZDO,
+disconnect/reconnect and duplicate requests. Confirm no item loss/duplication and
+normal empty-grave cleanup. InventorySlots excludes graves from multiuserchest;
+this follow-up does not change that policy or add concurrent grave access.

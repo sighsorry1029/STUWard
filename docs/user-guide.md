@@ -4,7 +4,39 @@
 
 Detailed permissions, server settings, and integration requirements.
 
-[Permissions](#permissions) · [Registration](#registration) · [Overlap](#ward-overlap) · [Ward settings](#ward-settings) · [Item policy](#item-policy) · [Integrations](#integrations)
+[Permissions](#permissions) · [Registration](#registration) · [Outpost Ward](#outpost-ward) · [Overlap](#ward-overlap) · [Ward settings](#ward-settings) · [Item policy](#item-policy) · [Integrations](#integrations)
+
+## Outpost Ward
+
+Build **Outpost Ward** with the Hammer for the same protection in a smaller area. It uses the regular ward model with fixed teal runes, active effects, a teal world boundary, and a teal map icon. Its default maximum radius is **16 m**, and each Steam/platform account can place **3 per world**, in addition to its regular ward allowance. Characters on the same account share each quota; disabled wards and wards in unloaded areas still count.
+
+Both ward types use the same configuration layout. Set their radius caps and default account limits in `[1 - General]` in `BepInEx/config/sighsorry.STUWard.cfg`:
+
+| Setting | Default |
+| --- | --- |
+| Max Ward Radius | 32 m |
+| Max Outpost Ward Radius | 16 m |
+| Max Wards Per Steam ID | 3 |
+| Max Outpost Wards Per Steam ID | 3 |
+
+All four settings use the same server synchronization and configuration lock. Radius caps are clamped to 8–64 m. Limits accept 0 or more, or `-1` for unlimited. Lowering a limit blocks new placements without removing existing wards.
+
+For account-specific limits, add optional entries to the server's `BepInEx/config/STUWard/STUWard.yml`. Each list affects only its own ward type. This example allows one account six regular wards and five Outpost Wards:
+
+```yaml
+ward_limit_overrides:
+  "76561198000000000": 6
+outpost_ward_limit_overrides:
+  "76561198000000000": 5
+```
+
+Accounts without an override use the corresponding CFG limit. Valid YAML edits apply live on the server; malformed edits keep the last valid configuration. The shared `item_prefab_policy` section remains in this file.
+
+New Outpost Wards use the largest available radius between 8 m and their cap, following the same owner/group overlap rules as regular wards. A lower cap shrinks existing wards; raising it does not expand them automatically. `Ward Range Configuration` controls manual adjustment for both types.
+
+Crafting costs are separate CFG settings in the same General section. `STUWard Recipe` controls regular wards. `Outpost Ward Recipe` defaults to `Ectoplasm:3,Iron:5,Chitin:7,ElderBark:9`: 3 Ectoplasm, 5 Iron, 7 Chitin, and 9 Ancient Bark. `ElderBark` is the prefab name for Ancient Bark. Both recipe settings synchronize from the server and support live changes.
+
+Protection settings, trusted-player controls, registrations, optional integrations, and client display settings are shared. Ward reports keep `wards`, `limit`, and `override` for regular wards and add `outpost_wards`, `outpost_limit`, and `outpost_override`. Install the same updated build on the server and every client before placing the new prefab.
 
 ## Protection
 
@@ -108,11 +140,15 @@ item_prefab_policy:
 
 The pickup mode in the main config selects which pickup list applies. With STUWard 1.4.0+ and FeedLikeGrandma 1.1.7+, the Orb check also covers the capture target or release position, including use from outside a ward. Trusted access still applies; adding a prefab does not ban it everywhere.
 
+Newly generated policy files include FeedLikeGrandma's `FLG_TamingOrb` in the blocked list. Existing YAML files are preserved; add that entry manually if it is missing from your server's list.
+
 ## Map Pins
 
-Ward pins can show ward locations and active ranges on the map.
+Both regular and Outpost Wards have location pins and active-range rings on the large map and minimap. Outpost pins use a teal version of the ward icon; regular ward icons keep their original color. Both use white dashed range rings. Disabled wards can retain their location pin but have no active-range ring. Pins do not display a ward-type name.
 
-Players normally see wards they are allowed to see. Admin debug control can show all managed wards.
+Players normally see wards they are trusted to access. Admin debug control can show all managed wards. The client settings `Ward Minimap Pin Scale` (default `1`, `0` hides icons) and `Ward Minimap Active Ranges` (default `On`) apply to both types.
+
+Opening the large map refreshes the display. Remote clients also receive server updates. In a local or hosted world, some changes while the large map is closed may appear only after opening it again.
 
 ## Integrations
 

@@ -492,7 +492,7 @@ internal sealed class WardGuiController : MonoBehaviour
             WardGuiLayoutSettings.GetRadiusSliderPosition(),
             WardGuiLayoutSettings.GetRadiusSliderWidth(),
             WardSettings.MinRadius,
-            WardSettings.MaxRadius,
+            WardSettings.GetMaxRadius(_currentWard),
             wholeNumbers: true);
         _radiusSlider.onValueChanged.AddListener(OnRadiusSliderChanged);
         var commitHandler = _radiusSlider.gameObject.AddComponent<SliderCommitHandler>();
@@ -1194,9 +1194,9 @@ internal sealed class WardGuiController : MonoBehaviour
             var displayedRadius = Mathf.Clamp(
                 _currentConfiguration.Radius,
                 WardSettings.MinRadius,
-                WardSettings.MaxRadius);
+                WardSettings.GetMaxRadius(_currentWard));
             _radiusSlider.minValue = WardSettings.MinRadius;
-            _radiusSlider.maxValue = WardSettings.MaxRadius;
+            _radiusSlider.maxValue = WardSettings.GetMaxRadius(_currentWard);
             _radiusSlider.value = displayedRadius;
             _radiusValueText.text = WardLocalization.LocalizeFormat(
                 WardLocalization.UiRadiusValueToken,
@@ -1643,7 +1643,7 @@ internal sealed class WardGuiController : MonoBehaviour
             return;
         }
 
-        _currentConfiguration = WardSettings.WithRadius(_currentConfiguration, value);
+        _currentConfiguration = WardSettings.WithRadius(_currentConfiguration, value, _currentWard);
         RefreshControls();
         StageConfigurationPush();
     }
@@ -2083,9 +2083,17 @@ internal sealed class WardGuiController : MonoBehaviour
             return;
         }
 
+        if (!Mathf.Approximately(_radiusSlider.maxValue, WardSettings.GetMaxRadius(_currentWard)))
+        {
+            // A server maximum can change while the stored radius stays the same.
+            // Refresh without staging a request or discarding other draft settings.
+            RefreshControls();
+            return;
+        }
+
         var maxRadius = _currentWard != null
             ? WardSettings.GetAdvisoryMaxRadius(_currentWard)
-            : WardSettings.MaxRadius;
+            : WardSettings.GetMaxRadius(_currentWard);
         UpdateRadiusLimitMarker(maxRadius);
         UpdateRadiusValueVisuals(maxRadius);
         _nextRadiusAdvisoryRefreshTime = Time.unscaledTime + RadiusAdvisoryRefreshSeconds;

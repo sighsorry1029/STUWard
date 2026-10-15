@@ -10,9 +10,37 @@ namespace STUWard;
 internal sealed class StuWardArea : MonoBehaviour
 {
     internal const string PrefabName = "piece_stuward";
+    internal const string OutpostPrefabName = "piece_stuward_outpost";
     internal const string BasePrefabName = "guard_stone";
     internal const string DisplayName = WardLocalization.PieceNameToken;
     internal const string Description = WardLocalization.PieceDescriptionToken;
+    private static readonly int RegularPrefabHash = StringExtensionMethods.GetStableHashCode(PrefabName);
+    private static readonly int OutpostPrefabHash = StringExtensionMethods.GetStableHashCode(OutpostPrefabName);
+    internal static readonly Color OutpostColor = new(85f / 255f, 206f / 255f, 214f / 255f);
+
+    // Serialized so Unity also preserves the kind on a placement ghost without a ZDO.
+    [SerializeField] internal bool IsOutpostWard;
+
+    internal static bool IsManagedPrefab(int prefabHash) =>
+        prefabHash == RegularPrefabHash || prefabHash == OutpostPrefabHash;
+
+    internal static bool IsOutpost(ZDO? zdo) => zdo != null && zdo.GetPrefab() == OutpostPrefabHash;
+
+    internal static bool IsOutpost(PrivateArea? area)
+    {
+        if (area == null) return false;
+        var zdo = WardPrivateAreaSafeAccess.GetZdo(area);
+        return zdo != null ? IsOutpost(zdo) : area.GetComponent<StuWardArea>()?.IsOutpostWard == true;
+    }
+
+    internal static void CollectWorldZdos(ZDOMan zdoMan, List<ZDO> destination)
+    {
+        destination.Clear();
+        // The game's iterative prefab scan can repeat sector 0 and a batch's
+        // boundary sector. This ID dictionary includes unloaded wards exactly once.
+        foreach (var zdo in zdoMan.GetWorldObjects().Values)
+            if (zdo != null && zdo.IsValid() && IsManagedPrefab(zdo.GetPrefab())) destination.Add(zdo);
+    }
 
     internal static bool IsManaged(PrivateArea? area)
     {
@@ -87,31 +115,44 @@ internal static class StuWardPrefab
     private static GameObject? _prefabRoot;
     private static PieceTable? _hammerTable;
     private static GameObject? _stuWardPrefab;
+    private static GameObject? _outpostWardPrefab;
+    private static readonly List<Material> OutpostMaterials = new();
     private static GameObject? _vanillaGuardStonePrefab;
     private static int _vanillaGuardStoneIndex = -1;
     private static Piece.Requirement[]? _defaultStuWardRequirements;
+    private static Sprite? _outpostMapIconSource;
+    private static Sprite? _outpostMapIcon;
+    private static Texture2D? _outpostMapIconTexture;
     // Called before ZNetScene builds its name/hash lookup. Inactive parent prevents
     // Awake from allocating a ZDO or destroying ZNetView on the prefab clone.
     internal static void Register(ZNetScene scene)
     {
-        var existing = scene.m_prefabs.Find(prefab => prefab != null && prefab.name == StuWardArea.PrefabName);
-        if (existing != null && existing != _stuWardPrefab)
-            throw new InvalidOperationException("Another prefab is already registered as " + StuWardArea.PrefabName);
-
-        if (_stuWardPrefab != null)
+        var source = scene.m_prefabs.Find(prefab => prefab != null && prefab.name == StuWardArea.BasePrefabName);
+        if (source == null) throw new InvalidOperationException("Valheim guard_stone prefab is unavailable.");
+        if (_prefabRoot == null)
         {
-            if (existing == null) scene.m_prefabs.Add(_stuWardPrefab);
-            ApplyRecipeSettings();
+            _prefabRoot = new GameObject("STUWard Prefabs");
+            _prefabRoot.SetActive(false);
+            UnityEngine.Object.DontDestroyOnLoad(_prefabRoot);
+        }
+        RegisterPiece(scene, source, ref _stuWardPrefab, StuWardArea.PrefabName, false);
+        RegisterPiece(scene, source, ref _outpostWardPrefab, StuWardArea.OutpostPrefabName, true);
+        ApplyRecipeSettings();
+    }
+
+    private static void RegisterPiece(ZNetScene scene, GameObject source, ref GameObject? registered, string name, bool outpost)
+    {
+        var existing = scene.m_prefabs.Find(prefab => prefab != null && prefab.name == name);
+        if (existing != null && existing != registered)
+            throw new InvalidOperationException("Another prefab is already registered as " + name);
+        if (registered != null)
+        {
+            if (existing == null) scene.m_prefabs.Add(registered);
             return;
         }
 
-        var source = scene.m_prefabs.Find(prefab => prefab != null && prefab.name == StuWardArea.BasePrefabName);
-        if (source == null) throw new InvalidOperationException("Valheim guard_stone prefab is unavailable.");
-        _prefabRoot = new GameObject("STUWard Prefabs");
-        _prefabRoot.SetActive(false);
-        UnityEngine.Object.DontDestroyOnLoad(_prefabRoot);
-        var prefab = UnityEngine.Object.Instantiate(source, _prefabRoot.transform, false);
-        prefab.name = StuWardArea.PrefabName;
+        var prefab = UnityEngine.Object.Instantiate(source, _prefabRoot!.transform, false);
+        prefab.name = name;
         prefab.SetActive(true);
         var piece = prefab.GetComponent<Piece>();
         var area = prefab.GetComponent<PrivateArea>();
@@ -120,28 +161,99 @@ internal static class StuWardPrefab
             Shutdown();
             throw new InvalidOperationException("guard_stone is missing Piece or PrivateArea.");
         }
-        prefab.AddComponent<StuWardArea>();
+        prefab.AddComponent<StuWardArea>().IsOutpostWard = outpost;
         prefab.AddComponent<StuWardPlacedHook>();
 
         // Preserve the defaults formerly applied by PieceConfig.
         piece.m_enabled = true;
         piece.m_allowedInDungeons = false;
-        piece.m_name = StuWardArea.DisplayName;
-        piece.m_description = StuWardArea.Description;
+        piece.m_name = outpost ? WardLocalization.OutpostNameToken : StuWardArea.DisplayName;
+        piece.m_description = outpost ? WardLocalization.OutpostDescriptionToken : StuWardArea.Description;
         piece.m_resources = CloneRequirements(piece.m_resources);
-        area.m_name = StuWardArea.DisplayName;
+        area.m_name = piece.m_name;
         area.m_radius = WardSettings.MinRadius;
         if (area.m_areaMarker != null)
         {
             area.m_areaMarker.m_radius = WardSettings.MinRadius;
         }
 
-        _stuWardPrefab = prefab;
-        _defaultStuWardRequirements = CloneRequirements(piece.m_resources);
+        registered = prefab;
+        if (!outpost) _defaultStuWardRequirements = CloneRequirements(piece.m_resources);
+        if (outpost && !WardUiResources.IsHeadless) ApplyOutpostColors(area);
 
         scene.m_prefabs.Add(prefab);
-        ApplyRecipeSettings();
-        Plugin.Log.LogInfo("Registered STUWard prefab without Jotunn.");
+        Plugin.Log.LogInfo($"Registered {name} without Jotunn.");
+    }
+
+    private static void ApplyOutpostColors(PrivateArea area)
+    {
+        // Never modify shared vanilla materials. UpdateStatus only toggles the
+        // emission keyword, so the cloned emission color survives enable/disable.
+        if (area.m_model != null)
+        {
+            var materials = area.m_model.sharedMaterials;
+            for (var i = 0; i < materials.Length; i++)
+            {
+                var source = materials[i];
+                if (source == null || !source.HasProperty("_EmissionColor")) continue;
+                var original = source.GetColor("_EmissionColor");
+                var intensity = Mathf.Max(original.r, Mathf.Max(original.g, original.b));
+                if (intensity <= 0f) continue;
+                var material = new Material(source);
+                var color = StuWardArea.OutpostColor * intensity;
+                color.a = original.a;
+                material.SetColor("_EmissionColor", color);
+                materials[i] = material;
+                OutpostMaterials.Add(material);
+            }
+            area.m_model.sharedMaterials = materials;
+        }
+        if (area.m_areaMarker != null && area.m_areaMarker.m_prefab != null)
+        {
+            // A private segment prefab keeps placement highlighting/MaterialMan
+            // resets from restoring the vanilla color. Never tint the shared asset.
+            var segment = UnityEngine.Object.Instantiate(area.m_areaMarker.m_prefab, _prefabRoot!.transform, false);
+            segment.name = "STUWard Outpost Boundary";
+            foreach (var renderer in segment.GetComponentsInChildren<Renderer>(true))
+            {
+                var materials = renderer.sharedMaterials;
+                for (var i = 0; i < materials.Length; i++)
+                {
+                    var source = materials[i];
+                    if (source == null) continue;
+                    var material = new Material(source);
+                    foreach (var property in WardSettings.AreaMarkerColorProperties)
+                        if (material.HasProperty(property))
+                            material.SetColor(property, TintOutpostColor(source.GetColor(property)));
+                    materials[i] = material;
+                    OutpostMaterials.Add(material);
+                }
+                renderer.sharedMaterials = materials;
+            }
+            area.m_areaMarker.m_prefab = segment;
+        }
+        var effect = area.m_enabledEffect;
+        if (effect == null) return;
+        foreach (var light in effect.GetComponentsInChildren<Light>(true)) light.color = StuWardArea.OutpostColor;
+        foreach (var particles in effect.GetComponentsInChildren<ParticleSystem>(true))
+        {
+            var main = particles.main;
+            var original = main.startColor;
+            // guard_stone uses Color/TwoColors here. Leave unfamiliar gradients
+            // intact instead of discarding an animation from another mod.
+            if (original.mode == ParticleSystemGradientMode.Color)
+                main.startColor = TintOutpostColor(original.color);
+            else if (original.mode == ParticleSystemGradientMode.TwoColors)
+                main.startColor = new ParticleSystem.MinMaxGradient(
+                    TintOutpostColor(original.colorMin), TintOutpostColor(original.colorMax));
+        }
+    }
+
+    private static Color TintOutpostColor(Color original)
+    {
+        var color = StuWardArea.OutpostColor * Mathf.Max(original.r, Mathf.Max(original.g, original.b));
+        color.a = original.a;
+        return color;
     }
 
     internal static void Shutdown()
@@ -149,16 +261,21 @@ internal static class StuWardPrefab
         if (_hammerTable != null)
         {
             _hammerTable.m_pieces.Remove(_stuWardPrefab);
+            _hammerTable.m_pieces.Remove(_outpostWardPrefab);
             if (_vanillaGuardStonePrefab != null && !_hammerTable.m_pieces.Contains(_vanillaGuardStonePrefab))
                 _hammerTable.m_pieces.Insert(Mathf.Clamp(_vanillaGuardStoneIndex, 0, _hammerTable.m_pieces.Count), _vanillaGuardStonePrefab);
         }
         _hammerTable = null;
         _stuWardPrefab = null;
+        _outpostWardPrefab = null;
         _vanillaGuardStonePrefab = null;
         _vanillaGuardStoneIndex = -1;
         _defaultStuWardRequirements = null;
         if (_prefabRoot != null) UnityEngine.Object.Destroy(_prefabRoot);
         _prefabRoot = null;
+        foreach (var material in OutpostMaterials) UnityEngine.Object.Destroy(material);
+        OutpostMaterials.Clear();
+        ClearOutpostMapIcon();
     }
 
     internal static void ApplyRecipeSettings()
@@ -169,11 +286,13 @@ internal static class StuWardPrefab
         {
             _hammerTable = table;
             if (!table.m_pieces.Contains(_stuWardPrefab)) table.m_pieces.Add(_stuWardPrefab);
+            if (_outpostWardPrefab != null && !table.m_pieces.Contains(_outpostWardPrefab)) table.m_pieces.Add(_outpostWardPrefab);
         }
 
         var refreshForVanillaRecipe = ApplyVanillaGuardStoneRecipeSetting(table);
-        var refreshForStuWardRecipe = ApplyStuWardRecipeSetting(piece);
-        if (refreshForVanillaRecipe || refreshForStuWardRecipe)
+        var refreshForStuWardRecipe = ApplyStuWardRecipeSetting(piece, outpost: false);
+        var refreshForOutpostRecipe = ApplyStuWardRecipeSetting(GetStuWardPiece(outpost: true), outpost: true);
+        if (refreshForVanillaRecipe || refreshForStuWardRecipe || refreshForOutpostRecipe)
         {
             Player.m_localPlayer?.UpdateAvailablePiecesList();
         }
@@ -190,14 +309,82 @@ internal static class StuWardPrefab
         return FindPrefab(StuWardArea.BasePrefabName)?.GetComponent<Piece>()?.m_icon;
     }
 
-    internal static Piece.Requirement[] GetCurrentStuWardRequirements()
+    internal static Piece.Requirement[] GetCurrentWardRequirements(bool outpost)
     {
-        return CloneRequirements(GetStuWardPiece()?.m_resources);
+        return CloneRequirements(GetStuWardPiece(outpost)?.m_resources);
     }
 
-    private static Piece? GetStuWardPiece()
+    internal static Sprite? GetOutpostMapIcon(Sprite? source)
     {
-        var piece = _stuWardPrefab != null ? _stuWardPrefab.GetComponent<Piece>() : null;
+        if (WardUiResources.IsHeadless || source == null) return source;
+        if (_outpostMapIconSource == source) return _outpostMapIcon != null ? _outpostMapIcon : source;
+        ClearOutpostMapIcon();
+        // Cache a failed attempt too; retry only after the source or scene changes.
+        _outpostMapIconSource = source;
+        RenderTexture? temporary = null;
+        var previousActive = RenderTexture.active;
+        var previousSrgbWrite = GL.sRGBWrite;
+        try
+        {
+            // The original guardstone icon is a non-readable BC7 atlas sprite,
+            // packed as an unrotated 64x64 rectangle. Never edit its shared atlas.
+            if (source.packed && source.packingRotation != SpritePackingRotation.None)
+                throw new InvalidOperationException("The ward icon has unsupported atlas rotation.");
+            var rect = source.textureRect;
+            var width = Mathf.RoundToInt(rect.width);
+            var height = Mathf.RoundToInt(rect.height);
+            temporary = RenderTexture.GetTemporary(width, height, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB);
+            GL.sRGBWrite = QualitySettings.activeColorSpace == ColorSpace.Linear;
+            Graphics.Blit(source.texture, temporary,
+                new Vector2(rect.width / source.texture.width, rect.height / source.texture.height),
+                new Vector2(rect.x / source.texture.width, rect.y / source.texture.height));
+            RenderTexture.active = temporary;
+            _outpostMapIconTexture = new Texture2D(width, height, TextureFormat.RGBA32, false)
+            {
+                name = "STUWard_Outpost_MapIcon",
+                filterMode = FilterMode.Bilinear,
+                wrapMode = TextureWrapMode.Clamp,
+                hideFlags = HideFlags.HideAndDontSave
+            };
+            _outpostMapIconTexture.ReadPixels(new Rect(0, 0, width, height), 0, 0);
+            var pixels = _outpostMapIconTexture.GetPixels();
+            for (var index = 0; index < pixels.Length; index++) pixels[index] = TintOutpostColor(pixels[index]);
+            _outpostMapIconTexture.SetPixels(pixels);
+            _outpostMapIconTexture.Apply(false, true);
+            _outpostMapIcon = Sprite.Create(_outpostMapIconTexture, new Rect(0, 0, width, height),
+                new Vector2(0.5f, 0.5f), source.pixelsPerUnit, 0u, SpriteMeshType.FullRect);
+            _outpostMapIcon.name = _outpostMapIconTexture.name;
+            _outpostMapIcon.hideFlags = HideFlags.HideAndDontSave;
+            return _outpostMapIcon;
+        }
+        catch (Exception exception)
+        {
+            ClearOutpostMapIcon();
+            _outpostMapIconSource = source;
+            Plugin.Log.LogWarning($"Unable to create Outpost map icon: {exception.Message}. Using the regular icon.");
+            return source;
+        }
+        finally
+        {
+            RenderTexture.active = previousActive;
+            GL.sRGBWrite = previousSrgbWrite;
+            if (temporary != null) RenderTexture.ReleaseTemporary(temporary);
+        }
+    }
+
+    private static void ClearOutpostMapIcon()
+    {
+        if (_outpostMapIcon != null) UnityEngine.Object.Destroy(_outpostMapIcon);
+        if (_outpostMapIconTexture != null) UnityEngine.Object.Destroy(_outpostMapIconTexture);
+        _outpostMapIcon = null;
+        _outpostMapIconTexture = null;
+        _outpostMapIconSource = null;
+    }
+
+    private static Piece? GetStuWardPiece(bool outpost = false)
+    {
+        var prefab = outpost ? _outpostWardPrefab : _stuWardPrefab;
+        var piece = prefab != null ? prefab.GetComponent<Piece>() : null;
         if (piece != null)
         {
             return piece;
@@ -241,14 +428,14 @@ internal static class StuWardPrefab
         return true;
     }
 
-    private static bool ApplyStuWardRecipeSetting(Piece? piece)
+    private static bool ApplyStuWardRecipeSetting(Piece? piece, bool outpost)
     {
         if (piece == null)
         {
             return false;
         }
 
-        var recipeOverride = Plugin.StuWardRecipe?.Value?.Trim() ?? string.Empty;
+        var recipeOverride = (outpost ? Plugin.OutpostWardRecipe : Plugin.StuWardRecipe)?.Value?.Trim() ?? string.Empty;
         if (string.IsNullOrWhiteSpace(recipeOverride))
         {
             if (_defaultStuWardRequirements != null)
@@ -262,7 +449,7 @@ internal static class StuWardPrefab
 
         if (!TryParseRequirements(recipeOverride, out var requirements))
         {
-            Plugin.Log.LogWarning($"Invalid STUWard recipe override '{recipeOverride}'. Keeping previous recipe.");
+            Plugin.Log.LogWarning($"Invalid {(outpost ? "Outpost Ward" : "STUWard")} recipe override '{recipeOverride}'. Keeping previous recipe.");
             return false;
         }
 

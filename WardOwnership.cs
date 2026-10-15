@@ -16,7 +16,6 @@ internal static partial class WardOwnership
     private const string NotifyManagedWardMapStateChangedRpc = "STUWard_NotifyManagedWardMapStateChanged";
     private static readonly List<ZDO> ManagedWardPrefabScanBuffer = new();
     private static readonly HashSet<ZDOID> AcceptedManagedWardIds = new();
-    private static readonly int ManagedWardPrefabHash = StringExtensionMethods.GetStableHashCode(StuWardArea.PrefabName);
     private static ZDOMan? _trackedZdoMan;
     private static bool _managedWardObservationInitialized;
     private static bool _rpcsRegistered;
@@ -215,12 +214,12 @@ internal static partial class WardOwnership
         }
 
         zdo.Set(LimitRefundProcessedKey, true);
-        DropManagedWardPlacementRefund(zdo.GetPosition());
+        DropManagedWardPlacementRefund(zdo.GetPosition(), StuWardArea.IsOutpost(zdo));
     }
 
-    private static void DropManagedWardPlacementRefund(Vector3 position)
+    private static void DropManagedWardPlacementRefund(Vector3 position, bool outpost)
     {
-        var requirements = StuWardPrefab.GetCurrentStuWardRequirements();
+        var requirements = StuWardPrefab.GetCurrentWardRequirements(outpost);
         if (requirements.Length == 0)
         {
             return;
@@ -294,13 +293,14 @@ internal static partial class WardOwnership
         }
     }
 
-    private static int GetEffectiveWardLimitForAccount(string accountId)
+    private static int GetEffectiveWardLimitForAccount(string accountId, bool outpost = false)
     {
         var overrideAccountId = NormalizeAccountId(accountId);
-        return WardLimitPolicy.GetEffectiveLimit(
+        return ManagedWardConfigFileService.CurrentSnapshot.GetWardLimit(
             overrideAccountId,
-            ManagedWardConfigFileService.CurrentSnapshot.WardLimitOverrides,
-            Plugin.MaxWardsPerSteamId?.Value ?? 3);
+            outpost,
+            Plugin.MaxWardsPerSteamId?.Value ?? 3,
+            Plugin.MaxOutpostWardsPerSteamId?.Value ?? 3);
     }
 
     private static void ResetServerRuntimeState()
@@ -404,14 +404,7 @@ internal static partial class WardOwnership
 
     private static int PrepareManagedWardPrefabScan(ZDOMan zdoMan)
     {
-        ManagedWardPrefabScanBuffer.Clear();
-        var scanIndex = 0;
-        while (!zdoMan.GetAllZDOsWithPrefabIterative(
-                   StuWardArea.PrefabName,
-                   ManagedWardPrefabScanBuffer,
-                   ref scanIndex))
-        {
-        }
+        StuWardArea.CollectWorldZdos(zdoMan, ManagedWardPrefabScanBuffer);
 
         return ManagedWardPrefabScanBuffer.Count;
     }
@@ -564,8 +557,9 @@ internal static partial class WardOwnership
             return false;
         }
 
-        var limit = GetEffectiveWardLimitForAccount(accountId);
-        if (!TryCountAuthoritativeManagedWardsForAccount(accountId, ownerPlayerId, zdo.m_uid, out var currentCount))
+        var outpost = StuWardArea.IsOutpost(zdo);
+        var limit = GetEffectiveWardLimitForAccount(accountId, outpost);
+        if (!TryCountAuthoritativeManagedWardsForAccount(accountId, ownerPlayerId, zdo.m_uid, outpost, out var currentCount))
         {
             RejectManagedWardPlacement(
                 zdo,
@@ -634,6 +628,7 @@ internal static partial class WardOwnership
         string accountId,
         long ownerPlayerId,
         ZDOID ignoredZdoId,
+        bool outpost,
         out int count)
     {
         count = 0;
@@ -652,6 +647,7 @@ internal static partial class WardOwnership
         {
             var candidate = ManagedWardPrefabScanBuffer[index];
             if (!IsManagedWardZdo(candidate) ||
+                StuWardArea.IsOutpost(candidate) != outpost ||
                 candidate!.m_uid == ignoredZdoId ||
                 !AcceptedManagedWardIds.Contains(candidate.m_uid) ||
                 candidate.GetBool(LimitRefundProcessedKey, false))
@@ -706,7 +702,7 @@ internal static partial class WardOwnership
             return false;
         }
 
-        return zdo.GetPrefab() == ManagedWardPrefabHash;
+        return StuWardArea.IsManagedPrefab(zdo.GetPrefab());
     }
 
 }

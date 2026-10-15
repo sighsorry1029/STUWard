@@ -21,7 +21,7 @@ internal sealed class ConfigurationManagerAttributes
 public sealed class Plugin : BaseUnityPlugin
 {
     internal const string ModName = "STUWard";
-    internal const string ModVersion = "1.4.1";
+    internal const string ModVersion = "1.4.2";
     internal const string Author = "sighsorry";
     internal const string ModGuid = $"{Author}.{ModName}";
 
@@ -45,6 +45,8 @@ public sealed class Plugin : BaseUnityPlugin
     internal static ConfigEntry<Toggle> ServerConfigLocked = null!;
     internal static ConfigEntry<int> MaxWardsPerSteamId = null!;
     internal static ConfigEntry<float> MaxWardRadius = null!;
+    internal static ConfigEntry<int> MaxOutpostWardsPerSteamId = null!;
+    internal static ConfigEntry<float> MaxOutpostWardRadius = null!;
     internal static ConfigEntry<Toggle> WardRangeConfiguration = null!;
     internal static ConfigEntry<Toggle> GuildsIntegration = null!;
     internal static ConfigEntry<Toggle> ClanIntegration = null!;
@@ -53,6 +55,7 @@ public sealed class Plugin : BaseUnityPlugin
     internal static readonly Dictionary<WardRestrictionOptions, ConfigEntry<RestrictionServerMode>> RestrictionModes = new();
     internal static ConfigEntry<Toggle> DisableVanillaGuardStoneRecipe = null!;
     internal static ConfigEntry<string> StuWardRecipe = null!;
+    internal static ConfigEntry<string> OutpostWardRecipe = null!;
     internal static ConfigEntry<KeyboardShortcut> WardSettingsShortcut = null!;
     internal static ConfigEntry<int> WardMinimapPinScale = null!;
     internal static ConfigEntry<Toggle> WardMinimapActiveRanges = null!;

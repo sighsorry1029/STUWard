@@ -187,6 +187,89 @@ foreach (var assemblyName in new[] { "assembly_guiutils.dll", "SoftReferenceable
 Check(string.Equals(Path.GetFullPath(game.Location), Path.Combine(managed, "assembly_valheim.dll"), StringComparison.OrdinalIgnoreCase), "Wrong game assembly was loaded");
 var mod = Assembly.LoadFrom(modPath);
 const BindingFlags hiddenStatic = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
+const BindingFlags hiddenInstance = BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public;
+// Exercise the actual merged YAML parser without initializing Unity/ServerSync.
+// A failed parse returns diagnostics; only the file-reader logs and commits state.
+var configService = mod.GetType("STUWard.ManagedWardConfigFileService", true)!;
+var parseConfig = configService.GetMethod("TryParseYaml", hiddenStatic)!;
+object ParseConfig(string yaml, bool expected = true)
+{
+    var arguments = new object?[] { yaml, null, null };
+    var accepted = (bool)parseConfig.Invoke(null, arguments)!;
+    Check(accepted == expected, "Unexpected YAML result: " + yaml + " / " + arguments[2]);
+    Check(accepted == string.IsNullOrEmpty((string)arguments[2]!), "Missing YAML parse diagnostic");
+    return arguments[1]!;
+}
+T SnapshotValue<T>(object snapshot, string name) =>
+    (T)snapshot.GetType().GetProperty(name, hiddenInstance)!.GetValue(snapshot)!;
+int SnapshotLimit(object snapshot, string accountId, bool outpost, int regularDefault = 5, int outpostDefault = 3) =>
+    (int)snapshot.GetType().GetMethod("GetWardLimit", hiddenInstance)!
+        .Invoke(snapshot, new object[] { accountId, outpost, regularDefault, outpostDefault })!;
+const string account = "76561198000000000";
+foreach (var yaml in new[] { "", "ward_limit_overrides: {}\noutpost_ward_limit_overrides: {}" })
+{
+    var defaults = ParseConfig(yaml);
+    Check(SnapshotLimit(defaults, account, false) == 5, "Regular CFG fallback changed");
+    Check(SnapshotLimit(defaults, account, true) == 3, "Outpost CFG fallback changed");
+    Check(SnapshotLimit(defaults, account, true, outpostDefault: 7) == 7, "Outpost CFG fallback is hard-coded");
+}
+var configured = ParseConfig("ward_limit_overrides:\n  '76561198000000000': 9\noutpost_ward_limit_overrides:\n  '76561198000000000': 2\nitem_prefab_policy:\n  blocked_item_prefabs: [FLG_TamingOrb]\n  pickup_whitelist: [Wood]\n  pickup_blacklist: []\n");
+Check(SnapshotLimit(configured, account, false) == 9, "Regular account override changed");
+Check(SnapshotLimit(configured, account, true) == 2, "Outpost account override changed");
+Check(SnapshotValue<string>(configured, "ItemPrefabPolicyYaml").Contains("FLG_TamingOrb"), "Shared item policy was lost");
+foreach (var outpost in new[] { false, true })
+{
+    var section = outpost ? "outpost_ward_limit_overrides" : "ward_limit_overrides";
+    foreach (var limit in new[] { -1, 0, 9 })
+    {
+        var snapshot = ParseConfig(section + ": {'Steam_" + account + "': " + limit + "}");
+        Check(SnapshotLimit(snapshot, account, outpost) == limit, "Normalized account override was lost: " + section);
+        Check(SnapshotLimit(snapshot, account, !outpost) == (outpost ? 5 : 3), "Quota leaked between ward types: " + section);
+        Check(SnapshotLimit(snapshot, "76561198000000001", outpost) == (outpost ? 3 : 5), "Quota leaked between accounts: " + section);
+    }
+    foreach (var invalid in new[]
+    {
+        "{'invalid-id': 3}", "{'" + account + "': -2}",
+        "{'" + account + "': 3, '" + account + "': 4}",
+        "{'" + account + "': 3, 'Steam_" + account + "': 4}", "[]"
+    }) ParseConfig(section + ": " + invalid, expected: false);
+    ParseConfig(section + ":\n" + string.Join("\n", Enumerable.Range(0, 4097)
+        .Select(i => "  '" + (76561198000000000L + i) + "': 3")), expected: false);
+}
+ParseConfig("outpost_ward: {max_radius: 16, max_per_steam_id: 3}", expected: false);
+ParseConfig("unknown_section: {}", expected: false);
+var generated = ParseConfig((string)configService.GetMethod("GetDefaultConfigFileContents", hiddenStatic)!.Invoke(null, null)!);
+Check(SnapshotValue<IReadOnlyDictionary<string, int>>(generated, "WardLimitOverrides").Count == 0, "Generated regular overrides are not empty");
+Check(SnapshotValue<IReadOnlyDictionary<string, int>>(generated, "OutpostWardLimitOverrides").Count == 0, "Generated Outpost overrides are not empty");
+Check(SnapshotValue<string>(generated, "ItemPrefabPolicyYaml").Contains("kg_TameableCollector"), "Generated item policy was lost");
+Check(SnapshotValue<string>(generated, "ItemPrefabPolicyYaml").Contains("FLG_TamingOrb"), "Generated item policy does not block the Taming Orb");
+var explicitPolicy = ParseConfig("item_prefab_policy: {blocked_item_prefabs: [PalStone]}");
+Check(!SnapshotValue<string>(explicitPolicy, "ItemPrefabPolicyYaml").Contains("FLG_TamingOrb"), "Explicit user policy was overwritten with new defaults");
+var persistedSnapshot = configService.GetField("_currentSnapshot", hiddenStatic)!;
+var previousSnapshot = persistedSnapshot.GetValue(null)!;
+try
+{
+    persistedSnapshot.SetValue(null, configured);
+    ParseConfig("outpost_ward_limit_overrides: {'" + account + "': -3}", expected: false);
+    Check(persistedSnapshot.GetValue(null)!.Equals(configured), "Failed parse modified the active snapshot");
+}
+finally { persistedSnapshot.SetValue(null, previousSnapshot); }
+var wardKind = mod.GetType("STUWard.StuWardArea", true)!;
+var prefabHash = Assembly.LoadFrom(Path.Combine(managed, "assembly_utils.dll"))
+    .GetType("StringExtensionMethods", true)!.GetMethod("GetStableHashCode", hiddenStatic, null, new[] { typeof(string) }, null)!;
+var isManagedPrefab = wardKind.GetMethod("IsManagedPrefab", hiddenStatic)!;
+foreach (var name in new[] { "piece_stuward", "piece_stuward_outpost", "guard_stone", "piece_chest_wood" })
+    Check((bool)isManagedPrefab.Invoke(null, new[] { prefabHash.Invoke(null, new object[] { name }) })! == name.StartsWith("piece_stuward"),
+        "Wrong managed prefab classification: " + name);
+Check(wardKind.GetField("IsOutpostWard", hiddenInstance)!.GetCustomAttributes(false)
+    .Any(a => a.GetType().FullName == "UnityEngine.SerializeField"), "Ghost kind is not Unity-serialized");
+foreach (var language in new[] { "English", "Korean" })
+{
+    var resource = mod.GetManifestResourceNames().Single(n => n.EndsWith("." + language + ".yml"));
+    using var reader = new StreamReader(mod.GetManifestResourceStream(resource)!);
+    var text = reader.ReadToEnd();
+    Check(text.Contains("stuw_outpost_name") && text.Contains("stuw_outpost_desc"), "Outpost localization missing: " + language);
+}
 var localizer = mod.GetType("LocalizationManager.Localizer", true)!;
 var normalizeTokenKey = localizer.GetMethod("NormalizeTokenKey", hiddenStatic)!;
 Check((string)normalizeTokenKey.Invoke(null, new object[] { "$stuw_piece_name" })! == "stuw_piece_name", "Localization token prefix was not removed");
@@ -283,6 +366,60 @@ Check(paths.Count == 1 && paths["same/path"]!.Equals(first), "Asset lookup overw
 // This exercises malformed network input without creating a Unity object.
 var readGroups = mod.GetType("STUWard.WardRemoteGroupAccess", true)!.GetMethod("TryReadSnapshot", hiddenStatic)!;
 var packageType = readGroups.GetParameters()[0].ParameterType;
+// Both ward types may have the same configured radius. Their icon identity must
+// survive the real ZPackage codec, including entries for distant/unloaded wards.
+var mapManager = mod.GetType("STUWard.WardMinimapPinsManager", true)!;
+var readMapEntries = mapManager.GetMethod("TryReadSnapshotEntries", hiddenStatic)!;
+var writeMapEntries = mapManager.GetMethod("WriteSnapshotEntries", hiddenStatic)!;
+byte[] MapEntriesPacket(float radius = 16f)
+{
+    using var stream = new MemoryStream();
+    using var writer = new BinaryWriter(stream);
+    foreach (var outpost in new[] { false, true })
+    {
+        writer.Write(42L); writer.Write(outpost ? 2u : 1u);
+        writer.Write(2000f); writer.Write(50f); writer.Write(-3000f);
+        writer.Write(radius); writer.Write(!outpost); writer.Write(outpost);
+    }
+    writer.Flush();
+    return stream.ToArray();
+}
+bool ReadMapEntries(byte[] bytes, int count, out Array entries)
+{
+    var arguments = new object?[] { Activator.CreateInstance(packageType, new object[] { bytes }), count, null };
+    var accepted = (bool)readMapEntries.Invoke(null, arguments)!;
+    entries = (Array)arguments[2]!;
+    return accepted;
+}
+var mapBytes = MapEntriesPacket();
+Check(ReadMapEntries(mapBytes, 2, out var mapEntries) && mapEntries.Length == 2, "Mixed ward map payload rejected");
+for (var index = 0; index < mapEntries.Length; index++)
+{
+    var entry = mapEntries.GetValue(index)!;
+    Check(SnapshotValue<bool>(entry, "IsOutpost") == (index == 1), "Map ward identity lost");
+    Check(SnapshotValue<bool>(entry, "IsEnabled") == (index == 0), "Map enabled state corrupted");
+    Check(SnapshotValue<float>(entry, "Radius") == 16f, "Map radius corrupted");
+}
+var writtenMap = Activator.CreateInstance(packageType)!;
+writeMapEntries.Invoke(null, new object[] { writtenMap, mapEntries });
+Check(((byte[])packageType.GetMethod("GetArray", Type.EmptyTypes)!.Invoke(writtenMap, null)!).SequenceEqual(mapBytes),
+    "Map snapshot codec did not round-trip both ward types");
+Check(!ReadMapEntries(mapBytes.Take(mapBytes.Length - 1).ToArray(), 2, out _), "Truncated map kind accepted");
+Check(!ReadMapEntries(MapEntriesPacket(float.NaN), 2, out _), "Non-finite map radius accepted");
+Check(!ReadMapEntries(mapBytes, -1, out _), "Negative map count accepted");
+Check(!ReadMapEntries(mapBytes, 16385, out _), "Oversized map count accepted");
+var tintOutpost = mod.GetType("STUWard.StuWardPrefab", true)!.GetMethod("TintOutpostColor", hiddenStatic)!;
+var colorType = tintOutpost.ReturnType;
+foreach (var intensity in new[] { 0f, 0.5f, 1f })
+{
+    var originalColor = Activator.CreateInstance(colorType, new object[] { intensity, intensity, intensity, 0.4f })!;
+    var tinted = tintOutpost.Invoke(null, new[] { originalColor })!;
+    Check(Math.Abs((float)colorType.GetField("a")!.GetValue(tinted)! - 0.4f) < 0.0001f, "Icon tint changed alpha");
+    Check(Math.Abs((float)colorType.GetField("r")!.GetValue(tinted)! - intensity * 85f / 255f) < 0.0001f &&
+          Math.Abs((float)colorType.GetField("g")!.GetValue(tinted)! - intensity * 206f / 255f) < 0.0001f &&
+          Math.Abs((float)colorType.GetField("b")!.GetValue(tinted)! - intensity * 214f / 255f) < 0.0001f,
+        "Icon tint changed the teal ramp");
+}
 byte[] GroupPacket(int count, bool row = false, bool trailing = false)
 {
     using var stream = new MemoryStream();

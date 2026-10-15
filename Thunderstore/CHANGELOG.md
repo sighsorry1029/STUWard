@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.4.2
+
+- Added Outpost Ward: the same protection and access rules in a smaller area, with a default 16 m radius cap and a separate allowance of 3 per Steam/platform account per world. Disabled wards, unloaded wards, and other characters on the same account count toward the limit.
+- Added fixed teal runes, effects, world boundaries, and map/minimap icons for Outpost Wards. Regular ward colors and map range styling are unchanged.
+- Added synchronized `Max Outpost Ward Radius`, `Max Outpost Wards Per Steam ID`, and `Outpost Ward Recipe` settings alongside the regular ward settings. Account exceptions use `outpost_ward_limit_overrides` in `STUWard.yml`; ward reports show both types separately.
+- Outpost Wards cost 3 Ectoplasm, 5 Iron, 7 Chitin, and 9 Ancient Bark by default (`Ectoplasm:3,Iron:5,Chitin:7,ElderBark:9`). Regular ward recipes remain independent. Existing overlap, radius adjustment, and placement-refund rules apply to both types.
+- Fixed duplicate ward counting during world scans by collecting each managed ward once by its ZDO ID.
+- Added FeedLikeGrandma's `FLG_TamingOrb` to newly generated blocked-item lists. Existing YAML files are preserved; add it to `item_prefab_policy.blocked_item_prefabs` manually if missing.
+- Update STUWard to 1.4.2 on the server and every client together. The new prefab and map data require matching builds; existing ward data does not need migration.
+
 ## 1.4.1
 
 - Allow players to recover their own tombstones inside STU Wards without ward access, through both automatic Take All and the grave inventory window. Ordinary chests and other players' graves keep their existing permission restrictions.

@@ -45,3 +45,5 @@
 "$stuw_msg_overlap": "Another Ward is too close."
 "$stuw_msg_limit_with_max": "Ward limit reached (max {0})"
 "$stuw_shortcut_unbound": "Unbound"
+stuw_outpost_name: "Outpost Ward"
+stuw_outpost_desc: "A compact ward with the same protection and a separate account limit."

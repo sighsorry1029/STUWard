@@ -279,7 +279,7 @@ internal static class WardAccess
 
         EnsureManagedWardCacheInitialized();
         if (_managedWardSpatialIndexRequiresFullRebuild ||
-            !Mathf.Approximately(_managedWardSpatialIndexMaxRadius, WardSettings.MaxRadius))
+            !Mathf.Approximately(_managedWardSpatialIndexMaxRadius, WardSettings.LargestMaxRadius))
         {
             if (!_managedWardSpatialIndexRequiresFullRebuild)
             {
@@ -984,7 +984,7 @@ internal static class WardAccess
             BuildWardOverlapAreas(allAreas));
     }
 
-    internal static bool TryGetAutomaticPlacementRadius(Player? player, Vector3 point, out float radius)
+    internal static bool TryGetAutomaticPlacementRadius(Player? player, Vector3 point, float maximumRadius, out float radius)
     {
         if (player == null)
         {
@@ -994,11 +994,11 @@ internal static class WardAccess
 
         var ownerPlayerId = player.GetPlayerID();
         var group = WardGroupCompat.GetPlayerGroupIdentity(player);
-        var allAreas = GetCandidateManagedWards(point, WardSettings.MaxRadius, requireEnabled: false);
+        var allAreas = GetCandidateManagedWards(point, maximumRadius, requireEnabled: false);
         return WardOverlapPolicy.TryGetPlacementRadius(
             WardSettings.MinRadius,
-            WardSettings.MaxRadius,
-            CreateWardOverlapQuery(point, WardSettings.MaxRadius, ownerPlayerId, group, ignoredWard: null),
+            maximumRadius,
+            CreateWardOverlapQuery(point, maximumRadius, ownerPlayerId, group, ignoredWard: null),
             BuildWardOverlapAreas(allAreas),
             out radius);
     }
@@ -1371,7 +1371,7 @@ internal static class WardAccess
     {
         EnsureManagedWardCacheInitialized();
 
-        var maxRadius = WardSettings.MaxRadius;
+        var maxRadius = WardSettings.LargestMaxRadius;
         if (!_managedWardSpatialIndexRequiresFullRebuild && Mathf.Approximately(_managedWardSpatialIndexMaxRadius, maxRadius))
         {
             return;
@@ -1396,7 +1396,7 @@ internal static class WardAccess
     {
         EnsureManagedWardCacheInitialized();
         if (_managedWardSpatialIndexRequiresFullRebuild ||
-            !Mathf.Approximately(_managedWardSpatialIndexMaxRadius, WardSettings.MaxRadius))
+            !Mathf.Approximately(_managedWardSpatialIndexMaxRadius, WardSettings.LargestMaxRadius))
         {
             if (!_managedWardSpatialIndexRequiresFullRebuild)
             {

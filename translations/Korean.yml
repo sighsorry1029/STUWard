@@ -45,3 +45,5 @@
 "$stuw_msg_overlap": "다른 와드가 너무 가깝습니다."
 "$stuw_msg_limit_with_max": "와드 한도 도달 (최대 {0}개)"
 "$stuw_shortcut_unbound": "미할당"
+stuw_outpost_name: "전초기지 와드"
+stuw_outpost_desc: "동일한 보호 기능과 별도의 계정당 설치 한도를 갖춘 소형 와드입니다."

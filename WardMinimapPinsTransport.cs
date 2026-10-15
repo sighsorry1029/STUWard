@@ -533,6 +533,7 @@ internal static partial class WardMinimapPinsManager
             pkg.Write(entry.Position);
             pkg.Write(entry.Radius);
             pkg.Write(entry.IsEnabled);
+            pkg.Write(entry.IsOutpost);
         }
     }
 
@@ -566,6 +567,7 @@ internal static partial class WardMinimapPinsManager
                     pkg.ReadZDOID(),
                     pkg.ReadVector3(),
                     pkg.ReadSingle(),
+                    pkg.ReadBool(),
                     pkg.ReadBool());
                 if (!WardMinimapSnapshotProtocol.IsValidEntry(entry))
                 {

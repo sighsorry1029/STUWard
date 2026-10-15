@@ -6,6 +6,8 @@ internal static class WardLocalization
 {
     internal const string PieceNameToken = "$stuw_piece_name";
     internal const string PieceDescriptionToken = "$stuw_piece_desc";
+    internal const string OutpostNameToken = "$stuw_outpost_name";
+    internal const string OutpostDescriptionToken = "$stuw_outpost_desc";
     internal const string UiTitleToken = "$stuw_ui_title";
     internal const string UiOwnerToken = "$stuw_ui_owner";
     internal const string UiGuildToken = "$stuw_ui_guild";

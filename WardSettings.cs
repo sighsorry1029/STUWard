@@ -173,6 +173,7 @@ internal static class WardSettings
     internal const float MinRadius = 8f;
     internal const float MaxRadiusLimit = 64f;
     internal const float DefaultMaxRadius = 32f;
+    internal const float DefaultOutpostMaxRadius = 16f;
     internal const bool DefaultAreaMarkerRotationEnabled = true;
     internal const bool DefaultAutoCloseEnabled = true;
     internal const bool DefaultWarningSoundEnabled = true;
@@ -194,7 +195,7 @@ internal static class WardSettings
     private const float MinimumAreaMarkerBrightness = 0.35f;
     private const float FallbackNativeAreaMarkerSpeed = 0.1f;
     private const float EnabledAreaMarkerSpeedMultiplier = 0.5f;
-    private static readonly string[] AreaMarkerColorProperties = { "_Color", "_BaseColor", "_TintColor" };
+    internal static readonly string[] AreaMarkerColorProperties = { "_Color", "_BaseColor", "_TintColor" };
 
     private static readonly MaterialPropertyBlock AreaMarkerPropertyBlock = new();
     private static readonly List<PrivateArea> BoundaryFlashPreviousCandidates = new();
@@ -278,6 +279,15 @@ internal static class WardSettings
         MinRadius,
         MaxRadiusLimit);
 
+    internal static float OutpostMaxRadius => Mathf.Clamp(
+        Plugin.MaxOutpostWardRadius?.Value ?? DefaultOutpostMaxRadius,
+        MinRadius,
+        MaxRadiusLimit);
+
+    internal static float LargestMaxRadius => Mathf.Max(MaxRadius, OutpostMaxRadius);
+    internal static float GetMaxRadius(ZDO? zdo) => StuWardArea.IsOutpost(zdo) ? OutpostMaxRadius : MaxRadius;
+    internal static float GetMaxRadius(PrivateArea? area) => StuWardArea.IsOutpost(area) ? OutpostMaxRadius : MaxRadius;
+
     internal static WardRestrictionOptions ForcedRestrictions
     {
         get
@@ -314,11 +324,11 @@ internal static class WardSettings
         return WithRestrictions(configuration, restrictions);
     }
 
-    internal static WardConfiguration WithRadius(WardConfiguration configuration, float radius)
+    internal static WardConfiguration WithRadius(WardConfiguration configuration, float radius, PrivateArea? area)
     {
         return CopyConfiguration(
             configuration,
-            radius: Mathf.Clamp(radius, MinRadius, MaxRadius));
+            radius: Mathf.Clamp(radius, MinRadius, GetMaxRadius(area)));
     }
 
     internal static bool IsWardRangeConfigurationEnabled()
@@ -419,6 +429,7 @@ internal static class WardSettings
     {
         ClampStoredRadiiToServerMaximum();
         ManagedWardRuntimeContexts.ClearConfigurationCaches();
+        ManagedWardPlacementPreviewService.Invalidate();
 
         var allAreas = WardGameAccess.GetAllAreas();
         if (allAreas == null)
@@ -448,7 +459,6 @@ internal static class WardSettings
             return;
         }
 
-        var maximumRadius = MaxRadius;
         foreach (var zdo in ZDOMan.instance.GetWorldObjects().Values)
         {
             if (zdo == null ||
@@ -458,6 +468,7 @@ internal static class WardSettings
                 continue;
             }
 
+            var maximumRadius = GetMaxRadius(zdo);
             if (!zdo.GetFloat(RadiusKey, out var storedRadius) ||
                 float.IsNaN(storedRadius) ||
                 float.IsInfinity(storedRadius) ||
@@ -475,7 +486,7 @@ internal static class WardSettings
     internal static WardConfiguration GetConfiguration(PrivateArea area)
     {
         var zdo = GetZdo(area);
-        var maxRadius = MaxRadius;
+        var maxRadius = GetMaxRadius(area);
         var forcedRestrictions = ForcedRestrictions;
         if (zdo != null)
         {
@@ -506,7 +517,7 @@ internal static class WardSettings
 
     private static WardConfiguration GetConfiguration(ZDO? zdo)
     {
-        return ReadConfiguration(zdo, MaxRadius, ForcedRestrictions);
+        return ReadConfiguration(zdo, GetMaxRadius(zdo), ForcedRestrictions);
     }
 
     private static WardConfiguration ReadConfiguration(
@@ -607,8 +618,9 @@ internal static class WardSettings
         }
 
         var player = Player.m_localPlayer;
-        _ = WardAccess.TryGetAutomaticPlacementRadius(player, area.transform.position, out var availableRadius);
-        var previewRadius = Mathf.Clamp(availableRadius, MinRadius, MaxRadius);
+        var maximumRadius = GetMaxRadius(area);
+        _ = WardAccess.TryGetAutomaticPlacementRadius(player, area.transform.position, maximumRadius, out var availableRadius);
+        var previewRadius = Mathf.Clamp(availableRadius, MinRadius, maximumRadius);
         if (!Mathf.Approximately(area.m_radius, previewRadius))
         {
             area.m_radius = previewRadius;
@@ -633,6 +645,7 @@ internal static class WardSettings
         {
             area.m_areaMarker.m_speed = 0f;
         }
+
     }
 
     internal static bool ShouldShowAreaMarker(PrivateArea area)
@@ -756,7 +769,7 @@ internal static class WardSettings
 
         // Treat large discontinuities as teleports rather than walking across every
         // intervening ward. Normal movement remains far below this per-frame limit.
-        var maximumSampleDistance = Mathf.Max(MinRadius, MaxRadius) * 2f;
+        var maximumSampleDistance = LargestMaxRadius * 2f;
         if (movementSquared > maximumSampleDistance * maximumSampleDistance)
         {
             return;
@@ -991,9 +1004,10 @@ internal static class WardSettings
     internal static float GetAdvisoryMaxRadius(PrivateArea? area)
     {
         var zdo = area != null ? GetZdo(area) : null;
+        var maximumRadius = GetMaxRadius(area);
         return zdo == null || !zdo.IsValid()
-            ? MaxRadius
-            : Mathf.Clamp(Mathf.Max(GetStoredRadius(zdo), GetMaxNonOverlappingRadius(zdo)), MinRadius, MaxRadius);
+            ? maximumRadius
+            : Mathf.Clamp(Mathf.Max(GetStoredRadius(zdo), GetMaxNonOverlappingRadius(zdo)), MinRadius, maximumRadius);
     }
 
     internal static float GetStoredRadiusOrMin(PrivateArea area)
@@ -1009,7 +1023,7 @@ internal static class WardSettings
             storedRadius = defaultRadius;
         }
 
-        return Mathf.Clamp(storedRadius, MinRadius, MaxRadius);
+        return Mathf.Clamp(storedRadius, MinRadius, GetMaxRadius(zdo));
     }
 
     internal static bool TryAssignAuthoritativePlacementRadius(ZDO? zdo, out float radius)
@@ -1031,7 +1045,7 @@ internal static class WardSettings
             return false;
         }
 
-        radius = Mathf.Clamp(maxRadius, MinRadius, MaxRadius);
+        radius = Mathf.Clamp(maxRadius, MinRadius, GetMaxRadius(zdo));
         zdo.Set(RadiusKey, radius);
         return true;
     }
@@ -1401,7 +1415,9 @@ internal static class WardSettings
         }
 
         configuration = new WardConfiguration(
-            Mathf.Clamp(radius, MinRadius, MaxRadius),
+            // Payloads have no ward context. The authoritative mutation below
+            // clamps to that prefab's maximum, independently of the regular limit.
+            Mathf.Clamp(radius, MinRadius, MaxRadiusLimit),
             areaMarkerRotationEnabled,
             autoCloseEnabled,
             warningSoundEnabled,
@@ -1485,7 +1501,7 @@ internal static class WardSettings
             : currentRadius;
         var maxRadius = requestedRadius > currentRadius ? GetMaxNonOverlappingRadius(zdo) : currentRadius;
         var clampedRadius = WardOverlapPolicy.ClampRequestedRadius(
-            currentRadius, requestedRadius, MinRadius, MaxRadius, maxRadius);
+            currentRadius, requestedRadius, MinRadius, GetMaxRadius(zdo), maxRadius);
         return CopyConfiguration(
             configuration,
             radius: clampedRadius,
@@ -1494,10 +1510,11 @@ internal static class WardSettings
 
     private static float GetMaxNonOverlappingRadius(ZDO zdo)
     {
+        var maximumRadius = GetMaxRadius(zdo);
         var zdoMan = ZDOMan.instance;
         if (zdoMan == null)
         {
-            return MaxRadius;
+            return maximumRadius;
         }
 
         var position = zdo.GetPosition();
@@ -1525,8 +1542,8 @@ internal static class WardSettings
         }
 
         return WardOverlapPolicy.GetMaxNonOverlappingRadius(
-            MaxRadius,
-            new WardOverlapQuery(position.x, position.z, MaxRadius, ownerPlayerId, group),
+            maximumRadius,
+            new WardOverlapQuery(position.x, position.z, maximumRadius, ownerPlayerId, group),
             overlapAreas);
     }
 
@@ -1543,7 +1560,7 @@ internal static class WardSettings
 
         var baseScale = marker.m_prefab != null ? marker.m_prefab.transform.localScale : Vector3.one;
         var lengthScale = Mathf.Clamp(
-            (configuration.Radius / MaxRadius) * ManagedAreaMarkerSegmentLengthMultiplier,
+            (configuration.Radius / GetMaxRadius(area)) * ManagedAreaMarkerSegmentLengthMultiplier,
             0f,
             ManagedAreaMarkerSegmentLengthMultiplier);
         var brightness = IsAreaMarkerBrightnessActive(area) ? 1f : MinimumAreaMarkerBrightness;
@@ -1630,7 +1647,7 @@ internal static class WardSettings
 
     private static bool ShouldRefreshAreaMarkerVisuals(PrivateArea area, CircleProjector marker, WardConfiguration configuration)
     {
-        if (!TryBuildAreaMarkerVisualState(marker, configuration, out var visualState))
+        if (!TryBuildAreaMarkerVisualState(area, marker, configuration, out var visualState))
         {
             ManagedWardRuntimeContexts.ClearAreaMarkerVisualState(area);
             return false;
@@ -1643,7 +1660,7 @@ internal static class WardSettings
 
     private static void CacheAreaMarkerVisualState(PrivateArea area, CircleProjector marker, WardConfiguration configuration)
     {
-        if (!TryBuildAreaMarkerVisualState(marker, configuration, out var visualState))
+        if (!TryBuildAreaMarkerVisualState(area, marker, configuration, out var visualState))
         {
             ManagedWardRuntimeContexts.ClearAreaMarkerVisualState(area);
             return;
@@ -1655,6 +1672,7 @@ internal static class WardSettings
     }
 
     private static bool TryBuildAreaMarkerVisualState(
+        PrivateArea area,
         CircleProjector marker,
         WardConfiguration configuration,
         out CachedAreaMarkerVisualState visualState)
@@ -1673,7 +1691,7 @@ internal static class WardSettings
             segments.Count,
             firstSegment != null ? firstSegment.GetInstanceID() : 0,
             lastSegment != null ? lastSegment.GetInstanceID() : 0,
-            MaxRadius,
+            GetMaxRadius(area),
             configuration.Radius);
         return true;
     }

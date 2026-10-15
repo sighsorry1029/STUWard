@@ -28,6 +28,7 @@ Wards can overlap when they share an owner or an authorized group. Auto-close sh
 | Building protection | Blocks unauthorized building, repairs, removal, and terrain changes. Protects building pieces from damage. |
 | Shared access | Register individual characters or use an optional Guilds or Clan group. |
 | Ward settings | Control alerts, door auto-close, range rotation, and settings allowed by the server. |
+| Outpost Ward | A teal ward with the same protection, a default 16 m range cap, and a separate limit of 3 per account. |
 | Item rules | Set blocked item prefabs and separate pickup lists. |
 | Map and server tools | Show ward pins and ranges, set account ward limits, and request ward reports. |
 
@@ -37,7 +38,7 @@ These are the default keyboard controls.
 
 | To… | Do this |
 | --- | --- |
-| Place a ward | Select **Ward** with the Hammer and build it. |
+| Place a ward | Select **Ward** or **Outpost Ward** with the Hammer and build it. |
 | Activate or deactivate it | Look at the ward and press **E**. |
 | Open Ward Settings | Look at the ward and press **Left Alt + E**. |
 | Register a player | Open the first settings page and add a character from the recent-player list. |

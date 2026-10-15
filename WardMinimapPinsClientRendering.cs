@@ -24,7 +24,7 @@ internal static partial class WardMinimapPinsManager
         {
             if (showIconPins)
             {
-                UpsertIconPin(minimap, entry, wardIcon);
+                UpsertIconPin(minimap, entry, entry.IsOutpost ? StuWardPrefab.GetOutpostMapIcon(wardIcon) : wardIcon);
             }
             else
             {

@@ -27,18 +27,20 @@ internal static class WardMinimapSnapshotProtocol
 
 internal readonly struct WardMinimapSnapshotEntry
 {
-    internal WardMinimapSnapshotEntry(ZDOID zdoId, Vector3 position, float radius, bool isEnabled)
+    internal WardMinimapSnapshotEntry(ZDOID zdoId, Vector3 position, float radius, bool isEnabled, bool isOutpost)
     {
         ZdoId = zdoId;
         Position = position;
         Radius = radius;
         IsEnabled = isEnabled;
+        IsOutpost = isOutpost;
     }
 
     internal ZDOID ZdoId { get; }
     internal Vector3 Position { get; }
     internal float Radius { get; }
     internal bool IsEnabled { get; }
+    internal bool IsOutpost { get; }
 }
 
 internal readonly struct WardMinimapViewerSnapshot
@@ -119,7 +121,8 @@ internal static class WardMinimapViewerSnapshotBuilder
                 entry.ZdoId,
                 entry.Position,
                 entry.Radius,
-                entry.IsEnabled);
+                entry.IsEnabled,
+                entry.IsOutpost);
             if (!WardMinimapSnapshotProtocol.IsValidEntry(snapshotEntry))
             {
                 continue;

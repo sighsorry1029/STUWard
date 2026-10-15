@@ -6,18 +6,25 @@ namespace STUWard;
 
 internal readonly struct ManagedWardReportAccountEntry
 {
-    internal ManagedWardReportAccountEntry(string accountId, int wardCount, int effectiveLimit, bool hasOverride)
+    internal ManagedWardReportAccountEntry(string accountId, int wardCount, int effectiveLimit, bool hasOverride,
+        int outpostWardCount, int outpostLimit, bool hasOutpostOverride)
     {
         AccountId = accountId ?? string.Empty;
         WardCount = wardCount;
         EffectiveLimit = effectiveLimit;
         HasOverride = hasOverride;
+        OutpostWardCount = outpostWardCount;
+        OutpostLimit = outpostLimit;
+        HasOutpostOverride = hasOutpostOverride;
     }
 
     internal string AccountId { get; }
     internal int WardCount { get; }
     internal int EffectiveLimit { get; }
     internal bool HasOverride { get; }
+    internal int OutpostWardCount { get; }
+    internal int OutpostLimit { get; }
+    internal bool HasOutpostOverride { get; }
 }
 
 internal readonly struct ManagedWardReportSnapshot
@@ -92,6 +99,9 @@ internal static class ManagedWardReportBuilder
                 builder.AppendLine($"    wards: {account.WardCount}");
                 builder.AppendLine($"    limit: {account.EffectiveLimit}");
                 builder.AppendLine($"    override: {account.HasOverride.ToString().ToLowerInvariant()}");
+                builder.AppendLine($"    outpost_wards: {account.OutpostWardCount}");
+                builder.AppendLine($"    outpost_limit: {account.OutpostLimit}");
+                builder.AppendLine($"    outpost_override: {account.HasOutpostOverride.ToString().ToLowerInvariant()}");
             }
         }
 

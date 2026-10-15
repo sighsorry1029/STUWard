@@ -10,14 +10,16 @@ internal static partial class WardOwnership
 
     private readonly struct ManagedWardScanEntry
     {
-        internal ManagedWardScanEntry(long ownerPlayerId, string accountId)
+        internal ManagedWardScanEntry(long ownerPlayerId, string accountId, bool outpost)
         {
             OwnerPlayerId = ownerPlayerId;
             AccountId = accountId ?? string.Empty;
+            IsOutpost = outpost;
         }
 
         internal long OwnerPlayerId { get; }
         internal string AccountId { get; }
+        internal bool IsOutpost { get; }
     }
 
     internal static string GetReportFilePath()
@@ -80,6 +82,13 @@ internal static partial class WardOwnership
             var wardLimitOverrides = ManagedWardConfigFileService.CurrentSnapshot.WardLimitOverrides;
             var scanEntries = BuildManagedWardScanEntries(zdoMan);
             var accounts = CollectReportWardCountsByAccount(scanEntries);
+            var outpostCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+            foreach (var entry in scanEntries)
+            {
+                if (!entry.IsOutpost || string.IsNullOrWhiteSpace(entry.AccountId)) continue;
+                outpostCounts.TryGetValue(entry.AccountId, out var count);
+                outpostCounts[entry.AccountId] = count + 1;
+            }
             accounts.Sort(static (left, right) =>
             {
                 var countCompare = right.Value.CompareTo(left.Value);
@@ -92,11 +101,15 @@ internal static partial class WardOwnership
             for (var index = 0; index < accounts.Count; index++)
             {
                 var account = accounts[index];
+                outpostCounts.TryGetValue(account.Key, out var outpostCount);
                 reportAccounts.Add(new ManagedWardReportAccountEntry(
                     account.Key,
-                    account.Value,
+                    account.Value - outpostCount,
                     GetEffectiveWardLimitForAccount(account.Key),
-                    wardLimitOverrides.ContainsKey(account.Key)));
+                    wardLimitOverrides.ContainsKey(account.Key),
+                    outpostCount,
+                    GetEffectiveWardLimitForAccount(account.Key, outpost: true),
+                    ManagedWardConfigFileService.CurrentSnapshot.OutpostWardLimitOverrides.ContainsKey(account.Key)));
             }
 
             var unresolvedPlayerEntries = CollectUnresolvedWardOwnerCounts(scanEntries);
@@ -139,7 +152,8 @@ internal static partial class WardOwnership
             var ownerPlayerId = zdo.GetLong(ZDOVars.s_creator, 0L);
             scanEntries.Add(new ManagedWardScanEntry(
                 ownerPlayerId,
-                NormalizeAccountIdValue(ResolveWardSteamAccountId(zdo, ownerPlayerId, string.Empty))));
+                NormalizeAccountIdValue(ResolveWardSteamAccountId(zdo, ownerPlayerId, string.Empty)),
+                StuWardArea.IsOutpost(zdo)));
         }
 
         return scanEntries;

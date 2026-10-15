@@ -13,6 +13,7 @@ internal readonly struct WardMinimapVisibilityIndexedEntry
         UnityEngine.Vector3 position,
         float radius,
         bool isEnabled,
+        bool isOutpost,
         IReadOnlyList<long> permittedPlayerIds)
     {
         ZdoId = zdoId;
@@ -21,6 +22,7 @@ internal readonly struct WardMinimapVisibilityIndexedEntry
         Position = position;
         Radius = radius;
         IsEnabled = isEnabled;
+        IsOutpost = isOutpost;
         PermittedPlayerIds = permittedPlayerIds ?? Array.Empty<long>();
     }
 
@@ -30,6 +32,7 @@ internal readonly struct WardMinimapVisibilityIndexedEntry
     internal UnityEngine.Vector3 Position { get; }
     internal float Radius { get; }
     internal bool IsEnabled { get; }
+    internal bool IsOutpost { get; }
     internal IReadOnlyList<long> PermittedPlayerIds { get; }
 }
 
@@ -76,11 +79,7 @@ internal static class WardMinimapVisibilityIndex
             return false;
         }
 
-        PrepareBuffer.Clear();
-        var scanIndex = 0;
-        while (!zdoMan.GetAllZDOsWithPrefabIterative(StuWardArea.PrefabName, PrepareBuffer, ref scanIndex))
-        {
-        }
+        StuWardArea.CollectWorldZdos(zdoMan, PrepareBuffer);
 
         IndexedWards.Clear();
         IndexedWardDataRevisions.Clear();
@@ -314,6 +313,7 @@ internal static class WardMinimapVisibilityIndex
             managedZdo.GetPosition(),
             WardSettings.GetStoredRadius(managedZdo, WardSettings.MinRadius),
             managedZdo.GetBool(ZDOVars.s_enabled, false),
+            StuWardArea.IsOutpost(managedZdo),
             WardPrivateAreaSafeAccess.GetPermittedPlayerIds(managedZdo));
         return true;
     }
@@ -334,6 +334,7 @@ internal static class WardMinimapVisibilityIndex
             area.transform.position,
             WardSettings.GetStoredRadiusOrMin(area),
             area.IsEnabled(),
+            StuWardArea.IsOutpost(zdo),
             WardPrivateAreaSafeAccess.GetPermittedPlayerIds(zdo));
         return true;
     }
@@ -345,6 +346,7 @@ internal static class WardMinimapVisibilityIndex
             left.Position != right.Position ||
             !Mathf.Approximately(left.Radius, right.Radius) ||
             left.IsEnabled != right.IsEnabled ||
+            left.IsOutpost != right.IsOutpost ||
             left.PermittedPlayerIds.Count != right.PermittedPlayerIds.Count)
         {
             return false;

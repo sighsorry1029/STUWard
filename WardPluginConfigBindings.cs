@@ -29,12 +29,14 @@ internal static class WardPluginConfigBindings
         }
 
         UnbindHandler(Plugin.MaxWardRadius, HandleMaxWardRadiusChanged);
+        UnbindHandler(Plugin.MaxOutpostWardRadius, HandleMaxWardRadiusChanged);
         UnbindHandler(Plugin.WardRangeConfiguration, HandleWardRangeConfigurationChanged);
         UnbindHandler(Plugin.GuildsIntegration, HandleGroupIntegrationChanged);
         UnbindHandler(Plugin.ClanIntegration, HandleGroupIntegrationChanged);
         UnbindHandler(Plugin.HostileCreatureStructureProtection, HandleWardPresenceConfigChanged);
         UnbindHandler(Plugin.DisableVanillaGuardStoneRecipe, HandleRecipeSettingsChanged);
         UnbindHandler(Plugin.StuWardRecipe, HandleRecipeSettingsChanged);
+        UnbindHandler(Plugin.OutpostWardRecipe, HandleRecipeSettingsChanged);
         UnbindHandler(Plugin.WardMinimapPinScale, HandleLocalWardPinConfigChanged);
         UnbindHandler(Plugin.WardMinimapActiveRanges, HandleLocalWardPinConfigChanged);
         UnbindHandler(Plugin.WardBoundaryBrightenMode, HandleLocalBoundaryBrightenModeChanged);
@@ -56,16 +58,32 @@ internal static class WardPluginConfigBindings
             "1 - General",
             "Max Ward Radius",
             32f,
-            "Maximum radius automatically assigned when a Ward is placed. Valid range: 8 to 64.",
+            "Maximum radius automatically assigned when a regular Ward is placed. Valid range: 8 to 64.",
             configManagerOrder: GeneralOrderStart - OrderStep
+        );
+
+        Plugin.MaxOutpostWardRadius = Plugin.BindConfigEntry(
+            "1 - General",
+            "Max Outpost Ward Radius",
+            16f,
+            "Maximum radius automatically assigned when an Outpost Ward is placed. Valid range: 8 to 64.",
+            configManagerOrder: GeneralOrderStart - OrderStep - OrderStep / 2
         );
 
         Plugin.MaxWardsPerSteamId = Plugin.BindConfigEntry(
             "1 - General",
             "Max Wards Per Steam ID",
             3,
-            "Maximum number of managed Wards allowed per Steam/platform account. Set to -1 for unlimited.",
+            "Maximum number of regular Wards allowed per Steam/platform account. Set to -1 for unlimited. Account exceptions use ward_limit_overrides in STUWard.yml.",
             configManagerOrder: GeneralOrderStart - OrderStep * 2
+        );
+
+        Plugin.MaxOutpostWardsPerSteamId = Plugin.BindConfigEntry(
+            "1 - General",
+            "Max Outpost Wards Per Steam ID",
+            3,
+            "Maximum number of Outpost Wards allowed per Steam/platform account, separate from regular Wards. Set to -1 for unlimited. Account exceptions use outpost_ward_limit_overrides in STUWard.yml.",
+            configManagerOrder: GeneralOrderStart - OrderStep * 2 - OrderStep / 2
         );
 
         Plugin.PickupBlockMode = Plugin.BindConfigEntry(
@@ -104,8 +122,16 @@ internal static class WardPluginConfigBindings
             "1 - General",
             "STUWard Recipe",
             "GreydwarfEye:1,BoneFragments:3,Flint:5,Wood:7",
-            "STUWard recipe override. Format: ItemPrefab:Amount[:Recover], ...",
+            "Recipe for regular Wards. Format: ItemPrefab:Amount[:Recover], ...",
             configManagerOrder: GeneralOrderStart - OrderStep * 7
+        );
+
+        Plugin.OutpostWardRecipe = Plugin.BindConfigEntry(
+            "1 - General",
+            "Outpost Ward Recipe",
+            "Ectoplasm:3,Iron:5,Chitin:7,ElderBark:9",
+            "Recipe for Outpost Wards. Format: ItemPrefab:Amount[:Recover], ...",
+            configManagerOrder: GeneralOrderStart - OrderStep * 7 - OrderStep / 2
         );
 
         Plugin.GuildsIntegration = Plugin.BindConfigEntry(
@@ -192,12 +218,14 @@ internal static class WardPluginConfigBindings
     private static void BindHandlers()
     {
         BindHandler(Plugin.MaxWardRadius, HandleMaxWardRadiusChanged);
+        BindHandler(Plugin.MaxOutpostWardRadius, HandleMaxWardRadiusChanged);
         BindHandler(Plugin.WardRangeConfiguration, HandleWardRangeConfigurationChanged);
         BindHandler(Plugin.GuildsIntegration, HandleGroupIntegrationChanged);
         BindHandler(Plugin.ClanIntegration, HandleGroupIntegrationChanged);
         BindHandler(Plugin.HostileCreatureStructureProtection, HandleWardPresenceConfigChanged);
         BindHandler(Plugin.DisableVanillaGuardStoneRecipe, HandleRecipeSettingsChanged);
         BindHandler(Plugin.StuWardRecipe, HandleRecipeSettingsChanged);
+        BindHandler(Plugin.OutpostWardRecipe, HandleRecipeSettingsChanged);
         BindHandler(Plugin.WardMinimapPinScale, HandleLocalWardPinConfigChanged);
         BindHandler(Plugin.WardMinimapActiveRanges, HandleLocalWardPinConfigChanged);
         BindHandler(Plugin.WardBoundaryBrightenMode, HandleLocalBoundaryBrightenModeChanged);

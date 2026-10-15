@@ -5,6 +5,30 @@ using Xunit;
 
 public sealed class WardOverlapPolicyTests
 {
+    [Theory]
+    [InlineData(16f, 32f, 44f, 12f, true)]
+    [InlineData(32f, 16f, 44f, 28f, true)]
+    [InlineData(16f, 32f, 39f, 7f, false)]
+    [InlineData(8f, 16f, 100f, 8f, true)]
+    public void Mixed_ward_sizes_yield_to_existing_foreign_coverage(
+        float cap, float existingRadius, float distance, float expected, bool allowed)
+    {
+        var query = new WardOverlapQuery(0f, 0f, cap, 10L, default);
+        var existing = new[] { new WardOverlapArea(1, distance, 0f, existingRadius, 20L, default) };
+        Assert.Equal(allowed, WardOverlapPolicy.TryGetPlacementRadius(8f, cap, query, existing, out var radius));
+        Assert.Equal(expected, radius);
+        Assert.Equal(existingRadius, existing[0].Radius);
+    }
+
+    [Fact]
+    public void Outpost_radius_shrink_remains_after_the_cap_is_raised()
+    {
+        var shrunk = WardOverlapPolicy.ClampRequestedRadius(16f, 16f, 8f, 12f, 64f);
+        Assert.Equal(12f, shrunk);
+        Assert.Equal(12f, WardOverlapPolicy.ClampRequestedRadius(shrunk, shrunk, 8f, 16f, 64f));
+        Assert.Equal(16f, WardOverlapPolicy.ClampRequestedRadius(shrunk, 16f, 8f, 16f, 64f));
+    }
+
     [Fact]
     public void IsForeignOverlap_blocks_overlapping_foreign_area()
     {

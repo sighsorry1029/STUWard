@@ -17,6 +17,7 @@ internal static partial class WardMinimapPinsManager
         var showActiveRanges = Plugin.WardMinimapActiveRanges != null &&
                                Plugin.WardMinimapActiveRanges.Value == Plugin.Toggle.On;
         var wardIcon = StuWardPrefab.GetPieceIcon();
+        var outpostIcon = showIconPins ? StuWardPrefab.GetPieceIcon(outpost: true) : null;
         var rangeIcon = showActiveRanges ? GetRepresentativeRangeSprite() : null;
         EnsureCustomPinTypes(minimap, wardIcon, rangeIcon);
 
@@ -24,7 +25,7 @@ internal static partial class WardMinimapPinsManager
         {
             if (showIconPins)
             {
-                UpsertIconPin(minimap, entry, entry.IsOutpost ? StuWardPrefab.GetOutpostMapIcon(wardIcon) : wardIcon);
+                UpsertIconPin(minimap, entry, entry.IsOutpost ? outpostIcon : wardIcon);
             }
             else
             {

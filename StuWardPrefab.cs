@@ -120,9 +120,9 @@ internal static class StuWardPrefab
     private static GameObject? _vanillaGuardStonePrefab;
     private static int _vanillaGuardStoneIndex = -1;
     private static Piece.Requirement[]? _defaultStuWardRequirements;
-    private static Sprite? _outpostMapIconSource;
-    private static Sprite? _outpostMapIcon;
-    private static Texture2D? _outpostMapIconTexture;
+    private static Sprite? _outpostIconSource;
+    private static Sprite? _outpostIcon;
+    private static Texture2D? _outpostIconTexture;
     // Called before ZNetScene builds its name/hash lookup. Inactive parent prevents
     // Awake from allocating a ZDO or destroying ZNetView on the prefab clone.
     internal static void Register(ZNetScene scene)
@@ -179,7 +179,12 @@ internal static class StuWardPrefab
 
         registered = prefab;
         if (!outpost) _defaultStuWardRequirements = CloneRequirements(piece.m_resources);
-        if (outpost && !WardUiResources.IsHeadless) ApplyOutpostColors(area);
+        if (outpost && !WardUiResources.IsHeadless)
+        {
+            ApplyOutpostColors(area);
+            // The Hammer and map share this prefab's icon and its lifetime.
+            piece.m_icon = GetOutpostIcon(piece.m_icon);
+        }
 
         scene.m_prefabs.Add(prefab);
         Plugin.Log.LogInfo($"Registered {name} without Jotunn.");
@@ -275,7 +280,7 @@ internal static class StuWardPrefab
         _prefabRoot = null;
         foreach (var material in OutpostMaterials) UnityEngine.Object.Destroy(material);
         OutpostMaterials.Clear();
-        ClearOutpostMapIcon();
+        ClearOutpostIcon();
     }
 
     internal static void ApplyRecipeSettings()
@@ -298,9 +303,9 @@ internal static class StuWardPrefab
         }
     }
 
-    internal static Sprite? GetPieceIcon()
+    internal static Sprite? GetPieceIcon(bool outpost = false)
     {
-        var piece = GetStuWardPiece();
+        var piece = GetStuWardPiece(outpost);
         if (piece != null && piece.m_icon != null)
         {
             return piece.m_icon;
@@ -314,13 +319,13 @@ internal static class StuWardPrefab
         return CloneRequirements(GetStuWardPiece(outpost)?.m_resources);
     }
 
-    internal static Sprite? GetOutpostMapIcon(Sprite? source)
+    private static Sprite? GetOutpostIcon(Sprite? source)
     {
         if (WardUiResources.IsHeadless || source == null) return source;
-        if (_outpostMapIconSource == source) return _outpostMapIcon != null ? _outpostMapIcon : source;
-        ClearOutpostMapIcon();
+        if (_outpostIconSource == source) return _outpostIcon != null ? _outpostIcon : source;
+        ClearOutpostIcon();
         // Cache a failed attempt too; retry only after the source or scene changes.
-        _outpostMapIconSource = source;
+        _outpostIconSource = source;
         RenderTexture? temporary = null;
         var previousActive = RenderTexture.active;
         var previousSrgbWrite = GL.sRGBWrite;
@@ -339,29 +344,29 @@ internal static class StuWardPrefab
                 new Vector2(rect.width / source.texture.width, rect.height / source.texture.height),
                 new Vector2(rect.x / source.texture.width, rect.y / source.texture.height));
             RenderTexture.active = temporary;
-            _outpostMapIconTexture = new Texture2D(width, height, TextureFormat.RGBA32, false)
+            _outpostIconTexture = new Texture2D(width, height, TextureFormat.RGBA32, false)
             {
-                name = "STUWard_Outpost_MapIcon",
+                name = "STUWard_Outpost_Icon",
                 filterMode = FilterMode.Bilinear,
                 wrapMode = TextureWrapMode.Clamp,
                 hideFlags = HideFlags.HideAndDontSave
             };
-            _outpostMapIconTexture.ReadPixels(new Rect(0, 0, width, height), 0, 0);
-            var pixels = _outpostMapIconTexture.GetPixels();
+            _outpostIconTexture.ReadPixels(new Rect(0, 0, width, height), 0, 0);
+            var pixels = _outpostIconTexture.GetPixels();
             for (var index = 0; index < pixels.Length; index++) pixels[index] = TintOutpostColor(pixels[index]);
-            _outpostMapIconTexture.SetPixels(pixels);
-            _outpostMapIconTexture.Apply(false, true);
-            _outpostMapIcon = Sprite.Create(_outpostMapIconTexture, new Rect(0, 0, width, height),
+            _outpostIconTexture.SetPixels(pixels);
+            _outpostIconTexture.Apply(false, true);
+            _outpostIcon = Sprite.Create(_outpostIconTexture, new Rect(0, 0, width, height),
                 new Vector2(0.5f, 0.5f), source.pixelsPerUnit, 0u, SpriteMeshType.FullRect);
-            _outpostMapIcon.name = _outpostMapIconTexture.name;
-            _outpostMapIcon.hideFlags = HideFlags.HideAndDontSave;
-            return _outpostMapIcon;
+            _outpostIcon.name = _outpostIconTexture.name;
+            _outpostIcon.hideFlags = HideFlags.HideAndDontSave;
+            return _outpostIcon;
         }
         catch (Exception exception)
         {
-            ClearOutpostMapIcon();
-            _outpostMapIconSource = source;
-            Plugin.Log.LogWarning($"Unable to create Outpost map icon: {exception.Message}. Using the regular icon.");
+            ClearOutpostIcon();
+            _outpostIconSource = source;
+            Plugin.Log.LogWarning($"Unable to create Outpost icon: {exception.Message}. Using the regular icon.");
             return source;
         }
         finally
@@ -372,13 +377,13 @@ internal static class StuWardPrefab
         }
     }
 
-    private static void ClearOutpostMapIcon()
+    private static void ClearOutpostIcon()
     {
-        if (_outpostMapIcon != null) UnityEngine.Object.Destroy(_outpostMapIcon);
-        if (_outpostMapIconTexture != null) UnityEngine.Object.Destroy(_outpostMapIconTexture);
-        _outpostMapIcon = null;
-        _outpostMapIconTexture = null;
-        _outpostMapIconSource = null;
+        if (_outpostIcon != null) UnityEngine.Object.Destroy(_outpostIcon);
+        if (_outpostIconTexture != null) UnityEngine.Object.Destroy(_outpostIconTexture);
+        _outpostIcon = null;
+        _outpostIconTexture = null;
+        _outpostIconSource = null;
     }
 
     private static Piece? GetStuWardPiece(bool outpost = false)

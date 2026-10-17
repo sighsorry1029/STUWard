@@ -230,3 +230,25 @@ Actual game/host/dedicated multiplayer acceptance is still required:
    after map switching and reconnecting, and regular icons remaining unchanged.
 
 Actual game sessions and performance measurements have not been performed.
+
+## Hammer icon follow-up (1.4.3, 2026-10-17)
+
+The Outpost prefab now assigns its teal sprite to `Piece.m_icon` during client
+registration. The Hammer build menu and map read that same prefab icon. Map
+refreshes no longer regenerate the sprite from the regular ward's icon, so they
+cannot destroy a sprite still referenced by the Outpost prefab or its clones.
+The headless guard, original-atlas preservation, fallback and scene/plugin
+shutdown cleanup remain in place. Regular ward icons, recipes and RPCs are unchanged.
+
+Baseline and patched Debug builds with `DeployToGame=true`, and Release 1.4.3,
+passed with zero warnings/errors. The final merged Release DLL passed 3,487 managed/IL checks and 122
+Harmony target lookups against each original 1.0.20 client/server assembly set.
+Build output and local plugin DLL SHA-256 match:
+`620013BC02E3661F2CF78FB81BEB9662F51D308668B0F7E22A5537E751B42E20`.
+The 115 existing xUnit tests passed in Release. Thunderstore/Nexus ZIPs contain
+exactly seven/two expected files, each matching its source. Plugin/file/manifest
+versions are 1.4.3 (assembly 1.4.3.0), with ServerSync/YamlDotNet merged and no
+game/reference DLLs packaged. Packaged Release DLL SHA-256:
+`731E5D1662127302D2C3FB8EA77C529143DBA96BE67A08C67E4D9262D591EE79`.
+In-game Hammer selection/preview, map switching and scene re-entry remain to be
+checked.

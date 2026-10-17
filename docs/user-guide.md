@@ -8,7 +8,7 @@ Detailed permissions, server settings, and integration requirements.
 
 ## Outpost Ward
 
-Build **Outpost Ward** with the Hammer for the same protection in a smaller area. It uses the regular ward model with fixed teal runes, active effects, a teal world boundary, and a teal map icon. Its default maximum radius is **16 m**, and each Steam/platform account can place **3 per world**, in addition to its regular ward allowance. Characters on the same account share each quota; disabled wards and wards in unloaded areas still count.
+Build **Outpost Ward** with the Hammer for the same protection in a smaller area. It uses the regular ward model with fixed teal runes, active effects, a teal world boundary, and matching teal icons in the Hammer build menu and on the map. Its default maximum radius is **16 m**, and each Steam/platform account can place **3 per world**, in addition to its regular ward allowance. Characters on the same account share each quota; disabled wards and wards in unloaded areas still count.
 
 Both ward types use the same configuration layout. Set their radius caps and default account limits in `[1 - General]` in `BepInEx/config/sighsorry.STUWard.cfg`:
 

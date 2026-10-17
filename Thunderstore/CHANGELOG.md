@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.3
+
+- Outpost Wards now use a teal icon in the Hammer build menu, matching their map and minimap icons.
+- Share the same icon across these displays so map refreshes cannot replace the build-menu sprite. Regular ward icons, recipes, and protection rules are unchanged.
+- Update STUWard to 1.4.3 on the server and every client together.
+
 ## 1.4.2
 
 - Added Outpost Ward: the same protection and access rules in a smaller area, with a default 16 m radius cap and a separate allowance of 3 per Steam/platform account per world. Disabled wards, unloaded wards, and other characters on the same account count toward the limit.
